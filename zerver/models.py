@@ -559,6 +559,8 @@ class UserProfile(ModelReprMixin, AbstractBaseUser, PermissionsMixin):
 
     enable_digest_emails = models.BooleanField(default=True) # type: bool
 
+    enable_persistent_desktop_notifications = models.BooleanField(default=True) # type: bool
+
     # Old notification field superseded by existence of stream notification
     # settings.
     default_desktop_notifications = models.BooleanField(default=True) # type: bool

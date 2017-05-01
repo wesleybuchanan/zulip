@@ -724,7 +724,7 @@ function render(template_name, args) {
         stream_sounds_enabled: true, desktop_notifications_enabled: true,
         sounds_enabled: true, enable_offline_email_notifications: true,
         enable_offline_push_notifications: true, enable_online_push_notifications: true,
-        enable_digest_emails: true,
+        enable_digest_emails: true, persistent_desktop_notifications_enabled: true,
         autoscroll_forever: true, default_desktop_notifications: true,
     };
     var page_params = $.extend(page_param_checkbox_options, {
@@ -736,8 +736,8 @@ function render(template_name, args) {
                         "enable_stream_sounds", "enable_desktop_notifications",
                         "enable_sounds", "enable_offline_push_notifications",
                         "enable_online_push_notifications",
-                        "enable_digest_emails", "autoscroll_forever",
-                        "default_desktop_notifications"];
+                        "enable_digest_emails", "enable_persistent_desktop_notifications",
+                        "autoscroll_forever", "default_desktop_notifications"];
 
     // Render with all booleans set to true.
     var html = render('settings_tab', {page_params: page_params});
