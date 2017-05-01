@@ -32,7 +32,8 @@ if (window.webkitNotifications) {
         createNotification: function createNotification(icon, title, content, tag) {
             var notification_object = new window.Notification(title, {icon: icon,
                                                                       body: content,
-                                                                      tag: tag});
+                                                                      tag: tag,
+                                                                      requireInteraction: true});
             notification_object.show = function () {};
             notification_object.cancel = function () { notification_object.close(); };
             return notification_object;
@@ -55,7 +56,7 @@ function cancel_notification_object(notification_object) {
         // We must remove the .onclose so that it does not trigger on .cancel
         notification_object.onclose = function () {};
         notification_object.onclick = function () {};
-        notification_object.cancel();
+        notification_object.close();
 }
 
 exports.initialize = function () {
@@ -297,6 +298,7 @@ function process_notification(notification) {
         }
     }
 
+
     if (content.length > 150) {
         // Truncate content at a word boundary
         for (i = 150; i > 0; i -= 1) {
@@ -342,14 +344,13 @@ function process_notification(notification) {
     if (window.bridge === undefined && notification.webkit_notify === true) {
         var icon_url = people.small_avatar_url(message);
         notice_memory[key] = {
-            obj: notifications_api.createNotification(
-                    icon_url, title, content, message.id),
+            obj: new Notification(title, {icon: icon_url, body: content, requireInteraction: page_params.persistent_desktop_notifications_enabled}),
             msg_count: msg_count,
             message_id: message.id,
         };
         notification_object = notice_memory[key].obj;
         notification_object.onclick = function () {
-            notification_object.cancel();
+            notification_object.close();
             if (feature_flags.clicking_notification_causes_narrow) {
                 narrow.by_subject(message.id, {trigger: 'notification'});
             }
@@ -358,7 +359,6 @@ function process_notification(notification) {
         notification_object.onclose = function () {
             delete notice_memory[key];
         };
-        notification_object.show();
     } else if (notification.webkit_notify === false && typeof Notification !== "undefined" && /mozilla/i.test(navigator.userAgent) === true) {
         Notification.requestPermission(function (perm) {
             if (perm === 'granted') {
@@ -653,6 +653,8 @@ exports.handle_global_notification_updates = function (notification_name, settin
         page_params.enable_digest_emails = setting;
     } else if (notification_name === "pm_content_in_desktop_notifications") {
         page_params.pm_content_in_desktop_notifications = setting;
+    } else if (notification_name === "enable_persistent_desktop_notifications") {
+        page_params.persistent_desktop_notifications_enabled = setting;
     }
 };
 
