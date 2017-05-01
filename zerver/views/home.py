@@ -247,6 +247,7 @@ def home_real(request):
         enable_offline_push_notifications = user_profile.enable_offline_push_notifications,
         enable_online_push_notifications = user_profile.enable_online_push_notifications,
         enable_digest_emails  = user_profile.enable_digest_emails,
+        persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
 
         # Realm foreign key data from register_ret.
         # TODO: Rename these to match register_ret values.
