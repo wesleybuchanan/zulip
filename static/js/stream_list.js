@@ -370,6 +370,7 @@ exports.update_dom_with_unread_counts = function (counts) {
     // integer counts
     set_count("global", "mentioned", counts.mentioned_message_count);
     set_count("global", "home", counts.home_unread_messages);
+    set_count("global", "customHome", counts.home_unread_messages - counts.private_message_count);
 
     unread_ui.set_count_toggle_button($("#streamlist-toggle-unreadcount"),
                                       counts.home_unread_messages);
