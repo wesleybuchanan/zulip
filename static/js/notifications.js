@@ -55,7 +55,7 @@ function cancel_notification_object(notification_object) {
         // We must remove the .onclose so that it does not trigger on .cancel
         notification_object.onclose = function () {};
         notification_object.onclick = function () {};
-        notification_object.cancel();
+        notification_object.close();
 }
 
 exports.initialize = function () {
