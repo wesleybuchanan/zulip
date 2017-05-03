@@ -2251,6 +2251,19 @@ def do_change_enable_digest_emails(user_profile, enable_digest_emails, log=True)
         log_event(event)
     send_event(event, [user_profile.id])
 
+def do_change_enable_persistent_desktop_notifications(user_profile, enable_persistent_desktop_notifications, log=True):
+    # type: (UserProfile, bool, bool) -> None
+    user_profile.enable_persistent_desktop_notifications = enable_persistent_desktop_notifications
+    user_profile.save(update_fields=["enable_persistent_desktop_notifications"])
+
+    event = {'type': 'update_global_notifications',
+             'user': user_profile.email,
+             'notification_name': 'enable_persistent_desktop_notifications',
+             'setting': enable_persistent_desktop_notifications}
+    if log:
+        log_event(event)
+    send_event(event, [user_profile.id])
+
 def do_change_autoscroll_forever(user_profile, autoscroll_forever, log=True):
     # type: (UserProfile, bool, bool) -> None
     user_profile.autoscroll_forever = autoscroll_forever

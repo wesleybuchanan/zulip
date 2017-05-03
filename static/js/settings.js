@@ -333,6 +333,10 @@ function _setup_page() {
             page_params.enable_digest_emails = result.enable_digest_emails;
         }
 
+        if (result.enable_persistent_desktop_notifications !== undefined) {
+            page_params.persistent_desktop_notifications_enabled = result.enable_persistent_desktop_notifications;
+        }
+
         ui.report_success(i18n.t("Updated notification settings!"), notify_settings_status);
     }
 
@@ -358,7 +362,7 @@ function _setup_page() {
                 "enable_desktop_notifications", "pm_content_in_desktop_notifications", "enable_sounds",
                 "enable_offline_email_notifications",
                 "enable_offline_push_notifications", "enable_online_push_notifications",
-                "enable_digest_emails"],
+                "enable_digest_emails", "enable_persistent_desktop_notifications"],
                function (setting) {
                    updated_settings[setting] = $("#" + setting).is(":checked");
                });
@@ -825,6 +829,7 @@ function _update_page() {
     $("#enable_online_push_notifications").prop('checked', page_params.enable_online_push_notifications);
     $("#pm_content_in_desktop_notifications").prop('checked', page_params.pm_content_in_desktop_notifications);
     $("#enable_digest_emails").prop('checked', page_params.enable_digest_emails);
+    $("#enable_persistent_desktop_notifications").prop('checked', page_params.persistent_desktop_notifications_enabled);
 }
 
 exports.setup_page = function () {

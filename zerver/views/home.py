@@ -256,6 +256,7 @@ def home_real(request):
         enable_online_push_notifications = user_profile.enable_online_push_notifications,
         twenty_four_hour_time = register_ret['twenty_four_hour_time'],
         enable_digest_emails  = user_profile.enable_digest_emails,
+        persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
         event_queue_id        = register_ret['queue_id'],
         last_event_id         = register_ret['last_event_id'],
         max_message_id        = register_ret['max_message_id'],
