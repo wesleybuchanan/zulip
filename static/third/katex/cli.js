@@ -36,7 +36,7 @@ SOFTWARE.
 let katex;
 try {
     // Attempt to import KaTeX from the production bundle
-    katex = require("/home/zulip/prod-static/min/katex.js");
+    katex = require("../../serve/min/katex.js");
 } catch (ex) {
     // Import KaTeX from node_modules (development environment) otherwise
     katex = require("../../node_modules/katex/katex.js");

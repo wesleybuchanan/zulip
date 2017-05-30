@@ -56,20 +56,12 @@ Although they are generally used to show reactions to a message, they can be
 used for various other purposes, such as [voting](/static/images/help/emoji-react-vote.png)
 or [checking off items in a to-do list](/static/images/help/emoji-react-checklist.png).
 
-### draft
-
-Message **drafts** are created when unsent messages are discarded by exiting out
-of the compose box while content has been written in the **Compose your message here...**
-field. Zulip's [Drafts](/#drafts) feature allows users to
-[retrieve and edit](/help/view-and-edit-your-message-drafts) draft contents in
-order to send them as new messages.
-
 ### filter
 
 Also known as a [view](#view), a **filter** is one of the options for viewing
 different kinds of messages, listed in the upper left corner of the Zulip
 browser window, such as **Home**, **Private messages**, **Starred messages**,
-and **Mentions**.
+and **@-mentions**.
 
 ### group PM
 
@@ -100,7 +92,7 @@ To **mention** users in Zulip, you have to type `@` and their email addresses or
 usernames for auto-completions in your [compose box](#compose-box). The users
 will be mentioned in your message as `@**username**`, and they will be notified
 of your message. Users can see all messages they've been mentioned in through
-the **Mentions** link in the left sidebar or by using **is:mentioned** as a
+the **@-mentions** link in the left sidebar or by using **is:mentioned** as a
 [filter](#filter) or a search constraint.
 
 ### /me
@@ -231,4 +223,4 @@ stop receiving all messages from the stream that they unsubscribed from.
 
 Also known as [filter](#filter), a **view** is an option for viewing different
 kinds of messages, listed in the upper left sidebar, including sections
-**Home**, **Private messages**, **Starred messages**, and **Mentions**.
+**Home**, **Private messages**, **Starred messages**, and **@-mentions**.

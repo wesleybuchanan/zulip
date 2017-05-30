@@ -59,17 +59,6 @@ class Integration(object):
         # type: (Dict[Any, Any]) -> None
         self.doc_context = context
 
-    @property
-    def help_content(self):
-        # type: () -> Text
-        doc_context = self.doc_context or {}
-
-        if self.doc.endswith('.md'):
-            return render_markdown_path(self.doc, doc_context)
-        else:
-            template = loader.get_template(self.doc)
-            return mark_safe(template.render(doc_context))
-
 class EmailIntegration(Integration):
     def is_enabled(self):
         # type: () -> bool
@@ -115,6 +104,17 @@ class WebhookIntegration(Integration):
         # type: () -> LocaleRegexProvider
         return url(self.url, self.function)
 
+    @property
+    def help_content(self):
+        # type: () -> Text
+        doc_context = self.doc_context or {}
+
+        if self.doc.endswith('.md'):
+            return render_markdown_path(self.doc, doc_context)
+        else:
+            template = loader.get_template(self.doc)
+            return mark_safe(template.render(doc_context))
+
 class HubotLozenge(Integration):
     GIT_URL_TEMPLATE = "https://github.com/hubot-scripts/hubot-{}"
 
@@ -146,6 +146,12 @@ WEBHOOK_INTEGRATIONS = [
     WebhookIntegration('basecamp'),
     WebhookIntegration('bitbucket2', logo='static/images/integrations/logos/bitbucket.svg', display_name='Bitbucket'),
     WebhookIntegration('bitbucket', display_name='Bitbucket', secondary_line_text='(Enterprise)'),
+    WebhookIntegration(
+        'stash',
+        display_name='Bitbucket Server',
+        secondary_line_text='(Stash)',
+        logo='static/images/integrations/logos/bitbucket.svg'
+    ),
     WebhookIntegration('circleci', display_name='CircleCI'),
     WebhookIntegration('codeship'),
     WebhookIntegration('crashlytics'),

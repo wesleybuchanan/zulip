@@ -165,49 +165,6 @@ function left_userlist_get_new_heights() {
     return res;
 }
 
-exports.watch_manual_resize = function (element) {
-    return (function on_box_resize(cb) {
-        var box = document.querySelector(element);
-
-        if (!box) {
-            blueslip.error('Bad selector in watch_manual_resize: ' + element);
-            return;
-        }
-
-        var meta = {
-            box: box,
-            height: null,
-            mousedown: false,
-        };
-
-        var box_handler = function () {
-            meta.mousedown = true;
-            meta.height = meta.box.clientHeight;
-        };
-        meta.box.addEventListener("mousedown", box_handler);
-
-        // If the user resizes the textarea manually, we use the
-        // callback to stop autosize from adjusting the height.
-        var body_handler = function () {
-            if (meta.mousedown === true) {
-                meta.mousedown = false;
-                if (meta.height !== meta.box.clientHeight) {
-                    meta.height = meta.box.clientHeight;
-                    cb.call(meta.box, meta.height);
-                }
-            }
-        };
-        document.body.addEventListener("mouseup", body_handler);
-
-        return [box_handler, body_handler];
-    }(function (height) {
-        // This callback disables autosize on the textarea.  It
-        // will be re-enabled when this component is next opened.
-        $(element).trigger("autosize.destroy")
-            .height(height + "px");
-    }));
-};
-
 exports.resize_bottom_whitespace = function (h) {
     if (page_params.autoscroll_forever) {
         $("#bottom_whitespace").height($("#compose-container")[0].offsetHeight);

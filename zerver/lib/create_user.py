@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
 from django.contrib.auth.models import UserManager
-from django.utils.timezone import now as timezone_now
+from django.utils import timezone
 from zerver.models import UserProfile, Recipient, Subscription, Realm, Stream
 import base64
 import ujson
@@ -26,10 +26,10 @@ def random_api_key():
 # Recipient objects
 def create_user_profile(realm, email, password, active, bot_type, full_name,
                         short_name, bot_owner, is_mirror_dummy, tos_version,
-                        timezone, tutorial_status=UserProfile.TUTORIAL_WAITING,
+                        tutorial_status=UserProfile.TUTORIAL_WAITING,
                         enter_sends=False):
-    # type: (Realm, Text, Optional[Text], bool, Optional[int], Text, Text, Optional[UserProfile], bool, Text, Optional[Text], Optional[Text], bool) -> UserProfile
-    now = timezone_now()
+    # type: (Realm, Text, Optional[Text], bool, Optional[int], Text, Text, Optional[UserProfile], bool, Optional[Text], Optional[Text], bool) -> UserProfile
+    now = timezone.now()
     email = UserManager.normalize_email(email)
 
     user_profile = UserProfile(email=email, is_staff=False, is_active=active,
@@ -37,7 +37,7 @@ def create_user_profile(realm, email, password, active, bot_type, full_name,
                                last_login=now, date_joined=now, realm=realm,
                                pointer=-1, is_bot=bool(bot_type), bot_type=bot_type,
                                bot_owner=bot_owner, is_mirror_dummy=is_mirror_dummy,
-                               tos_version=tos_version, timezone=timezone,
+                               tos_version=tos_version,
                                tutorial_status=tutorial_status,
                                enter_sends=enter_sends,
                                onboarding_steps=ujson.dumps([]),
@@ -53,16 +53,15 @@ def create_user_profile(realm, email, password, active, bot_type, full_name,
 
 def create_user(email, password, realm, full_name, short_name,
                 active=True, bot_type=None, bot_owner=None, tos_version=None,
-                timezone=u"", avatar_source=UserProfile.AVATAR_FROM_GRAVATAR,
+                avatar_source=UserProfile.AVATAR_FROM_GRAVATAR,
                 is_mirror_dummy=False, default_sending_stream=None,
                 default_events_register_stream=None,
                 default_all_public_streams=None, user_profile_id=None):
-    # type: (Text, Optional[Text], Realm, Text, Text, bool, Optional[int], Optional[UserProfile], Optional[Text], Text, Text, bool, Optional[Stream], Optional[Stream], Optional[bool], Optional[int]) -> UserProfile
+    # type: (Text, Text, Realm, Text, Text, bool, Optional[int], Optional[UserProfile], Optional[Text], Text, bool, Optional[Stream], Optional[Stream], Optional[bool], Optional[int]) -> UserProfile
     user_profile = create_user_profile(realm, email, password, active, bot_type,
                                        full_name, short_name, bot_owner,
-                                       is_mirror_dummy, tos_version, timezone)
+                                       is_mirror_dummy, tos_version)
     user_profile.avatar_source = avatar_source
-    user_profile.timezone = timezone
     user_profile.default_sending_stream = default_sending_stream
     user_profile.default_events_register_stream = default_events_register_stream
     # Allow the ORM default to be used if not provided

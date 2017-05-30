@@ -7,46 +7,35 @@ from zerver.lib.test_classes import WebhookTestCase
 
 class GitlabHookTests(WebhookTestCase):
     STREAM_NAME = 'gitlab'
-    URL_TEMPLATE = "/api/v1/external/gitlab?&api_key={api_key}&stream={stream}"
+    URL_TEMPLATE = "/api/v1/external/gitlab?&api_key={api_key}"
     FIXTURE_DIR_NAME = 'gitlab'
+
+    def build_webhook_url(self, branches=None):
+        # type: (Optional[Text]) -> Text
+        api_key = self.get_api_key(self.TEST_USER_EMAIL)
+        url = self.URL_TEMPLATE.format(api_key=api_key)
+        if branches is not None:
+            url = "{}&branches={}".format(url, branches)
+        return url
 
     def test_push_event_message(self):
         # type: () -> None
         expected_subject = u"my-awesome-project / tomek"
-        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) 2 commits to branch tomek.\n\n* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n* c ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))"
+        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) to branch tomek\n\n* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n* c ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))"
         self.send_and_test_stream_message('push', expected_subject, expected_message, HTTP_X_GITLAB_EVENT="Push Hook")
-
-    def test_push_local_branch_without_commits(self):
-        # type: () -> None
-        expected_subject = u"my-awesome-project / changes"
-        expected_message = u"Eeshan Garg [pushed](https://gitlab.com/eeshangarg/my-awesome-project/compare/0000000000000000000000000000000000000000...68d7a5528cf423dfaac37dd62a56ac9cc8a884e3) the branch changes."
-        self.send_and_test_stream_message('push_local_branch_without_commits', expected_subject, expected_message, HTTP_X_GITLAB_EVENT="Push Hook")
 
     def test_push_event_message_filtered_by_branches(self):
         # type: () -> None
-        self.url = self.build_webhook_url(branches='master,tomek')
+        self.url = self.build_webhook_url('master,tomek')
         expected_subject = u"my-awesome-project / tomek"
-        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) 2 commits to branch tomek.\n\n* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n* c ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))"
+        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) to branch tomek\n\n* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n* c ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))"
         self.send_and_test_stream_message('push', expected_subject, expected_message, HTTP_X_GITLAB_EVENT="Push Hook")
-
-    def test_push_multiple_committers(self):
-        # type: () -> None
-        expected_subject = u"my-awesome-project / tomek"
-        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) 2 commits to branch tomek. Commits by Ben (1) and Tomasz Kolek (1).\n\n* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n* c ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))"
-        self.send_and_test_stream_message('push_multiple_committers', expected_subject, expected_message, HTTP_X_GITLAB_EVENT="Push Hook")
-
-    def test_push_multiple_committers_with_others(self):
-        # type: () -> None
-        expected_subject = u"my-awesome-project / tomek"
-        commit_info = u"* b ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))\n"
-        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) 7 commits to branch tomek. Commits by Ben (3), baxterthehacker (2), James (1) and others (1).\n\n{}* b ([eb6ae1e](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9))".format(commit_info * 6)
-        self.send_and_test_stream_message('push_multiple_committers_with_others', expected_subject, expected_message, HTTP_X_GITLAB_EVENT="Push Hook")
 
     def test_push_commits_more_than_limit_event_message(self):
         # type: () -> None
         expected_subject = u"my-awesome-project / tomek"
         commits_info = u'* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n'
-        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) 50 commits to branch tomek.\n\n{}[and {} more commit(s)]".format(
+        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) to branch tomek\n\n{}[and {} more commit(s)]".format(
             commits_info * COMMITS_LIMIT,
             50 - COMMITS_LIMIT,
         )
@@ -54,10 +43,10 @@ class GitlabHookTests(WebhookTestCase):
 
     def test_push_commits_more_than_limit_message_filtered_by_branches(self):
         # type: () -> None
-        self.url = self.build_webhook_url(branches='master,tomek')
+        self.url = self.build_webhook_url('master,tomek')
         expected_subject = u"my-awesome-project / tomek"
         commits_info = u'* b ([66abd2d](https://gitlab.com/tomaszkolek0/my-awesome-project/commit/66abd2da28809ffa128ed0447965cf11d7f863a7))\n'
-        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) 50 commits to branch tomek.\n\n{}[and {} more commit(s)]".format(
+        expected_message = u"Tomasz Kolek [pushed](https://gitlab.com/tomaszkolek0/my-awesome-project/compare/5fcdd5551fc3085df79bece2c32b1400802ac407...eb6ae1e591e0819dc5bf187c6bfe18ec065a80e9) to branch tomek\n\n{}[and {} more commit(s)]".format(
             commits_info * COMMITS_LIMIT,
             50 - COMMITS_LIMIT,
         )
@@ -371,7 +360,7 @@ class GitlabHookTests(WebhookTestCase):
     def test_push_event_message_filtered_by_branches_ignore(
             self, check_send_message_mock):
         # type: (MagicMock) -> None
-        self.url = self.build_webhook_url(branches='master,development')
+        self.url = self.build_webhook_url('master,development')
         payload = self.get_body('push')
         result = self.client_post(self.url, payload, HTTP_X_GITLAB_EVENT='Push Hook', content_type="application/json")
         self.assertFalse(check_send_message_mock.called)
@@ -381,7 +370,7 @@ class GitlabHookTests(WebhookTestCase):
     def test_push_commits_more_than_limit_message_filtered_by_branches_ignore(
             self, check_send_message_mock):
         # type: (MagicMock) -> None
-        self.url = self.build_webhook_url(branches='master,development')
+        self.url = self.build_webhook_url('master,development')
         payload = self.get_body('push_commits_more_than_limit')
         result = self.client_post(self.url, payload, HTTP_X_GITLAB_EVENT='Push Hook', content_type="application/json")
         self.assertFalse(check_send_message_mock.called)

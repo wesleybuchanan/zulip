@@ -4,9 +4,7 @@ set -x
 
 if ! git diff-index --quiet HEAD; then
     set +x
-    echo "There are uncommitted changes:"
-    git status --short
-    echo "Doing nothing to avoid losing your work."
+    echo "There are uncommitted files. Exiting."
     exit 1
 fi
 request_id="$1"

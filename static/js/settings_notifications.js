@@ -5,7 +5,7 @@ var exports = {};
 exports.set_up = function () {
     $("#notify-settings-status").hide();
 
-    if (!page_params.realm_show_digest_email) {
+    if (!page_params.show_digest_email) {
         $("#other_notifications").hide();
     }
 
@@ -16,20 +16,20 @@ exports.set_up = function () {
         // Stream notification settings.
 
         if (result.enable_stream_desktop_notifications !== undefined) {
-            page_params.enable_stream_desktop_notifications =
+            page_params.stream_desktop_notifications_enabled =
                 result.enable_stream_desktop_notifications;
         }
         if (result.enable_stream_sounds !== undefined) {
-            page_params.enable_stream_sounds = result.enable_stream_sounds;
+            page_params.stream_sounds_enabled = result.enable_stream_sounds;
         }
 
         // PM and @-mention notification settings.
 
         if (result.enable_desktop_notifications !== undefined) {
-            page_params.enable_desktop_notifications = result.enable_desktop_notifications;
+            page_params.desktop_notifications_enabled = result.enable_desktop_notifications;
         }
         if (result.enable_sounds !== undefined) {
-            page_params.enable_sounds = result.enable_sounds;
+            page_params.sounds_enabled = result.enable_sounds;
         }
 
         if (result.enable_offline_email_notifications !== undefined) {
@@ -107,12 +107,12 @@ exports.set_up = function () {
 
     function update_desktop_notification_setting(new_setting) {
         update_global_stream_setting("enable_stream_desktop_notifications", new_setting);
-        stream_edit.set_all_stream_desktop_notifications_to(new_setting);
+        subs.set_all_stream_desktop_notifications_to(new_setting);
     }
 
     function update_audible_notification_setting(new_setting) {
         update_global_stream_setting("enable_stream_sounds", new_setting);
-        stream_edit.set_all_stream_audible_notifications_to(new_setting);
+        subs.set_all_stream_audible_notifications_to(new_setting);
     }
 
     function maybe_bulk_update_stream_notification_setting(notification_checkbox,
@@ -146,10 +146,10 @@ exports.set_up = function () {
 };
 
 function _update_page() {
-    $("#enable_stream_desktop_notifications").prop('checked', page_params.enable_stream_desktop_notifications);
-    $("#enable_stream_sounds").prop('checked', page_params.enable_stream_sounds);
-    $("#enable_desktop_notifications").prop('checked', page_params.enable_desktop_notifications);
-    $("#enable_sounds").prop('checked', page_params.enable_sounds);
+    $("#enable_stream_desktop_notifications").prop('checked', page_params.stream_desktop_notifications_enabled);
+    $("#enable_stream_sounds").prop('checked', page_params.stream_sounds_enabled);
+    $("#enable_desktop_notifications").prop('checked', page_params.desktop_notifications_enabled);
+    $("#enable_sounds").prop('checked', page_params.sounds_enabled);
     $("#enable_offline_email_notifications").prop('checked', page_params.enable_offline_email_notifications);
     $("#enable_offline_push_notifications").prop('checked', page_params.enable_offline_push_notifications);
     $("#enable_online_push_notifications").prop('checked', page_params.enable_online_push_notifications);

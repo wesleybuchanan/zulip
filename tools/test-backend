@@ -14,7 +14,6 @@ import ujson
 from lib import sanity_check
 sanity_check.check_venv(__file__)
 
-import coverage
 import django
 from django.conf import settings
 from django.test.utils import get_runner
@@ -27,7 +26,6 @@ target_fully_covered = {path for target in [
     'zerver/context_processors.py',
     'zerver/lib/alert_words.py',
     'zerver/lib/attachments.py',
-    'zerver/lib/avatar.py',
     'zerver/lib/avatar_hash.py',
     'zerver/lib/context_managers.py',
     'zerver/lib/domains.py',
@@ -42,10 +40,7 @@ target_fully_covered = {path for target in [
     'zerver/lib/users.py',
     'zerver/lib/webhooks/*.py',
     'zerver/logging_handlers.py',
-    # As a project, we require 100% test coverage in the views files.
     'zerver/views/*.py',
-    # Test files should have 100% coverage; test code that isn't run
-    # is likely a bug in the test.
     'zerver/tests/*.py',
     # Once we have a nice negative tests system, we can add these:
     # 'zerver/webhooks/*/*.py',
@@ -62,9 +57,9 @@ target_fully_covered = {path for target in [
     'zerver/lib/message.py',
     'zerver/lib/narrow.py',
     'zerver/lib/notifications.py',
+    'zerver/lib/push_notifications.py',
     'zerver/lib/request.py',
     'zerver/lib/response.py',
-    'zerver/lib/sessions.py',
     'zerver/lib/test_helpers.py',
     'zerver/lib/test_classes.py',
     'zerver/lib/upload.py',
@@ -90,6 +85,9 @@ not_yet_fully_covered = {
     'zerver/lib/push_notifications.py',
     'zerver/lib/upload.py',
     'zerver/models.py',
+    # Test files should have full coverage; it's a bug in the test if
+    # they don't!  There are open issues for all of these.
+    'zerver/tests/test_tornado.py',
 }
 
 enforce_fully_covered = sorted(target_fully_covered - not_yet_fully_covered)
@@ -115,11 +113,6 @@ if __name__ == "__main__":
     TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
     os.chdir(os.path.dirname(TOOLS_DIR))
     sys.path.insert(0, os.path.dirname(TOOLS_DIR))
-
-    # Remove proxy settings for running backend tests
-    os.environ["http_proxy"] = ""
-    os.environ["https_proxy"] = ""
-
     from zerver.lib.test_fixtures import is_template_database_current
 
     from tools.lib.test_script import (
@@ -146,8 +139,7 @@ if __name__ == "__main__":
                       dest="fatal_errors", help="Continue past test failures to run all tests")
     parser.add_option('--coverage', dest='coverage',
                       action="store_true",
-                      default=False,
-                      help='Compute test coverage. Enforces processes=1.')
+                      default=False, help='Compute test coverage.')
     parser.add_option('--verbose-coverage', dest='verbose_coverage',
                       action="store_true",
                       default=False, help='Enable verbose print of coverage report.')
@@ -163,9 +155,9 @@ if __name__ == "__main__":
                       type="int",
                       callback=allow_positive_int,
                       action='callback',
-                      default=None,
+                      default=1,
                       help='Specify the number of processes to run the '
-                           'tests in. Default is 4.')
+                           'tests in. Default is 1.')
     parser.add_option('--profile', dest='profile',
                       action="store_true",
                       default=False, help='Profile test runtime.')
@@ -180,9 +172,10 @@ if __name__ == "__main__":
                       action="store_true",
                       default=False,
                       help="Show detailed output")
-    parser.add_option('--generate-fixtures', action="store_true", default=False,
+    parser.add_option('--no-generate-fixtures', action="store_false", default=True,
                       dest="generate_fixtures",
-                      help=("Force a call to generate-fixtures."))
+                      help=("Reduce running time by not calling generate-fixtures. "
+                            "This may cause spurious failures for some tests."))
     parser.add_option('--report-slow-tests', dest='report_slow_tests',
                       action="store_true",
                       default=False,
@@ -198,6 +191,7 @@ if __name__ == "__main__":
                             "test-backend was run.  Implies --nonfatal-errors."))
 
     (options, args) = parser.parse_args()
+
     zerver_test_dir = 'zerver/tests/'
 
     # While running --rerun, we read var/last_test_failure.json to get
@@ -206,7 +200,6 @@ if __name__ == "__main__":
     # --nonfatal-errors, so that we don't end up removing tests from
     # the list that weren't run.
     if options.rerun:
-        options.processes = 1
         options.fatal_errors = False
         failed_tests = get_failed_tests()
         if failed_tests:
@@ -273,15 +266,9 @@ if __name__ == "__main__":
             sys.exit(1)
 
     if options.coverage:
-        settings.TEST_RUNNER = 'zerver.lib.test_runner.CoverageRunner'
-        cov = coverage.Coverage(config_file="tools/coveragerc", data_suffix=True)
-        cov.erase()
-        # We run coverage here in the main process to get covrage over imports
-        # but we also collect coverage in test_runner.run_subsuite. Each
-        # coverage instance writes its own stats to disk and we merge them at
-        # the end of the test run.
+        import coverage
+        cov = coverage.Coverage(config_file="tools/coveragerc")
         cov.start()
-
     if options.profile:
         import cProfile
         prof = cProfile.Profile()
@@ -296,15 +283,12 @@ if __name__ == "__main__":
     # files, since part of setup is importing the models for all applications in INSTALLED_APPS.
     django.setup()
 
-    if options.generate_fixtures or not is_template_database_current():
+    if options.generate_fixtures:
         generate_fixtures_command = [os.path.join(TOOLS_DIR, 'setup', 'generate-fixtures')]
-        generate_fixtures_command.append('--force')
+        if not is_template_database_current():
+            generate_fixtures_command.append('--force')
+
         subprocess.call(generate_fixtures_command)
-
-    subprocess.check_call(['tools/webpack', '--test'])
-
-    if options.processes is None:
-        options.processes = 4
 
     TestRunner = get_runner(settings)
     parallel = options.processes
@@ -334,7 +318,6 @@ if __name__ == "__main__":
     if options.coverage:
         cov.stop()
         cov.save()
-        cov.combine()
         if options.verbose_coverage:
             print("Printing coverage data")
             cov.report(show_missing=False)

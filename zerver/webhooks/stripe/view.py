@@ -4,7 +4,7 @@ from django.utils.translation import ugettext as _
 from zerver.lib.actions import check_send_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-from zerver.models import UserProfile
+from zerver.models import Client, UserProfile
 
 from django.http import HttpRequest, HttpResponse
 from typing import Dict, Any, Optional, Text
@@ -14,10 +14,10 @@ import time
 
 @api_key_only_webhook_view('Stripe')
 @has_request_variables
-def api_stripe_webhook(request, user_profile,
+def api_stripe_webhook(request, user_profile, client,
                        payload=REQ(argument_type='body'), stream=REQ(default='test'),
                        topic=REQ(default=None)):
-    # type: (HttpRequest, UserProfile, Dict[str, Any], Text, Optional[Text]) -> HttpResponse
+    # type: (HttpRequest, UserProfile, Client, Dict[str, Any], Text, Optional[Text]) -> HttpResponse
     body = None
     event_type = payload["type"]
     try:
@@ -78,8 +78,8 @@ def api_stripe_webhook(request, user_profile,
                     body_template = "The customer subscription with id **[{id}]({link})** was deleted."
                     body = body_template.format(id=object_id, link=link)
 
-                else:  # customer.subscription.trial_will_end
-                    DAY = 60 * 60 * 24  # seconds in a day
+                else: # customer.subscription.trial_will_end
+                    DAY = 60 * 60 * 24 # seconds in a day
                     # days_left should always be three according to
                     # https://stripe.com/docs/api/python#event_types, but do the
                     # computation just to be safe.
@@ -163,7 +163,7 @@ def api_stripe_webhook(request, user_profile,
     if body is None:
         return json_error(_("We don't support {} event".format(event_type)))
 
-    check_send_message(user_profile, request.client, 'stream', [stream], topic, body)
+    check_send_message(user_profile, client, 'stream', [stream], topic, body)
 
     return json_success()
 

@@ -173,9 +173,8 @@ class PreviewTestCase(ZulipTestCase):
     @override_settings(INLINE_URL_EMBED_PREVIEW=True)
     def test_edit_message_history(self):
         # type: () -> None
-        email = self.example_email('hamlet')
-        self.login(email)
-        msg_id = self.send_message(email, "Scotland", Recipient.STREAM,
+        self.login("hamlet@zulip.com")
+        msg_id = self.send_message("hamlet@zulip.com", "Scotland", Recipient.STREAM,
                                    subject="editing", content="original")
 
         url = 'http://test.org/'
@@ -202,12 +201,12 @@ class PreviewTestCase(ZulipTestCase):
         self.assertIn(embedded_link, msg.rendered_content)
 
     @override_settings(INLINE_URL_EMBED_PREVIEW=True)
-    def _send_message_with_test_org_url(self, sender_email, queue_should_run=True, relative_url=False):
-        # type: (str, bool, bool) -> Message
+    def _send_message_with_test_org_url(self, sender_email, queue_should_run=True):
+        # type: (str, bool) -> Message
         url = 'http://test.org/'
         with mock.patch('zerver.lib.actions.queue_json_publish') as patched:
             msg_id = self.send_message(
-                sender_email, self.example_email('cordelia'),
+                sender_email, "cordelia@zulip.com",
                 Recipient.PERSONAL, subject="url", content=url)
             if queue_should_run:
                 patched.assert_called_once()
@@ -228,8 +227,6 @@ class PreviewTestCase(ZulipTestCase):
 
         # Mock the network request result so the test can be fast without Internet
         response = MockPythonResponse(self.open_graph_html, 200)
-        if relative_url is True:
-            response = MockPythonResponse(self.open_graph_html.replace('http://ia.media-imdb.com', ''), 200)
         mocked_response = mock.Mock(
             side_effect=lambda k: {url: response}.get(k, MockPythonResponse('', 404)))
 
@@ -246,7 +243,7 @@ class PreviewTestCase(ZulipTestCase):
         embedded_link = '<a href="{0}" target="_blank" title="The Rock">The Rock</a>'.format(url)
 
         # When humans send, we should get embedded content.
-        msg = self._send_message_with_test_org_url(sender_email=self.example_email('hamlet'))
+        msg = self._send_message_with_test_org_url(sender_email='hamlet@zulip.com')
         self.assertIn(embedded_link, msg.rendered_content)
 
         # We don't want embedded content for bots.
@@ -256,35 +253,28 @@ class PreviewTestCase(ZulipTestCase):
 
         # Try another human to make sure bot failure was due to the
         # bot sending the message and not some other reason.
-        msg = self._send_message_with_test_org_url(sender_email=self.example_email('prospero'))
+        msg = self._send_message_with_test_org_url(sender_email='prospero@zulip.com')
         self.assertIn(embedded_link, msg.rendered_content)
 
     def test_inline_url_embed_preview(self):
         # type: () -> None
         with_preview = '<p><a href="http://test.org/" target="_blank" title="http://test.org/">http://test.org/</a></p>\n<div class="message_embed"><a class="message_embed_image" href="http://test.org/" style="background-image: url(http://ia.media-imdb.com/images/rock.jpg)" target="_blank"></a><div class="data-container"><div class="message_embed_title"><a href="http://test.org/" target="_blank" title="The Rock">The Rock</a></div><div class="message_embed_description">Description text</div></div></div>'
         without_preview = '<p><a href="http://test.org/" target="_blank" title="http://test.org/">http://test.org/</a></p>'
-        msg = self._send_message_with_test_org_url(sender_email=self.example_email('hamlet'))
+        msg = self._send_message_with_test_org_url(sender_email='hamlet@zulip.com')
         self.assertEqual(msg.rendered_content, with_preview)
 
         realm = msg.get_realm()
         setattr(realm, 'inline_url_embed_preview', False)
         realm.save()
 
-        msg = self._send_message_with_test_org_url(sender_email=self.example_email('prospero'), queue_should_run=False)
+        msg = self._send_message_with_test_org_url(sender_email='prospero@zulip.com', queue_should_run=False)
         self.assertEqual(msg.rendered_content, without_preview)
-
-    def test_inline_url_embed_preview_with_relative_image_url(self):
-        # type: () -> None
-        with_preview_relative = '<p><a href="http://test.org/" target="_blank" title="http://test.org/">http://test.org/</a></p>\n<div class="message_embed"><a class="message_embed_image" href="http://test.org/" style="background-image: url(http://test.org/images/rock.jpg)" target="_blank"></a><div class="data-container"><div class="message_embed_title"><a href="http://test.org/" target="_blank" title="The Rock">The Rock</a></div><div class="message_embed_description">Description text</div></div></div>'
-        # Try case where the opengraph image is a relative url.
-        msg = self._send_message_with_test_org_url(sender_email=self.example_email('prospero'), relative_url=True)
-        self.assertEqual(msg.rendered_content, with_preview_relative)
 
     def test_http_error_get_data(self):
         # type: () -> None
         url = 'http://test.org/'
         msg_id = self.send_message(
-            self.example_email('hamlet'), self.example_email('cordelia'),
+            "hamlet@zulip.com", "cordelia@zulip.com",
             Recipient.PERSONAL, subject="url", content=url)
         msg = Message.objects.select_related("sender").get(id=msg_id)
         event = {

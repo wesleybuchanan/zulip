@@ -51,8 +51,6 @@ Install the following non-Python dependencies:
  * rabbitmq-server
  * libldap2-dev
  * python-dev
- * python3-dev
- * python-virtualenv
  * redis-server — rate limiting
  * tsearch-extras — better text search
  * libfreetype6-dev — needed before you pip install Pillow to properly generate emoji PNGs
@@ -68,18 +66,16 @@ https://github.com/zulip/zulip.git`
 sudo apt-get install closure-compiler libfreetype6-dev libffi-dev \
     memcached rabbitmq-server libldap2-dev redis-server \
     postgresql-server-dev-all libmemcached-dev python-dev \
-    python3-dev python-virtualenv hunspell-en-us nodejs \
-    nodejs-legacy npm git yui-compressor puppet gettext postgresql
+    hunspell-en-us nodejs nodejs-legacy npm git yui-compressor \
+    puppet gettext postgresql
 
-# If using Ubuntu, install PGroonga from its PPA
+# Next, install PGroonga from its PPA
 sudo add-apt-repository -ys ppa:groonga/ppa
 sudo apt-get update
 # On 14.04
 sudo apt-get install postgresql-9.3-pgroonga
 # On 16.04
 sudo apt-get install postgresql-9.5-pgroonga
-
-# If using Debian, follow the instructions here: http://pgroonga.github.io/install/debian.html
 
 # Next, install Zulip's tsearch-extras postgresql extension
 # If on 14.04 or 16.04, you can use the Zulip PPA for tsearch-extras:
@@ -325,7 +321,6 @@ Now run these commands:
 ```
 ./tools/install-mypy
 ./tools/setup/emoji/build_emoji
-./tools/setup/build_pygments_data.py
 ./scripts/setup/generate_secrets.py --development
 if [ $(uname) = "OpenBSD" ]; then
     sudo cp ./puppet/zulip/files/postgresql/zulip_english.stop /var/postgresql/tsearch_data/
@@ -400,8 +395,7 @@ docker build -t user/zulipdev .
 Commit and tag the provisioned images. The below will install Zulip's dependencies:
 ```
 docker run -itv $(pwd):/srv/zulip -p 9991:9991 user/zulipdev /bin/bash
-$ /bin/bash sudo chown -R zulip:zulip /srv/zulip
-$ /bin/bash /srv/zulip/tools/provision --docker
+# /bin/bash /srv/zulip/tools/provision --docker
 docker ps -af ancestor=user/zulipdev
 docker commit -m "Zulip installed" <container id> user/zulipdev:v2
 ```
@@ -466,3 +460,4 @@ the results in your browser.
 Currently, the Docker workflow is substantially less convenient than
 the Vagrant workflow and less documented; please contribute to this
 guide and the Docker tooling if you are using Docker to develop Zulip!
+

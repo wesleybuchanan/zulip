@@ -1,14 +1,12 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import sys
+from typing import Any
 
 from argparse import ArgumentParser
 from django.core.management.base import BaseCommand
-from typing import Any
-
 from zerver.lib.actions import do_change_user_email
-from zerver.models import UserProfile, get_user_for_mgmt
+from zerver.models import UserProfile, get_user_profile_by_email
 
 class Command(BaseCommand):
     help = """Change the email address for a user."""
@@ -25,9 +23,9 @@ class Command(BaseCommand):
         old_email = options['old_email']
         new_email = options['new_email']
         try:
-            user_profile = get_user_for_mgmt(old_email)
+            user_profile = get_user_profile_by_email(old_email)
         except UserProfile.DoesNotExist:
             print("Old e-mail doesn't exist in the system.")
-            sys.exit(1)
+            exit(1)
 
         do_change_user_email(user_profile, new_email)

@@ -25,7 +25,6 @@ IGNORED_PHRASES = [
     r"Kerberos",
     r"Mac",
     r"MiB",
-    r"OTP",
     r"Pivotal",
     r'REMOTE_USER',
     r'Slack',
@@ -41,7 +40,6 @@ IGNORED_PHRASES = [
     r"Zephyr",
     r"Zulip",
     r"iPhone",
-    r"Emoji One",
     # Code things
     r".zuliprc",
     r"__\w+\.\w+__",
@@ -59,10 +57,10 @@ IGNORED_PHRASES = [
     # Fragments of larger strings
     (r'Change notification settings for individual streams on your '
      '<a href="/#streams">Streams page</a>.'),
-    (r'Looking for our '
+    (r'<p class="bot-settings-note padded-container"> Looking for our '
      '<a href="/integrations" target="_blank">Integrations</a> or '
      '<a href="{{ server_uri }}/api" target="_blank">API</a> '
-     'documentation?'),
+     'documentation? </p>'),
     r'Most stream administration is done on the <a href="/#streams">Streams page</a>.',
     r"one or more people...",
     r"confirmation email",
@@ -81,8 +79,6 @@ IGNORED_PHRASES = [
     r"more conversations",
     # We should probably just delete this string from translations
     r'activation key',
-    # this is used as a topic
-    r'^hello$',
 
     # TO CLEAN UP
     # Just want to avoid churning login.html right now

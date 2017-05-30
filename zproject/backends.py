@@ -77,12 +77,6 @@ def github_auth_enabled(realm=None):
     # type: (Optional[Realm]) -> bool
     return auth_enabled_helper([u'GitHub'], realm)
 
-def any_oauth_backend_enabled(realm=None):
-    # type: (Optional[Realm]) -> bool
-    """Used by the login page process to determine whether to show the
-    'OR' for login with Google"""
-    return auth_enabled_helper([u'GitHub', u'Google'], realm)
-
 def common_get_active_user_by_email(email, return_data=None):
     # type: (Text, Optional[Dict[str, Any]]) -> Optional[UserProfile]
     try:
@@ -220,21 +214,19 @@ class SocialAuthMixin(ZulipAuthMixin):
         request = strategy.request
         email_address = self.get_email_address(*args, **kwargs)
         full_name = self.get_full_name(*args, **kwargs)
-        is_signup = strategy.session_get('is_signup') == '1'
 
         subdomain = strategy.session_get('subdomain')
+
         if not subdomain:
             return login_or_register_remote_user(request, email_address,
                                                  user_profile, full_name,
-                                                 invalid_subdomain=bool(invalid_subdomain),
-                                                 is_signup=is_signup)
+                                                 bool(invalid_subdomain))
         try:
             realm = Realm.objects.get(string_id=subdomain)
         except Realm.DoesNotExist:
             return redirect_to_subdomain_login_url()
 
-        return redirect_and_log_into_subdomain(realm, full_name, email_address,
-                                               is_signup=is_signup)
+        return redirect_and_log_into_subdomain(realm, full_name, email_address)
 
     def auth_complete(self, *args, **kwargs):
         # type: (*Any, **Any) -> Optional[HttpResponse]
@@ -265,8 +257,7 @@ class ZulipDummyBackend(ZulipAuthMixin):
             if user_profile is None:
                 return None
             if not check_subdomain(realm_subdomain, user_profile.realm.subdomain):
-                if return_data is not None:
-                    return_data["invalid_subdomain"] = True
+                return_data["invalid_subdomain"] = True
                 return None
             return user_profile
         return None
@@ -301,8 +292,7 @@ class EmailAuthBackend(ZulipAuthMixin):
             return None
         if user_profile.check_password(password):
             if not check_subdomain(realm_subdomain, user_profile.realm.subdomain):
-                if return_data is not None:
-                    return_data["invalid_subdomain"] = True
+                return_data["invalid_subdomain"] = True
                 return None
             return user_profile
         return None
@@ -355,7 +345,7 @@ class ZulipRemoteUserBackend(RemoteUserBackend):
     create_unknown_user = False
 
     def authenticate(self, remote_user, realm_subdomain=None):
-        # type: (Optional[str], Optional[Text]) -> Optional[UserProfile]
+        # type: (str, Optional[Text]) -> Optional[UserProfile]
         if not remote_user:
             return None
 
@@ -375,23 +365,23 @@ class ZulipLDAPException(Exception):
 class ZulipLDAPAuthBackendBase(ZulipAuthMixin, LDAPBackend):
     # Don't use Django LDAP's permissions functions
     def has_perm(self, user, perm, obj=None):
-        # type: (Optional[UserProfile], Any, Any) -> bool
+        # type: (UserProfile, Any, Any) -> bool
         # Using Any type is safe because we are not doing anything with
         # the arguments.
         return False
 
     def has_module_perms(self, user, app_label):
-        # type: (Optional[UserProfile], Optional[str]) -> bool
+        # type: (UserProfile, str) -> bool
         return False
 
     def get_all_permissions(self, user, obj=None):
-        # type: (Optional[UserProfile], Any) -> Set
+        # type: (UserProfile, Any) -> Set
         # Using Any type is safe because we are not doing anything with
         # the arguments.
         return set()
 
     def get_group_permissions(self, user, obj=None):
-        # type: (Optional[UserProfile], Any) -> Set
+        # type: (UserProfile, Any) -> Set
         # Using Any type is safe because we are not doing anything with
         # the arguments.
         return set()

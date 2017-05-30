@@ -7,7 +7,7 @@ from django.http import HttpRequest, HttpResponse
 from zerver.lib.actions import check_send_message
 from zerver.lib.response import json_success
 from zerver.lib.request import JsonableError
-from zerver.models import UserProfile
+from zerver.models import Client, UserProfile
 from zerver.decorator import api_key_only_webhook_view, REQ, has_request_variables
 
 from zerver.lib.webhooks.git import get_issue_event_message, SUBJECT_WITH_PR_OR_ISSUE_INFO_TEMPLATE,\
@@ -180,8 +180,6 @@ def get_push_tags_body(payload):
 def get_push_commits_body(payload):
     # type: (Dict[str, Any]) -> Text
     commits_data = [{
-        'name': (commit.get('author').get('username') or
-                 commit.get('author').get('name')),
         'sha': commit['id'],
         'url': commit['url'],
         'message': commit['message']
@@ -190,8 +188,7 @@ def get_push_commits_body(payload):
         get_sender_name(payload),
         payload['compare'],
         get_branch_name_from_ref(payload['ref']),
-        commits_data,
-        deleted=payload['deleted']
+        commits_data
     )
 
 def get_public_body(payload):
@@ -391,14 +388,15 @@ EVENT_FUNCTION_MAPPER = {
 @api_key_only_webhook_view('GitHub')
 @has_request_variables
 def api_github_webhook(
-        request, user_profile, payload=REQ(argument_type='body'),
-        stream=REQ(default='github'), branches=REQ(default=None)):
-    # type: (HttpRequest, UserProfile, Dict[str, Any], Text, Text) -> HttpResponse
+        request, user_profile, client,
+        payload=REQ(argument_type='body'), stream=REQ(default='github'),
+        branches=REQ(default=None)):
+    # type: (HttpRequest, UserProfile, Client, Dict[str, Any], Text, Text) -> HttpResponse
     event = get_event(request, payload, branches)
     if event is not None:
         subject = get_subject_based_on_type(payload, event)
         body = get_body_function_based_on_type(event)(payload)
-        check_send_message(user_profile, request.client, 'stream', [stream], subject, body)
+        check_send_message(user_profile, client, 'stream', [stream], subject, body)
     return json_success()
 
 def get_event(request, payload, branches):
@@ -418,7 +416,7 @@ def get_event(request, payload, branches):
         if is_commit_push_event(payload):
             if branches is not None:
                 branch = get_branch_name_from_ref(payload['ref'])
-                if branches.find(branch) == -1:
+                if branch not in branches.split(','):
                     return None
             return "push_commits"
         else:

@@ -10,6 +10,7 @@ from django.test import override_settings
 from django.template import Template, Context
 from django.template.loader import get_template
 
+from zerver.models import get_user_profile_by_email
 from zerver.lib.test_helpers import get_all_templates
 from zerver.lib.test_classes import (
     ZulipTestCase,
@@ -59,9 +60,6 @@ class TemplateTestCase(ZulipTestCase):
         logged_out = [
             'confirmation/confirm.html',  # seems unused
             'confirmation/confirm_mituser.html',  # seems unused
-            'zerver/compare.html',
-            'zerver/landing_nav_blue.html',
-            'zerver/footer.html',
         ]
 
         logged_in = [
@@ -85,24 +83,16 @@ class TemplateTestCase(ZulipTestCase):
             'zerver/message_history.html',
         ]
         unusual = [
-            'zerver/emails/confirm_registration_mit.txt',
-            'zerver/emails/confirm_registration_mit.subject',
-            'zerver/emails/invitation_mit.txt',
-            'zerver/emails/invitation_mit.subject',
-            'zerver/emails/confirm_new_email.subject',
-            'zerver/emails/confirm_new_email.html',
-            'zerver/emails/confirm_new_email.txt',
-            'zerver/emails/notify_change_in_email.subject',
-            'zerver/emails/digest.subject',
-            'zerver/emails/digest.html',
-            'zerver/emails/digest.txt',
-            'zerver/emails/followup_day1.subject',
-            'zerver/emails/followup_day1.html',
-            'zerver/emails/followup_day1.txt',
-            'zerver/emails/followup_day2.subject',
-            'zerver/emails/followup_day2.txt',
-            'zerver/emails/followup_day2.html',
+            'confirmation/mituser_confirmation_email_body.txt',
+            'confirmation/mituser_confirmation_email_subject.txt',
+            'confirmation/mituser_invite_email_body.txt',
+            'confirmation/mituser_invite_email_subject.txt',
+            'confirmation/emailchangestatus_confirmation_email.subject',
+            'confirmation/emailchangestatus_confirmation_email.html',
+            'confirmation/emailchangestatus_confirmation_email.txt',
+            'confirmation/notify_change_in_email_subject.txt',
             'corporate/mit.html',
+            'corporate/privacy.html',
             'corporate/zephyr.html',
             'corporate/zephyr-mirror.html',
             'pipeline/css.jinja',
@@ -166,8 +156,8 @@ class TemplateTestCase(ZulipTestCase):
             context.
 
         """
-        user_profile = self.example_user('hamlet')
-        email = user_profile.email
+        email = "hamlet@zulip.com"
+        user_profile = get_user_profile_by_email(email)
 
         context = dict(
             article="zerver/help/index.md",

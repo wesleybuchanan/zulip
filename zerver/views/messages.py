@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
 from django.utils.translation import ugettext as _
-from django.utils.timezone import now as timezone_now
+from django.utils import timezone
 from django.conf import settings
 from django.core import validators
 from django.core.exceptions import ValidationError
@@ -70,8 +70,8 @@ class BadNarrowOperator(JsonableError):
         # type: () -> str
         return _('Invalid narrow operator: {}').format(self.desc)
 
-Query = Any  # TODO: Should be Select, but sqlalchemy stubs are busted
-ConditionTransform = Any  # TODO: should be Callable[[ColumnElement], ColumnElement], but sqlalchemy stubs are busted
+Query = Any # TODO: Should be Select, but sqlalchemy stubs are busted
+ConditionTransform = Any # TODO: should be Callable[[ColumnElement], ColumnElement], but sqlalchemy stubs are busted
 
 # When you add a new operator to this, also update zerver/lib/narrow.py
 class NarrowBuilder(object):
@@ -153,7 +153,9 @@ class NarrowBuilder(object):
         s = list(pattern)
         for i, c in enumerate(s):
             if c not in self._alphanum:
-                if ord(c) >= 128:
+                if c == '\000':
+                    s[i] = '\0'
+                elif ord(c) >= 128:
                     # convert the character to hex postgres regex will take
                     # \uXXXX
                     s[i] = '\\u{:0>4x}'.format(ord(c))
@@ -287,30 +289,6 @@ class NarrowBuilder(object):
                             column("recipient_id") == narrow_recipient.id))
             return query.where(maybe_negate(cond))
 
-    def by_group_pm_with(self, query, operand, maybe_negate):
-        # type: (Query, str, ConditionTransform) -> Query
-        try:
-            narrow_profile = get_user_profile_by_email(operand)
-        except UserProfile.DoesNotExist:
-            raise BadNarrowOperator('unknown user ' + operand)
-
-        self_recipient_ids = [
-            recipient_tuple['recipient_id'] for recipient_tuple
-            in Subscription.objects.filter(
-                user_profile=self.user_profile,
-                recipient__type=Recipient.HUDDLE
-            ).values("recipient_id")]
-        narrow_recipient_ids = [
-            recipient_tuple['recipient_id'] for recipient_tuple
-            in Subscription.objects.filter(
-                user_profile=narrow_profile,
-                recipient__type=Recipient.HUDDLE
-            ).values("recipient_id")]
-
-        recipient_ids = set(self_recipient_ids) & set(narrow_recipient_ids)
-        cond = column("recipient_id").in_(recipient_ids)
-        return query.where(maybe_negate(cond))
-
     def by_search(self, query, operand, maybe_negate):
         # type: (Query, str, ConditionTransform) -> Query
         if settings.USING_PGROONGA:
@@ -367,21 +345,12 @@ def highlight_string(text, locs):
     highlight_stop = u'</span>'
     pos = 0
     result = u''
-    in_tag = False
     for loc in locs:
         (offset, length) = loc
-        for character in string[pos:offset + length]:
-            if character == u'<':
-                in_tag = True
-            elif character == u'>':
-                in_tag = False
-        if in_tag:
-            result += string[pos:offset + length]
-        else:
-            result += string[pos:offset]
-            result += highlight_start
-            result += string[offset:offset + length]
-            result += highlight_stop
+        result += string[pos:offset]
+        result += highlight_start
+        result += string[offset:offset + length]
+        result += highlight_stop
         pos = offset + length
     result += string[pos:]
     return result
@@ -579,7 +548,7 @@ def get_messages_backend(request, user_profile,
         # Build the query for the narrow
         num_extra_messages = 0
         builder = NarrowBuilder(user_profile, inner_msg_id_col)
-        search_term = None  # type: Optional[Dict[str, Any]]
+        search_term = None # type: Optional[Dict[str, Any]]
         for term in narrow:
             if term['operator'] == 'search':
                 if not is_search:
@@ -612,20 +581,6 @@ def get_messages_backend(request, user_profile,
         muting_conditions = exclude_muting_conditions(user_profile, narrow)
         if muting_conditions:
             condition = and_(condition, *muting_conditions)
-
-        # The mobile app uses narrow=[] and use_first_unread_anchor=True to
-        # determine what messages to show when you first load the app.
-        # Unfortunately, this means that if you have a years-old unread
-        # message, the mobile app could get stuck in the past.
-        #
-        # To fix this, we enforce that the "first unread anchor" must be on or
-        # after the user's current pointer location. Since the pointer
-        # location refers to the latest the user has read in the home view,
-        # we'll only apply this logic in the home view (ie, when narrow is
-        # empty).
-        if not narrow:
-            pointer_condition = inner_msg_id_col >= user_profile.pointer
-            condition = and_(condition, pointer_condition)
 
         first_unread_query = query.where(condition)
         first_unread_query = first_unread_query.order_by(inner_msg_id_col.asc()).limit(1)
@@ -676,9 +631,9 @@ def get_messages_backend(request, user_profile,
     # rendered message dict before returning it.  We attempt to
     # bulk-fetch rendered message dicts from remote cache using the
     # 'messages' list.
-    search_fields = dict()  # type: Dict[int, Dict[str, Text]]
-    message_ids = []  # type: List[int]
-    user_message_flags = {}  # type: Dict[int, List[str]]
+    search_fields = dict() # type: Dict[int, Dict[str, Text]]
+    message_ids = [] # type: List[int]
+    user_message_flags = {} # type: Dict[int, List[str]]
     if include_history:
         message_ids = [row[0] for row in query_result]
 
@@ -772,7 +727,7 @@ def update_message_flags(request, user_profile,
                          'msg': ''})
 
 def create_mirrored_message_users(request, user_profile, recipients):
-    # type: (HttpRequest, UserProfile, Iterable[Text]) -> Tuple[bool, Optional[UserProfile]]
+    # type: (HttpResponse, UserProfile, Iterable[Text]) -> Tuple[bool, Optional[UserProfile]]
     if "sender" not in request.POST:
         return (False, None)
 
@@ -991,7 +946,7 @@ def update_message_backend(request, user_profile,
                            content=REQ(default=None)):
     # type: (HttpRequest, UserProfile, int, Optional[Text], Optional[str], Optional[Text]) -> HttpResponse
     if not user_profile.realm.allow_message_editing:
-        return json_error(_("Your organization has turned off message editing"))
+        return json_error(_("Your organization has turned off message editing."))
 
     message, ignored_user_message = access_message(user_profile, message_id)
 
@@ -1016,7 +971,7 @@ def update_message_backend(request, user_profile,
     edit_limit_buffer = 20
     if content is not None and user_profile.realm.message_content_edit_limit_seconds > 0:
         deadline_seconds = user_profile.realm.message_content_edit_limit_seconds + edit_limit_buffer
-        if (timezone_now() - message.pub_date) > datetime.timedelta(seconds=deadline_seconds):
+        if (timezone.now() - message.pub_date) > datetime.timedelta(seconds=deadline_seconds):
             raise JsonableError(_("The time limit for editing this message has past"))
 
     if subject is None and content is None:

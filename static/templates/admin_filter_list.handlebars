@@ -6,12 +6,10 @@
     <td>
         <span class="filter_url_format_string">{{url_format_string}}</span>
     </td>
-    {{#if ../can_modify}}
     <td>
-        <button class="button white small delete btn-danger" data-filter-id="{{id}}">
-            <i class="icon-vector-trash" aria-hidden="true"></i>
+        <button class="btn delete btn-danger" data-filter-id="{{id}}">
+            {{t "Delete" }}
         </button>
     </td>
-    {{/if}}
 </tr>
 {{/with}}

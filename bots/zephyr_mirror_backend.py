@@ -30,7 +30,7 @@ from six.moves import range
 try:
     import simplejson
 except ImportError:
-    import json as simplejson  # type: ignore
+    import json as simplejson # type: ignore
 import re
 import time
 import subprocess
@@ -51,7 +51,7 @@ class States(object):
     Startup, ZulipToZephyr, ZephyrToZulip, ChildSending = list(range(4))
 CURRENT_STATE = States.Startup
 
-logger = None  # type: logging.Logger
+logger = None # type: logging.Logger
 
 def to_zulip_username(zephyr_username):
     # type: (str) -> str
@@ -294,21 +294,12 @@ def process_loop(log):
                 except Exception:
                     logger.exception("Error updating subscriptions from Zulip:")
 
-def parse_zephyr_body(zephyr_data, notice_format):
-    # type: (str, str) -> Tuple[str, str]
+def parse_zephyr_body(zephyr_data):
+    # type: (str) -> Tuple[str, str]
     try:
         (zsig, body) = zephyr_data.split("\x00", 1)
-        if (notice_format == 'New transaction [$1] entered in $2\nFrom: $3 ($5)\nSubject: $4' or
-                notice_format == 'New transaction [$1] entered in $2\nFrom: $3\nSubject: $4'):
-            # Logic based off of owl_zephyr_get_message in barnowl
-            fields = body.split('\x00')
-            if len(fields) == 5:
-                body = 'New transaction [%s] entered in %s\nFrom: %s (%s)\nSubject: %s' % (
-                    fields[0], fields[1], fields[2], fields[4], fields[3])
     except ValueError:
         (zsig, body) = ("", zephyr_data)
-    # Clean body of any null characters, since they're invalid in our protocol.
-    body = body.replace('\x00', '')
     return (zsig, body)
 
 def parse_crypt_table(zephyr_class, instance):
@@ -366,7 +357,7 @@ def decrypt_zephyr(zephyr_class, instance, body):
 
 def process_notice(notice, log):
     # type: (zulip, IO) -> None
-    (zsig, body) = parse_zephyr_body(notice.message, notice.format)
+    (zsig, body) = parse_zephyr_body(notice.message)
     is_personal = False
     is_huddle = False
 
@@ -902,13 +893,13 @@ def valid_stream_name(name):
     return name != ""
 
 def parse_zephyr_subs(verbose=False):
-    # type: (bool) -> Set[Tuple[str, str, str]]
-    zephyr_subscriptions = set() # type: Set[Tuple[str, str, str]]
+    # type: (bool) -> Union[List, Tuple, Set[Tuple[str, str, str]]]
+    zephyr_subscriptions = set()
     subs_file = os.path.join(os.environ["HOME"], ".zephyr.subs")
     if not os.path.exists(subs_file):
         if verbose:
             logger.error("Couldn't find ~/.zephyr.subs!")
-        return zephyr_subscriptions
+        return []
 
     for line in open(subs_file, "r").readlines():
         line = line.strip()
@@ -1085,7 +1076,7 @@ if __name__ == "__main__":
     # The properties available on 'options' are dynamically
     # determined, so we have to treat it as an Any for type
     # annotations.
-    (options, args) = parse_args()  # type: Any, List[str]
+    (options, args) = parse_args() # type: Any, List[str]
 
     logger = open_logger()
     configure_logger(logger, "parent")
@@ -1173,7 +1164,7 @@ or specify the --api-key-file option.""" % (options.api_key_file,))))
         options.session_path = "/var/tmp/%s" % (options.user,)
 
     if options.forward_from_zulip:
-        child_pid = os.fork()  # type: int
+        child_pid = os.fork() # type: int
         if child_pid == 0:
             CURRENT_STATE = States.ZulipToZephyr
             # Run the zulip => zephyr mirror in the child

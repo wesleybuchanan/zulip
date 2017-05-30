@@ -6,7 +6,8 @@ from django.shortcuts import render
 from typing import Callable
 
 from confirmation.models import Confirmation
-from zerver.lib.actions import do_change_notification_settings, clear_followup_emails_queue
+from zerver.lib.actions import do_change_enable_offline_email_notifications, \
+    do_change_enable_digest_emails, clear_followup_emails_queue
 from zerver.models import UserProfile
 from zerver.context_processors import common_context
 
@@ -28,7 +29,7 @@ def process_unsubscribe(request, token, subscription_type, unsubscribe_function)
 
 def do_missedmessage_unsubscribe(user_profile):
     # type: (UserProfile) -> None
-    do_change_notification_settings(user_profile, 'enable_offline_email_notifications', False)
+    do_change_enable_offline_email_notifications(user_profile, False)
 
 def do_welcome_unsubscribe(user_profile):
     # type: (UserProfile) -> None
@@ -36,7 +37,7 @@ def do_welcome_unsubscribe(user_profile):
 
 def do_digest_unsubscribe(user_profile):
     # type: (UserProfile) -> None
-    do_change_notification_settings(user_profile, 'enable_digest_emails', False)
+    do_change_enable_digest_emails(user_profile, False)
 
 # The keys are part of the URL for the unsubscribe link and must be valid
 # without encoding.

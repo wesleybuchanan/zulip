@@ -20,7 +20,6 @@ import zerver.views
 import zerver.views.auth
 import zerver.views.compatibility
 import zerver.views.home
-import zerver.views.email_mirror
 import zerver.views.registration
 import zerver.views.zephyr
 import zerver.views.users
@@ -28,7 +27,6 @@ import zerver.views.unsubscribe
 import zerver.views.integrations
 import zerver.views.user_settings
 import zerver.views.muting
-import zerver.views.streams
 import confirmation.views
 
 from zerver.lib.rest import rest_dispatch
@@ -81,8 +79,7 @@ i18n_urls = [
     url(r'^accounts/password/reset/$', password_reset,
         {'post_reset_redirect': '/accounts/password/reset/done/',
          'template_name': 'zerver/reset.html',
-         'email_template_name': 'zerver/emails/password_reset.txt',
-         'subject_template_name': 'zerver/emails/password_reset.subject',
+         'email_template_name': 'registration/password_reset_email.txt',
          'password_reset_form': zerver.forms.ZulipPasswordResetForm,
          }, name='django.contrib.auth.views.password_reset'),
     url(r'^accounts/password/reset/done/$', password_reset_done,
@@ -101,9 +98,6 @@ i18n_urls = [
     url(r'^avatar/(?P<email_or_id>[\S]+)?', zerver.views.users.avatar, name='zerver.views.users.avatar'),
 
     # Registration views, require a confirmation ID.
-    url(r'^accounts/register/social/(\w+)$',
-        zerver.views.auth.start_social_signup,
-        name='signup-social'),
     url(r'^accounts/home/', zerver.views.registration.accounts_home,
         name='zerver.views.registration.accounts_home'),
     url(r'^accounts/send_confirm/(?P<email>[\S]+)?',
@@ -206,14 +200,6 @@ v1_api_and_json_patterns = [
     url(r'^realm/filters/(?P<filter_id>\d+)$', rest_dispatch,
         {'DELETE': 'zerver.views.realm_filters.delete_filter'}),
 
-    # realm/profile_fields -> zerver.views.custom_profile_fields
-    url(r'^realm/profile_fields$', rest_dispatch,
-        {'GET': 'zerver.views.custom_profile_fields.list_realm_custom_profile_fields',
-         'POST': 'zerver.views.custom_profile_fields.create_realm_custom_profile_field'}),
-    url(r'^realm/profile_fields/(?P<field_id>\d+)$', rest_dispatch,
-        {'PATCH': 'zerver.views.custom_profile_fields.update_realm_custom_profile_field',
-         'DELETE': 'zerver.views.custom_profile_fields.delete_realm_custom_profile_field'}),
-
     # users -> zerver.views.users
     #
     # Since some of these endpoints do something different if used on
@@ -255,12 +241,6 @@ v1_api_and_json_patterns = [
     url(r'^messages/(?P<message_id>\d+)/history$', rest_dispatch,
         {'GET': 'zerver.views.messages.get_message_edit_history'}),
 
-    url(r'^users/me/subscriptions/properties$', rest_dispatch,
-        {'POST': 'zerver.views.streams.update_subscription_properties_backend'}),
-
-    url(r'users/me/subscriptions/(?P<stream_id>\d+)$', rest_dispatch,
-        {'PATCH': 'zerver.views.streams.update_subscriptions_property'}),
-
     # reactions -> zerver.view.reactions
     # PUT adds a reaction to a message
     # DELETE removes a reaction from a message
@@ -283,6 +263,10 @@ v1_api_and_json_patterns = [
     # user_uploads -> zerver.views.upload
     url(r'^user_uploads$', rest_dispatch,
         {'POST': 'zerver.views.upload.upload_file_backend'}),
+
+    # invite -> zerver.views.invite
+    url(r'^invite/bulk$', rest_dispatch,
+        {'POST': 'zerver.views.invite.bulk_invite_users'}),
 
     # users/me -> zerver.views
     url(r'^users/me$', rest_dispatch,
@@ -332,10 +316,6 @@ v1_api_and_json_patterns = [
          'POST': 'zerver.views.alert_words.set_alert_words',
          'PUT': 'zerver.views.alert_words.add_alert_words',
          'DELETE': 'zerver.views.alert_words.remove_alert_words'}),
-
-    # users/me/custom_profile_data -> zerver.views.custom_profile_data
-    url(r'^users/me/profile_data$', rest_dispatch,
-        {'PATCH': 'zerver.views.custom_profile_fields.update_user_custom_profile_data'}),
 
     url(r'^users/me/(?P<stream_id>\d+)/topics$', rest_dispatch,
         {'GET': 'zerver.views.streams.get_topics_backend'}),
@@ -410,11 +390,8 @@ urls.append(url(r'^api/v1/external/github', github_dispatcher.api_github_webhook
 
 # Mobile-specific authentication URLs
 urls += [
-    # This json format view used by the mobile apps lists which
-    # authentication backends the server allows as well as details
-    # like the requested subdomains'd realm icon (if known).
-    url(r'^api/v1/server_settings', zerver.views.auth.api_get_server_settings),
-    # This is a deprecated old version of api/v1/server_settings that only returns auth backends.
+    # This json format view used by the mobile apps lists which authentication
+    # backends the server allows, to display the proper UI and check for server existence
     url(r'^api/v1/get_auth_backends', zerver.views.auth.api_get_auth_backends, name='zerver.views.auth.api_get_auth_backends'),
 
     # used by mobile apps to check if they are compatible with the server
@@ -433,12 +410,6 @@ urls += [
     url(r'^api/v1/fetch_google_client_id$',
         zerver.views.auth.api_fetch_google_client_id,
         name='zerver.views.auth.api_fetch_google_client_id'),
-]
-
-# View for uploading messages from email mirror
-urls += [
-    url(r'^email_mirror_message$', zerver.views.email_mirror.email_mirror_message,
-        name='zerver.views.email_mirror.email_mirror_message'),
 ]
 
 # Include URL configuration files for site-specified extra installed

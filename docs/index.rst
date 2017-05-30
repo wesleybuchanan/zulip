@@ -53,7 +53,6 @@ Contents:
    Installing a production server <prod-install>
    prod-troubleshooting
    prod-customize
-   prod-mobile-push-notifications
    prod-maintain-secure-upgrade
    security-model
    prod-authentication-methods
@@ -97,7 +96,6 @@ Contents:
    code-reviewing
    chat-zulip-org
    zulipbot-usage
-   accessibility
 
 .. _code-testing:
 
@@ -134,7 +132,6 @@ Contents:
    full-text-search
    analytics
    translating
-   client
    logging
    release-checklist
    README

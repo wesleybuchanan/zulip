@@ -1,3 +1,5 @@
+global.stub_out_jquery();
+
 add_dependencies({
     people: 'js/people.js',
     util: 'js/util.js',
@@ -44,20 +46,6 @@ global.people.initialize_current_user(me.user_id);
 global.util.execute_early = noop;
 
 var message_store = require('js/message_store.js');
-
-(function test_insert_recent_private_message() {
-    message_store.insert_recent_private_message('1', 1001);
-    message_store.insert_recent_private_message('2', 2001);
-    message_store.insert_recent_private_message('1', 3001);
-
-    // try to backdate user1's timestamp
-    message_store.insert_recent_private_message('1', 555);
-
-    assert.deepEqual(message_store.recent_private_messages, [
-        {user_ids_string: '1', timestamp: 3001},
-        {user_ids_string: '2', timestamp: 2001},
-    ]);
-}());
 
 (function test_add_message_metadata() {
     var message = {

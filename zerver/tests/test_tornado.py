@@ -33,13 +33,14 @@ from zerver.tornado.views import get_events_backend
 
 from six.moves.http_cookies import SimpleCookie
 
-from typing import Any, Callable, Dict, Generator, Optional, Text
+from typing import Any, Callable, Dict, Generator, Optional
 
 
 class WebSocketBaseTestCase(AsyncHTTPTestCase, ZulipTestCase):
 
     def setUp(self):
         # type: () -> None
+        #
         settings.RUNNING_INSIDE_TORNADO = True
         super(WebSocketBaseTestCase, self).setUp()
 
@@ -60,14 +61,15 @@ class WebSocketBaseTestCase(AsyncHTTPTestCase, ZulipTestCase):
 
     @gen.coroutine
     def close(self, ws):
-        # type: (Any) -> None
+        # type: (Any) -> Generator[None, Any, None]
         """Close a websocket connection and wait for the server side.
 
         If we don't wait here, there are sometimes leak warnings in the
         tests.
         """
         ws.close()
-        self.wait()
+        yield self.close_future
+
 
 class TornadoTestCase(WebSocketBaseTestCase):
     def get_app(self):
@@ -114,7 +116,7 @@ class TornadoTestCase(WebSocketBaseTestCase):
 
     @staticmethod
     def _get_queue_events_data(email):
-        # type: (Text) -> Dict[str, Dict[str, str]]
+        # type: (str) -> Dict[str, Dict[str, str]]
         user_profile = UserProfile.objects.filter(email=email).first()
         events_query = {
             'queue_id': None,
@@ -182,18 +184,17 @@ class TornadoTestCase(WebSocketBaseTestCase):
     @gen_test
     def test_tornado_connect(self):
         # type: () -> Generator[str, Any, None]
-        user_profile = self.example_user('hamlet')
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
         cookies = self._get_cookies(user_profile)
         cookie_header = self.get_cookie_header(cookies)
         ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', cookie_header=cookie_header)
         response = yield ws.read_message()
         self.assertEqual(response, 'o')
-        self.close(ws)
 
     @gen_test
     def test_tornado_auth(self):
         # type: () -> Generator[str, TornadoTestCase, None]
-        user_profile = self.example_user('hamlet')
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
         cookies = self._get_cookies(user_profile)
         cookie_header = self.get_cookie_header(cookies)
         ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', cookie_header=cookie_header)
@@ -222,12 +223,11 @@ class TornadoTestCase(WebSocketBaseTestCase):
                  },
                  "type": "response"}
             ])
-        self.close(ws)
 
     @gen_test
     def test_sending_private_message(self):
         # type: () -> Generator[str, Any, None]
-        user_profile = self.example_user('hamlet')
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
         cookies = self._get_cookies(user_profile)
         cookie_header = self.get_cookie_header(cookies)
         queue_events_data = self._get_queue_events_data(user_profile.email)
@@ -243,12 +243,12 @@ class TornadoTestCase(WebSocketBaseTestCase):
                 "type": "private",
                 "subject": "(no topic)",
                 "stream": "",
-                "private_message_recipient": self.example_email('othello'),
+                "private_message_recipient": "othello@zulip.com",
                 "content": "hello",
                 "sender_id": user_profile.id,
                 "queue_id": queue_events_data['response']['queue_id'],
-                "to": ujson.dumps([self.example_email('othello')]),
-                "reply_to": self.example_email('hamlet'),
+                "to": ujson.dumps(["othello@zulip.com"]),
+                "reply_to": "hamlet@zulip.com",
                 "local_id": -1
             }
         }
@@ -257,12 +257,11 @@ class TornadoTestCase(WebSocketBaseTestCase):
         ack_resp = yield ws.read_message()
         msg_resp = yield ws.read_message()
         self._check_message_sending(request_id, ack_resp, msg_resp, user_profile, queue_events_data)
-        self.close(ws)
 
     @gen_test
     def test_sending_stream_message(self):
         # type: () -> Generator[str, Any, None]
-        user_profile = self.example_user('hamlet')
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
         cookies = self._get_cookies(user_profile)
         cookie_header = self.get_cookie_header(cookies)
         queue_events_data = self._get_queue_events_data(user_profile.email)
@@ -283,7 +282,7 @@ class TornadoTestCase(WebSocketBaseTestCase):
                 "sender_id": user_profile.id,
                 "queue_id": queue_events_data['response']['queue_id'],
                 "to": ujson.dumps(["Denmark"]),
-                "reply_to": self.example_email('hamlet'),
+                "reply_to": "hamlet@zulip.com",
                 "local_id": -1
             }
         }
@@ -292,4 +291,3 @@ class TornadoTestCase(WebSocketBaseTestCase):
         ack_resp = yield ws.read_message()
         msg_resp = yield ws.read_message()
         self._check_message_sending(request_id, ack_resp, msg_resp, user_profile, queue_events_data)
-        self.close(ws)

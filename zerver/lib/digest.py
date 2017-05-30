@@ -11,8 +11,7 @@ from django.template import loader
 from django.conf import settings
 
 from zerver.lib.notifications import build_message_list, hash_util_encode, \
-    one_click_unsubscribe_link
-from zerver.lib.send_email import display_email, send_future_email
+    send_future_email, one_click_unsubscribe_link
 from zerver.models import UserProfile, UserMessage, Recipient, Stream, \
     Subscription, get_active_streams
 from zerver.context_processors import common_context
@@ -46,8 +45,8 @@ def gather_hot_conversations(user_profile, stream_messages):
     # Returns a list of dictionaries containing the templating
     # information for each hot conversation.
 
-    conversation_length = defaultdict(int)  # type: Dict[Tuple[int, Text], int]
-    conversation_diversity = defaultdict(set)  # type: Dict[Tuple[int, Text], Set[Text]]
+    conversation_length = defaultdict(int) # type: Dict[Tuple[int, Text], int]
+    conversation_diversity = defaultdict(set) # type: Dict[Tuple[int, Text], Set[Text]]
     for user_message in stream_messages:
         if not user_message.message.sent_by_human():
             # Don't include automated messages in the count.
@@ -106,7 +105,7 @@ def gather_new_users(user_profile, threshold):
     # Gather information on users in the realm who have recently
     # joined.
     if user_profile.realm.is_zephyr_mirror_realm:
-        new_users = []  # type: List[UserProfile]
+        new_users = [] # type: List[UserProfile]
     else:
         new_users = list(UserProfile.objects.filter(
             realm=user_profile.realm, date_joined__gt=threshold,
@@ -118,12 +117,12 @@ def gather_new_users(user_profile, threshold):
 def gather_new_streams(user_profile, threshold):
     # type: (UserProfile, datetime.datetime) -> Tuple[int, Dict[str, List[Text]]]
     if user_profile.realm.is_zephyr_mirror_realm:
-        new_streams = []  # type: List[Stream]
+        new_streams = [] # type: List[Stream]
     else:
         new_streams = list(get_active_streams(user_profile.realm).filter(
             invite_only=False, date_created__gt=threshold))
 
-    base_url = u"%s/  # narrow/stream/" % (user_profile.realm.uri,)
+    base_url = u"%s/#narrow/stream/" % (user_profile.realm.uri,)
 
     streams_html = []
     streams_plain = []
@@ -147,6 +146,16 @@ def enough_traffic(unread_pms, hot_conversations, new_streams, new_users):
         return True
     return False
 
+def send_digest_email(user_profile, subject, html_content, text_content):
+    # type: (UserProfile, Text, Text, Text) -> None
+    recipients = [{'email': user_profile.email, 'name': user_profile.full_name}]
+    sender = {'email': settings.NOREPLY_EMAIL_ADDRESS, 'name': 'Zulip'}
+
+    # Send now, through Mandrill.
+    send_future_email(recipients, html_content, text_content, subject,
+                      delay=datetime.timedelta(0), sender=sender,
+                      tags=["digest-emails"])
+
 def handle_digest_email(user_profile_id, cutoff):
     # type: (int, float) -> None
     user_profile = UserProfile.objects.get(id=user_profile_id)
@@ -157,10 +166,10 @@ def handle_digest_email(user_profile_id, cutoff):
         user_profile=user_profile,
         message__pub_date__gt=cutoff_date).order_by("message__pub_date")
 
-    context = common_context(user_profile)
+    template_payload = common_context(user_profile)
 
     # Start building email template data.
-    context.update({
+    template_payload.update({
         'name': user_profile.full_name,
         'unsubscribe_link': one_click_unsubscribe_link(user_profile, "digest")
     })
@@ -175,9 +184,9 @@ def handle_digest_email(user_profile_id, cutoff):
     # Show up to 4 missed PMs.
     pms_limit = 4
 
-    context['unread_pms'] = build_message_list(
+    template_payload['unread_pms'] = build_message_list(
         user_profile, [pm.message for pm in pms[:pms_limit]])
-    context['remaining_unread_pms_count'] = min(0, len(pms) - pms_limit)
+    template_payload['remaining_unread_pms_count'] = min(0, len(pms) - pms_limit)
 
     home_view_recipients = [sub.recipient for sub in
                             Subscription.objects.filter(
@@ -190,23 +199,29 @@ def handle_digest_email(user_profile_id, cutoff):
         message__recipient__in=home_view_recipients)
 
     # Gather hot conversations.
-    context["hot_conversations"] = gather_hot_conversations(
+    template_payload["hot_conversations"] = gather_hot_conversations(
         user_profile, stream_messages)
 
     # Gather new streams.
     new_streams_count, new_streams = gather_new_streams(
         user_profile, cutoff_date)
-    context["new_streams"] = new_streams
-    context["new_streams_count"] = new_streams_count
+    template_payload["new_streams"] = new_streams
+    template_payload["new_streams_count"] = new_streams_count
 
     # Gather users who signed up recently.
     new_users_count, new_users = gather_new_users(
         user_profile, cutoff_date)
-    context["new_users"] = new_users
+    template_payload["new_users"] = new_users
+
+    subject = loader.render_to_string('zerver/emails/digest/digest_email.subject').strip()
+    text_content = loader.render_to_string(
+        'zerver/emails/digest/digest_email.txt', template_payload)
+    html_content = loader.render_to_string(
+        'zerver/emails/digest/digest_email.html', template_payload)
 
     # We don't want to send emails containing almost no information.
-    if enough_traffic(context["unread_pms"], context["hot_conversations"],
+    if enough_traffic(template_payload["unread_pms"],
+                      template_payload["hot_conversations"],
                       new_streams_count, new_users_count):
         logger.info("Sending digest email for %s" % (user_profile.email,))
-        # Send now, as a ScheduledJob
-        send_future_email('zerver/emails/digest', display_email(user_profile), context=context)
+        send_digest_email(user_profile, subject, html_content, text_content)

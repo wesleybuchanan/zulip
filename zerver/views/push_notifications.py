@@ -1,9 +1,6 @@
 from __future__ import absolute_import
 
-import requests
-import json
-
-from typing import Optional, Text
+from typing import Optional
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse

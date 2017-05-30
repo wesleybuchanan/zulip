@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 from __future__ import print_function
-from __future__ import absolute_import
 
 import importlib
 import logging
@@ -14,7 +13,7 @@ sys.path.insert(0, our_dir)
 from bot_lib import run_message_handler_for_bot
 
 def get_lib_module(bots_fn):
-    bots_fn = os.path.realpath(bots_fn)
+    bots_fn = os.path.abspath(bots_fn)
     if not os.path.dirname(bots_fn).startswith(os.path.join(our_dir, 'bots')):
         print('Sorry, we will only import code from contrib_bots/bots.')
         sys.exit(1)
@@ -23,7 +22,7 @@ def get_lib_module(bots_fn):
         print('Please use a .py extension for library files.')
         sys.exit(1)
     base_bots_fn = os.path.basename(os.path.splitext(bots_fn)[0])
-    sys.path.append(os.path.dirname(bots_fn))
+    sys.path.append('bots/{}'.format(base_bots_fn))
     module_name = base_bots_fn
     module = importlib.import_module(module_name)
     return module

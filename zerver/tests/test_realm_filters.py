@@ -11,8 +11,7 @@ class RealmFilterTest(ZulipTestCase):
 
     def test_list(self):
         # type: () -> None
-        email = self.example_email('iago')
-        self.login(email)
+        self.login("iago@zulip.com")
         realm = get_realm('zulip')
         do_add_realm_filter(
             realm,
@@ -26,8 +25,7 @@ class RealmFilterTest(ZulipTestCase):
 
     def test_create(self):
         # type: () -> None
-        email = self.example_email('iago')
-        self.login(email)
+        self.login("iago@zulip.com")
         data = {"pattern": "", "url_format_string": "https://realm.com/my_realm_filter/%(id)s"}
         result = self.client_post("/json/realm/filters", info=data)
         self.assert_json_error(result, 'This field cannot be blank.')
@@ -56,8 +54,7 @@ class RealmFilterTest(ZulipTestCase):
 
     def test_not_realm_admin(self):
         # type: () -> None
-        email = self.example_email('hamlet')
-        self.login(email)
+        self.login("hamlet@zulip.com")
         result = self.client_post("/json/realm/filters")
         self.assert_json_error(result, 'Must be a realm administrator')
         result = self.client_delete("/json/realm/filters/15")
@@ -65,8 +62,7 @@ class RealmFilterTest(ZulipTestCase):
 
     def test_delete(self):
         # type: () -> None
-        email = self.example_email('iago')
-        self.login(email)
+        self.login("iago@zulip.com")
         realm = get_realm('zulip')
         filter_id = do_add_realm_filter(
             realm,

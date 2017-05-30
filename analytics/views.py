@@ -7,7 +7,7 @@ from django.db.models import Sum
 from django.db.models.query import QuerySet
 from django.http import HttpResponseNotFound, HttpRequest, HttpResponse
 from django.template import RequestContext, loader
-from django.utils.timezone import now as timezone_now
+from django.utils import timezone
 from django.utils.translation import ugettext as _
 from django.shortcuts import render
 from jinja2 import Markup as mark_safe
@@ -17,7 +17,7 @@ from analytics.lib.time_utils import time_range
 from analytics.models import BaseCount, InstallationCount, RealmCount, \
     UserCount, StreamCount, last_successful_fill
 
-from zerver.decorator import has_request_variables, REQ, require_server_admin, \
+from zerver.decorator import has_request_variables, REQ, zulip_internal, \
     zulip_login_required, to_non_negative_int, to_utc_datetime
 from zerver.lib.request import JsonableError
 from zerver.lib.response import json_success
@@ -52,31 +52,32 @@ def get_chart_data(request, user_profile, chart_name=REQ(),
                    end=REQ(converter=to_utc_datetime, default=None)):
     # type: (HttpRequest, UserProfile, Text, Optional[int], Optional[datetime], Optional[datetime]) -> HttpResponse
     if chart_name == 'number_of_humans':
-        stat = COUNT_STATS['realm_active_humans::day']
+        stat = COUNT_STATS['active_users:is_bot:day']
         tables = [RealmCount]
-        subgroup_to_label = {None: 'human'} # type: Dict[Optional[str], str]
+        subgroups = ['false', 'true']
+        labels = ['human', 'bot']
         labels_sort_function = None
         include_empty_subgroups = True
     elif chart_name == 'messages_sent_over_time':
         stat = COUNT_STATS['messages_sent:is_bot:hour']
         tables = [RealmCount, UserCount]
-        subgroup_to_label = {'false': 'human', 'true': 'bot'}
+        subgroups = ['false', 'true']
+        labels = ['human', 'bot']
         labels_sort_function = None
         include_empty_subgroups = True
     elif chart_name == 'messages_sent_by_message_type':
         stat = COUNT_STATS['messages_sent:message_type:day']
         tables = [RealmCount, UserCount]
-        subgroup_to_label = {'public_stream': 'Public streams',
-                             'private_stream': 'Private streams',
-                             'private_message': 'Private messages',
-                             'huddle_message': 'Group private messages'}
+        subgroups = ['public_stream', 'private_stream', 'private_message', 'huddle_message']
+        labels = ['Public streams', 'Private streams', 'Private messages', 'Group private messages']
         labels_sort_function = lambda data: sort_by_totals(data['realm'])
         include_empty_subgroups = True
     elif chart_name == 'messages_sent_by_client':
         stat = COUNT_STATS['messages_sent:client:day']
         tables = [RealmCount, UserCount]
-        # Note that the labels are further re-written by client_label_map
-        subgroup_to_label = {str(id): name for id, name in Client.objects.values_list('id', 'name')}
+        subgroups = [str(x) for x in Client.objects.values_list('id', flat=True).order_by('id')]
+        # these are further re-written by client_label_map
+        labels = list(Client.objects.values_list('name', flat=True).order_by('id'))
         labels_sort_function = sort_client_labels
         include_empty_subgroups = False
     else:
@@ -101,14 +102,14 @@ def get_chart_data(request, user_profile, chart_name=REQ(),
         raise JsonableError(_("No analytics data available. Please contact your server administrator."))
 
     end_times = time_range(start, end, stat.frequency, min_length)
-    data = {'end_times': end_times, 'frequency': stat.frequency}
+    data = {'end_times': end_times, 'frequency': stat.frequency, 'interval': stat.interval}
     for table in tables:
         if table == RealmCount:
             data['realm'] = get_time_series_by_subgroup(
-                stat, RealmCount, realm.id, end_times, subgroup_to_label, include_empty_subgroups)
+                stat, RealmCount, realm.id, end_times, subgroups, labels, include_empty_subgroups)
         if table == UserCount:
             data['user'] = get_time_series_by_subgroup(
-                stat, UserCount, user_profile.id, end_times, subgroup_to_label, include_empty_subgroups)
+                stat, UserCount, user_profile.id, end_times, subgroups, labels, include_empty_subgroups)
     if labels_sort_function is not None:
         data['display_order'] = labels_sort_function(data)
     else:
@@ -117,9 +118,11 @@ def get_chart_data(request, user_profile, chart_name=REQ(),
 
 def sort_by_totals(value_arrays):
     # type: (Dict[str, List[int]]) -> List[str]
-    totals = [(sum(values), label) for label, values in value_arrays.items()]
-    totals.sort(reverse=True)
-    return [label for total, label in totals]
+    totals = []
+    for label, values in value_arrays.items():
+        totals.append((label, sum(values)))
+    totals.sort(key=lambda label_total: "%s:%s" % (label_total[1], label_total[0]), reverse=True)
+    return [label for label, total in totals]
 
 # For any given user, we want to show a fixed set of clients in the chart,
 # regardless of the time aggregation or whether we're looking at realm or
@@ -182,15 +185,18 @@ def rewrite_client_arrays(value_arrays):
             mapped_arrays[mapped_label] = [value_arrays[label][i] for i in range(0, len(array))]
     return mapped_arrays
 
-def get_time_series_by_subgroup(stat, table, key_id, end_times, subgroup_to_label, include_empty_subgroups):
-    # type: (CountStat, Type[BaseCount], Optional[int], List[datetime], Dict[Optional[str], str], bool) -> Dict[str, List[int]]
+def get_time_series_by_subgroup(stat, table, key_id, end_times, subgroups, labels, include_empty_subgroups):
+    # type: (CountStat, Type[BaseCount], Optional[int], List[datetime], List[str], List[str], bool) -> Dict[str, List[int]]
+    if len(subgroups) != len(labels):
+        raise AssertionError("subgroups and labels have lengths %s and %s, which are different." %
+                             (len(subgroups), len(labels)))
     queryset = table_filtered_to_id(table, key_id).filter(property=stat.property) \
                                                   .values_list('subgroup', 'end_time', 'value')
     value_dicts = defaultdict(lambda: defaultdict(int)) # type: Dict[Optional[str], Dict[datetime, int]]
     for subgroup, end_time, value in queryset:
         value_dicts[subgroup][end_time] = value
     value_arrays = {}
-    for subgroup, label in subgroup_to_label.items():
+    for subgroup, label in zip(subgroups, labels):
         if (subgroup in value_dicts) or include_empty_subgroups:
             value_arrays[label] = [value_dicts[subgroup][end_time] for end_time in end_times]
 
@@ -741,7 +747,7 @@ def ad_hoc_queries():
 
     return pages
 
-@require_server_admin
+@zulip_internal
 @has_request_variables
 def get_activity(request):
     # type: (HttpRequest) -> HttpResponse
@@ -991,7 +997,7 @@ def realm_user_summary_table(all_records, admin_emails):
 
     def is_recent(val):
         # type: (Optional[datetime]) -> bool
-        age = timezone_now() - val
+        age = timezone.now() - val
         return age.total_seconds() < 5 * 60
 
     rows = []
@@ -1035,7 +1041,7 @@ def realm_user_summary_table(all_records, admin_emails):
     content = make_table(title, cols, rows, has_row_class=True)
     return user_records, content
 
-@require_server_admin
+@zulip_internal
 def get_realm_activity(request, realm_str):
     # type: (HttpRequest, str) -> HttpResponse
     data = [] # type: List[Tuple[str, str]]
@@ -1074,7 +1080,7 @@ def get_realm_activity(request, realm_str):
         context=dict(data=data, realm_link=realm_link, title=title),
     )
 
-@require_server_admin
+@zulip_internal
 def get_user_activity(request, email):
     # type: (HttpRequest, str) -> HttpResponse
     records = get_user_activity_records_for_email(email)

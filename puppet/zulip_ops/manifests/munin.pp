@@ -4,8 +4,6 @@ class zulip_ops::munin {
   $munin_packages = [# Packages needed for munin
                      "munin",
                      "autossh",
-                     # Packages needed for munin website
-                     'libapache2-mod-fcgid',
                      ]
   package { $munin_packages: ensure => "installed" }
 

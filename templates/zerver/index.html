@@ -14,7 +14,7 @@ var page_params = {{ page_params }};
 {% block customhead %}
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link href="/static/images/logo/apple-touch-icon-precomposed.png" rel="apple-touch-icon-precomposed">
-{% stylesheet 'google_sprite' %}
+<link rel="stylesheet" type="text/css" href="/static/generated/emoji/sprite.css" />
 <style type="text/css">
 
 #css-loading {
@@ -37,7 +37,9 @@ var page_params = {{ page_params }};
 {% endif %}
 {{ minified_js('app')|safe }}
 
-{{ render_bundle('translations') }}
+{% if not pipeline %}
+<script type="text/javascript" src="/webpack/bundle.js"></script>
+{% endif %}
 
 {% if debug %}
 {{ minified_js('app_debug')|safe }}
@@ -75,8 +77,13 @@ var page_params = {{ page_params }};
 <div class="alert-box">
     <div class="alert alert_sidebar alert-error home-error-bar" id="connection-error">
         <div class="exit"></div>
-        {% trans %}<strong class="message">Unable to connect to
-        Zulip.</strong>  Updates may be delayed.{% endtrans %} {{ _('Retrying soon...') }} <a class="restart_get_events_button">{{ _('Try now.') }}</a>
+        {% trans %}<strong class="message">Unable to connect to Zulip.</strong>  Updates may be delayed.{% endtrans %}
+        <div class="faded">{{ _('Retrying soon...') }} <a class="restart_get_events_button">{{ _('Try now.') }}</a></div>
+    </div>
+    <div class="alert alert_sidebar alert-error home-error-bar" id="get_old_messages_error">
+        <div class="exit"></div>
+        {% trans %}<strong class="message">Unable to connect to Zulip.</strong>  Could not fetch messages.{% endtrans %}
+        <div class="faded">{{ _('Retrying soon...') }}</div>
     </div>
     <div class="alert alert_sidebar alert-error home-error-bar" id="zephyr-mirror-error">
         <div class="exit"></div>

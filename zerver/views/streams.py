@@ -8,25 +8,23 @@ from django.http import HttpRequest, HttpResponse
 
 from zerver.lib.request import JsonableError, REQ, has_request_variables
 from zerver.decorator import authenticated_json_post_view, \
-    authenticated_json_view, require_realm_admin, to_non_negative_int
+    authenticated_json_view, \
+    get_user_profile_by_email, require_realm_admin, to_non_negative_int
 from zerver.lib.actions import bulk_remove_subscriptions, \
-    do_change_subscription_property, internal_prep_private_message, \
-    internal_prep_stream_message, \
+    do_change_subscription_property, internal_prep_message, \
     gather_subscriptions, subscribed_to_stream, \
     bulk_add_subscriptions, do_send_messages, get_subscriber_emails, do_rename_stream, \
     do_deactivate_stream, do_change_stream_invite_only, do_add_default_stream, \
     do_change_stream_description, do_get_streams, \
-    do_remove_default_stream, get_topic_history_for_stream, \
-    prep_stream_welcome_message
+    do_remove_default_stream, get_topic_history_for_stream
 from zerver.lib.response import json_success, json_error, json_response
 from zerver.lib.streams import access_stream_by_id, access_stream_by_name, \
     check_stream_name, check_stream_name_available, filter_stream_authorization, \
     list_to_streams
-from zerver.lib.validator import check_string, check_int, check_list, check_dict, \
+from zerver.lib.validator import check_string, check_list, check_dict, \
     check_bool, check_variable_type
 from zerver.models import UserProfile, Stream, Realm, Subscription, \
-    Recipient, get_recipient, get_stream, get_active_user_dicts_in_realm, \
-    get_system_bot, get_user
+    Recipient, get_recipient, get_stream, get_active_user_dicts_in_realm
 
 from collections import defaultdict
 import ujson
@@ -38,8 +36,8 @@ from typing import Text
 class PrincipalError(JsonableError):
     def __init__(self, principal, status_code=403):
         # type: (Text, int) -> None
-        self.principal = principal  # type: Text
-        self.status_code = status_code  # type: int
+        self.principal = principal # type: Text
+        self.status_code = status_code # type: int
 
     def to_json_error_msg(self):
         # type: () -> Text
@@ -48,14 +46,21 @@ class PrincipalError(JsonableError):
 
 def principal_to_user_profile(agent, principal):
     # type: (UserProfile, Text) -> UserProfile
+    principal_doesnt_exist = False
     try:
-        return get_user(principal, agent.realm)
+        principal_user_profile = get_user_profile_by_email(principal)
     except UserProfile.DoesNotExist:
+        principal_doesnt_exist = True
+
+    if (principal_doesnt_exist or
+            agent.realm != principal_user_profile.realm):
         # We have to make sure we don't leak information about which users
         # are registered for Zulip in a different realm.  We could do
         # something a little more clever and check the domain part of the
         # principal to maybe give a better error message
         raise PrincipalError(principal)
+
+    return principal_user_profile
 
 @require_realm_admin
 def deactivate_stream_backend(request, user_profile, stream_id):
@@ -121,7 +126,7 @@ def update_subscriptions_backend(request, user_profile,
     method_kwarg_pairs = [
         (add_subscriptions_backend, dict(streams_raw=add)),
         (remove_subscriptions_backend, dict(streams_raw=delete))
-    ]  # type: List[FuncKwargPair]
+    ] # type: List[FuncKwargPair]
     return compose_views(request, user_profile, method_kwarg_pairs)
 
 def compose_views(request, user_profile, method_kwarg_pairs):
@@ -136,7 +141,7 @@ def compose_views(request, user_profile, method_kwarg_pairs):
     TODO: Move this a utils-like module if we end up using it more widely.
     '''
 
-    json_dict = {}  # type: Dict[str, Any]
+    json_dict = {} # type: Dict[str, Any]
     with transaction.atomic():
         for method, kwargs in method_kwarg_pairs:
             response = method(request, user_profile, **kwargs)
@@ -177,7 +182,7 @@ def remove_subscriptions_backend(request, user_profile,
     else:
         people_to_unsub = set([user_profile])
 
-    result = dict(removed=[], not_subscribed=[])  # type: Dict[str, List[Text]]
+    result = dict(removed=[], not_subscribed=[]) # type: Dict[str, List[Text]]
     (removed, not_subscribed) = bulk_remove_subscriptions(people_to_unsub, streams)
 
     for (subscriber, stream) in removed:
@@ -186,37 +191,6 @@ def remove_subscriptions_backend(request, user_profile,
         result["not_subscribed"].append(stream.name)
 
     return json_success(result)
-
-def you_were_just_subscribed_message(acting_user, stream_names, private_stream_names):
-    # type: (UserProfile, Set[Text], Set[Text]) -> Text
-
-    # stream_names is the list of streams for which we should send notifications.
-    #
-    # We only use private_stream_names to see which of those names
-    # are private; it can possibly be a superset of stream_names due to the way the
-    # calling code is structured.
-
-    subscriptions = sorted(list(stream_names))
-
-    msg = "Hi there!  We thought you'd like to know that %s just subscribed you to " % (
-        acting_user.full_name,)
-
-    if len(subscriptions) == 1:
-        invite_only = subscriptions[0] in private_stream_names
-        msg += "the%s stream #**%s**." % (" **invite-only**" if invite_only else "",
-                                          subscriptions[0])
-    else:
-        msg += "the following streams: \n\n"
-        for stream_name in subscriptions:
-            invite_only = stream_name in private_stream_names
-            msg += "* #**%s**%s\n" % (stream_name,
-                                      " (**invite-only**)" if invite_only else "")
-
-    public_stream_names = stream_names - private_stream_names
-    if public_stream_names:
-        msg += "\nYou can see historical content on a non-invite-only stream by narrowing to it."
-
-    return msg
 
 @has_request_variables
 def add_subscriptions_backend(request, user_profile,
@@ -229,7 +203,7 @@ def add_subscriptions_backend(request, user_profile,
     # type: (HttpRequest, UserProfile, Iterable[Mapping[str, Text]], bool, bool, List[Text], bool) -> HttpResponse
     stream_dicts = []
     for stream_dict in streams_raw:
-        stream_dict_copy = {}  # type: Dict[str, Any]
+        stream_dict_copy = {} # type: Dict[str, Any]
         for field in stream_dict:
             stream_dict_copy[field] = stream_dict[field]
         # Strip the stream name here.
@@ -258,22 +232,20 @@ def add_subscriptions_backend(request, user_profile,
 
     (subscribed, already_subscribed) = bulk_add_subscriptions(streams, subscribers)
 
-    result = dict(subscribed=defaultdict(list), already_subscribed=defaultdict(list))  # type: Dict[str, Any]
+    result = dict(subscribed=defaultdict(list), already_subscribed=defaultdict(list)) # type: Dict[str, Any]
     for (subscriber, stream) in subscribed:
         result["subscribed"][subscriber.email].append(stream.name)
     for (subscriber, stream) in already_subscribed:
         result["already_subscribed"][subscriber.email].append(stream.name)
 
+    private_streams = dict((stream.name, stream.invite_only) for stream in streams)
     bots = dict((subscriber.email, subscriber.is_bot) for subscriber in subscribers)
-
-    newly_created_stream_names = {stream.name for stream in created_streams}
-    private_stream_names = {stream.name for stream in streams if stream.invite_only}
 
     # Inform the user if someone else subscribed them to stuff,
     # or if a new stream was created with the "announce" option.
     notifications = []
     if len(principals) > 0 and result["subscribed"]:
-        for email, subscribed_stream_names in six.iteritems(result["subscribed"]):
+        for email, subscriptions in six.iteritems(result["subscribed"]):
             if email == user_profile.email:
                 # Don't send a Zulip if you invited yourself.
                 continue
@@ -281,26 +253,27 @@ def add_subscriptions_backend(request, user_profile,
                 # Don't send invitation Zulips to bots
                 continue
 
-            # For each user, we notify them about newly subscribed streams, except for
-            # streams that were newly created.
-            notify_stream_names = set(subscribed_stream_names) - newly_created_stream_names
+            if len(subscriptions) == 1:
+                msg = ("Hi there!  We thought you'd like to know that %s just "
+                       "subscribed you to the%s stream #**%s**."
+                       % (user_profile.full_name,
+                          " **invite-only**" if private_streams[subscriptions[0]] else "",
+                          subscriptions[0],
+                          ))
+            else:
+                msg = ("Hi there!  We thought you'd like to know that %s just "
+                       "subscribed you to the following streams: \n\n"
+                       % (user_profile.full_name,))
+                for stream in subscriptions:
+                    msg += "* #**%s**%s\n" % (
+                        stream,
+                        " (**invite-only**)" if private_streams[stream] else "")
 
-            if not notify_stream_names:
-                continue
-
-            msg = you_were_just_subscribed_message(
-                acting_user=user_profile,
-                stream_names=notify_stream_names,
-                private_stream_names=private_stream_names
-            )
-
-            sender = get_system_bot(settings.NOTIFICATION_BOT)
-            notifications.append(
-                internal_prep_private_message(
-                    realm=user_profile.realm,
-                    sender=sender,
-                    recipient_email=email,
-                    content=msg))
+            if len([s for s in subscriptions if not private_streams[s]]) > 0:
+                msg += "\nYou can see historical content on a non-invite-only stream by narrowing to it."
+            notifications.append(internal_prep_message(
+                user_profile.realm, settings.NOTIFICATION_BOT,
+                "private", email, "", msg))
 
     if announce and len(created_streams) > 0:
         notifications_stream = user_profile.realm.notifications_stream  # type: Optional[Stream]
@@ -310,22 +283,22 @@ def add_subscriptions_backend(request, user_profile,
             else:
                 stream_msg = "a new stream #**%s**." % created_streams[0].name
             msg = ("%s just created %s" % (user_profile.full_name, stream_msg))
-
-            sender = get_system_bot(settings.NOTIFICATION_BOT)
-            stream_name = notifications_stream.name
-            topic = 'Streams'
-
             notifications.append(
-                internal_prep_stream_message(
-                    realm=user_profile.realm,
-                    sender=sender,
-                    stream_name=stream_name,
-                    topic=topic,
-                    content=msg))
-
-    if not user_profile.realm.is_zephyr_mirror_realm:
-        for stream in created_streams:
-            notifications.append(prep_stream_welcome_message(stream))
+                internal_prep_message(user_profile.realm, settings.NOTIFICATION_BOT,
+                                      "stream",
+                                      notifications_stream.name, "Streams", msg))
+        else:
+            msg = ("Hi there!  %s just created a new stream #**%s**."
+                   % (user_profile.full_name, created_streams[0].name))
+            for realm_user_dict in get_active_user_dicts_in_realm(user_profile.realm):
+                # Don't announce to yourself or to people you explicitly added
+                # (who will get the notification above instead).
+                if realm_user_dict['email'] in principals or realm_user_dict['email'] == user_profile.email:
+                    continue
+                notifications.append(internal_prep_message(
+                    user_profile.realm, settings.NOTIFICATION_BOT,
+                    "private",
+                    realm_user_dict['email'], "", msg))
 
     if len(notifications) > 0:
         do_send_messages(notifications)
@@ -402,7 +375,7 @@ def json_stream_exists(request, user_profile, stream_name=REQ("stream"),
         bulk_add_subscriptions([stream], [user_profile])
         result["subscribed"] = True
 
-    return json_success(result)  # results are ignored for HEAD requests
+    return json_success(result) # results are ignored for HEAD requests
 
 @has_request_variables
 def json_get_stream_id(request, user_profile, stream_name=REQ('stream')):
@@ -410,19 +383,11 @@ def json_get_stream_id(request, user_profile, stream_name=REQ('stream')):
     (stream, recipient, sub) = access_stream_by_name(user_profile, stream_name)
     return json_success({'stream_id': stream.id})
 
+@authenticated_json_view
 @has_request_variables
-def update_subscriptions_property(request, user_profile, stream_id=REQ(), property=REQ(), value=REQ()):
-    # type: (HttpRequest, UserProfile, int, str, str) -> HttpResponse
-    subscription_data = [{"property": property,
-                          "stream_id": stream_id,
-                          "value": value}]
-    return update_subscription_properties_backend(request, user_profile,
-                                                  subscription_data=subscription_data)
-
-@has_request_variables
-def update_subscription_properties_backend(request, user_profile, subscription_data=REQ(
+def json_subscription_property(request, user_profile, subscription_data=REQ(
         validator=check_list(
-            check_dict([("stream_id", check_int),
+            check_dict([("stream", check_string),
                         ("property", check_string),
                         ("value", check_variable_type(
                             [check_string, check_bool]))])))):
@@ -434,9 +399,12 @@ def update_subscription_properties_backend(request, user_profile, subscription_d
 
     Requests are of the form:
 
-    [{"stream_id": "1", "property": "in_home_view", "value": False},
-     {"stream_id": "1", "property": "color", "value": "#c2c2c2"}]
+    [{"stream": "devel", "property": "in_home_view", "value": False},
+     {"stream": "devel", "property": "color", "value": "#c2c2c2"}]
     """
+    if request.method != "POST":
+        return json_error(_("Invalid verb"))
+
     property_converters = {"color": check_string, "in_home_view": check_bool,
                            "desktop_notifications": check_bool,
                            "audible_notifications": check_bool,
@@ -444,16 +412,16 @@ def update_subscription_properties_backend(request, user_profile, subscription_d
     response_data = []
 
     for change in subscription_data:
-        stream_id = change["stream_id"]
+        stream_name = change["stream"]
         property = change["property"]
         value = change["value"]
 
         if property not in property_converters:
             return json_error(_("Unknown subscription property: %s") % (property,))
 
-        (stream, recipient, sub) = access_stream_by_id(user_profile, stream_id)
+        (stream, recipient, sub) = access_stream_by_name(user_profile, stream_name)
         if sub is None:
-            return json_error(_("Not subscribed to stream id %d") % (stream_id,))
+            return json_error(_("Not subscribed to stream %s") % (stream_name,))
 
         property_conversion = property_converters[property](property, value)
         if property_conversion:
@@ -462,7 +430,7 @@ def update_subscription_properties_backend(request, user_profile, subscription_d
         do_change_subscription_property(user_profile, sub, stream,
                                         property, value)
 
-        response_data.append({'stream_id': stream_id,
+        response_data.append({'stream': stream_name,
                               'property': property,
                               'value': value})
 

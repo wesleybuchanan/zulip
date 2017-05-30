@@ -1,3 +1,5 @@
+global.stub_out_jquery();
+
 add_dependencies({
     people: 'js/people.js',
 });
@@ -9,10 +11,8 @@ var user_events = require("js/user_events.js");
 set_global('activity', {
     redraw: function () {},
 });
-set_global('settings_users', {
-    update_user_data: function () {},
-});
 set_global('admin', {
+    update_user_data: function () {},
     show_or_hide_menu_item: function () {},
 });
 set_global('page_params', {

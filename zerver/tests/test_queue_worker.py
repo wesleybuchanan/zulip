@@ -13,15 +13,15 @@ from typing import Any, Callable, Dict, List, Mapping, Tuple
 
 from zerver.lib.test_helpers import simulated_queue_client
 from zerver.lib.test_classes import ZulipTestCase
-from zerver.models import get_client, UserActivity
+from zerver.models import get_client, get_user_profile_by_email, UserActivity
 from zerver.worker import queue_processors
 
-class WorkerTest(ZulipTestCase):
+class WorkerTest(TestCase):
     class FakeClient(object):
         def __init__(self):
             # type: () -> None
-            self.consumers = {}  # type: Dict[str, Callable]
-            self.queue = []  # type: List[Tuple[str, Dict[str, Any]]]
+            self.consumers = {} # type: Dict[str, Callable]
+            self.queue = [] # type: List[Tuple[str, Dict[str, Any]]]
 
         def register_json_consumer(self, queue_name, callback):
             # type: (str, Callable) -> None
@@ -40,17 +40,17 @@ class WorkerTest(ZulipTestCase):
             dict(
                 message=u'\xf3test',
                 time=time.time(),
-                rcpt_to=self.example_email('hamlet'),
+                rcpt_to='hamlet@zulip.com',
             ),
             dict(
                 message='\xf3test',
                 time=time.time(),
-                rcpt_to=self.example_email('hamlet'),
+                rcpt_to='hamlet@zulip.com',
             ),
             dict(
                 message='test',
                 time=time.time(),
-                rcpt_to=self.example_email('hamlet'),
+                rcpt_to='hamlet@zulip.com',
             ),
         ]
         for element in data:
@@ -66,7 +66,7 @@ class WorkerTest(ZulipTestCase):
         # type: () -> None
         fake_client = self.FakeClient()
 
-        user = self.example_user('hamlet')
+        user = get_user_profile_by_email('hamlet@zulip.com')
         UserActivity.objects.filter(
             user_profile = user.id,
             client = get_client('ios')

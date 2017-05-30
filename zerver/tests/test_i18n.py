@@ -6,7 +6,6 @@ from typing import Any
 import django
 import mock
 from django.test import TestCase
-from django.utils import translation
 from django.conf import settings
 from django.http import HttpResponse
 from six.moves.http_cookies import SimpleCookie
@@ -22,10 +21,6 @@ class TranslationTestCase(ZulipTestCase):
     Tranlations strings should change with locale. URLs should be locale
     aware.
     """
-
-    def tearDown(self):
-        # type: () -> None
-        translation.activate(settings.LANGUAGE_CODE)
 
     # e.g. self.client_post(url) if method is "post"
     def fetch(self, method, url, expected_status, **kwargs):
@@ -79,18 +74,13 @@ class TranslationTestCase(ZulipTestCase):
 
 
 class JsonTranslationTestCase(ZulipTestCase):
-    def tearDown(self):
-        # type: () -> None
-        translation.activate(settings.LANGUAGE_CODE)
-
     @mock.patch('zerver.lib.request._')
     def test_json_error(self, mock_gettext):
         # type: (Any) -> None
         dummy_value = "Some other language '%s'"
         mock_gettext.return_value = dummy_value
 
-        email = self.example_email('hamlet')
-        self.login(email)
+        self.login("hamlet@zulip.com")
         result = self.client_post("/json/refer_friend",
                                   HTTP_ACCEPT_LANGUAGE='de')
 
@@ -104,8 +94,7 @@ class JsonTranslationTestCase(ZulipTestCase):
         dummy_value = "Some other language"
         mock_gettext.return_value = dummy_value
 
-        email = self.example_email('hamlet')
-        self.login(email)
+        self.login("hamlet@zulip.com")
         result = self.client_get("/de/accounts/login/jwt/")
 
         self.assert_json_error_contains(result,

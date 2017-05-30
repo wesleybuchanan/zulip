@@ -133,7 +133,7 @@ function handle_edit_keydown(from_topic_edited_only, e) {
     var row;
     var code = e.keyCode || e.which;
 
-    if ($(e.target).hasClass("message_edit_content") && code === 13 &&
+    if (e.target.id === "message_edit_content" && code === 13 &&
         (e.metaKey || e.ctrlKey)) {
         row = $(".message_edit_content").filter(":focus").closest(".message_row");
     } else if (e.target.id === "message_edit_topic" && code === 13) {
@@ -183,7 +183,6 @@ function edit_message(row, raw_content) {
     var form = $(templates.render(
         'message_edit_form',
         {is_stream: (message.type === 'stream'),
-         message_id: message.id,
          is_editable: is_editable,
          has_been_editable: (editability !== editability_types.NO),
          topic: message.subject,
@@ -194,18 +193,18 @@ function edit_message(row, raw_content) {
     currently_editing_messages[message.id] = edit_obj;
     current_msg_list.show_edit_message(row, edit_obj);
 
+    initClipboard(row.find('.copy_message')[0]);
+
     form.keydown(_.partial(handle_edit_keydown, false));
 
     var message_edit_content = row.find('textarea.message_edit_content');
     var message_edit_topic = row.find('input.message_edit_topic');
     var message_edit_topic_propagate = row.find('select.message_edit_topic_propagate');
     var message_edit_countdown_timer = row.find('.message_edit_countdown_timer');
-    var copy_message = row.find('.copy_message');
 
     if (editability === editability_types.NO) {
         message_edit_content.prop("readonly", "readonly");
         message_edit_topic.prop("readonly", "readonly");
-        initClipboard(copy_message[0]);
     } else if (editability === editability_types.NO_LONGER) {
         // You can currently only reach this state in non-streams. If that
         // changes (e.g. if we stop allowing topics to be modified forever
@@ -213,20 +212,12 @@ function edit_message(row, raw_content) {
         // row.find('input.message_edit_topic') as well.
         message_edit_content.prop("readonly", "readonly");
         message_edit_countdown_timer.text(i18n.t("View source"));
-        initClipboard(copy_message[0]);
     } else if (editability === editability_types.TOPIC_ONLY) {
         message_edit_content.prop("readonly", "readonly");
         // Hint why you can edit the topic but not the message content
         message_edit_countdown_timer.text(i18n.t("Topic editing only"));
-        initClipboard(copy_message[0]);
     } else if (editability === editability_types.FULL) {
-        copy_message.remove();
-        var edit_id = "#message_edit_content_" + rows.id(row);
-        var listeners = resize.watch_manual_resize(edit_id);
-        if (listeners) {
-            currently_editing_messages[rows.id(row)].listeners = listeners;
-        }
-        composebox_typeahead.initialize_compose_typeahead(edit_id, {emoji: true, stream: true});
+        composebox_typeahead.initialize_compose_typeahead("#message_edit_content", {emoji: true, stream: true});
     }
 
     // Add tooltip
@@ -365,16 +356,6 @@ exports.end = function (row) {
         currently_editing_messages[message.id] !== undefined) {
         var scroll_by = currently_editing_messages[message.id].scrolled_by;
         message_viewport.scrollTop(message_viewport.scrollTop() - scroll_by);
-
-        // Clean up resize event listeners
-        var listeners = currently_editing_messages[message.id].listeners;
-        var edit_box = document.querySelector("#message_edit_content_" + message.id);
-        if (listeners !== undefined) {
-            // Event listeners to cleanup are only set in some edit types
-            edit_box.removeEventListener("mousedown", listeners[0]);
-            document.body.removeEventListener("mouseup", listeners[1]);
-        }
-
         delete currently_editing_messages[message.id];
         current_msg_list.hide_edit_message(row);
     }

@@ -1,13 +1,5 @@
 <div id="settings_page" class="new-style overlay-content">
-    <div class="settings-header mobile">
-        <div class="icon-vector-chevron-left"></div>
-        <h1>{{ _('Settings') }}<span class="section"></span></h1>
-        <div class="exit">
-            <span class="exit-sign">&times;</span>
-        </div>
-        <div class="clear-float"></div>
-    </div>
-    <div class="sidebar left">
+    <div class="sidebar">
         <div class="sidebar-list dark-grey small-text">
             <div class="center tab-container"></div>
             <ul class="settings-list">
@@ -48,14 +40,11 @@
                     <i class="icon icon-vector-beaker"></i>
                     <div class="text">{{ _('Organization settings') }}</div>
                 </li>
-                <li class="admin" tabindex="1" data-section="organization-permissions">
-                    <i class="icon icon-vector-lock"></i>
-                    <div class="text">{{ _('Organization permissions') }}</div>
-                </li>
                 <li class="admin" tabindex="1" data-section="emoji-settings">
                     <i class="icon icon-vector-smile"></i>
                     <div class="text">{{ _('Custom emoji') }}</div>
                 </li>
+                {% if is_admin %}
                 <li class="admin" tabindex="1" data-section="auth-methods">
                     <i class="icon icon-vector-lock"></i>
                     <div class="text">{{ _('Authentication methods') }}</div>
@@ -64,22 +53,18 @@
                     <i class="icon icon-vector-user"></i>
                     <div class="text">{{ _('Users') }}</div>
                 </li>
-                {% if is_admin %}
                 <li class="admin" tabindex="1" data-section="deactivated-users-admin">
                     <i class="icon icon-vector-trash"></i>
                     <div class="text">{{ _('Deactivated users') }}</div>
                 </li>
-                {% endif %}
                 <li class="admin" tabindex="1" data-section="bot-list-admin">
                     <i class="icon icon-vector-github"></i>
                     <div class="text">{{ _('Bots') }}</div>
                 </li>
-                {% if is_admin %}
                 <li class="admin" tabindex="1" data-section="streams-list-admin">
                     <i class="icon icon-vector-exchange"></i>
                     <div class="text">{{ _('Delete streams') }}</div>
                 </li>
-                {% endif %}
                 <li class="admin" tabindex="1" data-section="default-streams-list">
                     <i class="icon icon-vector-exchange"></i>
                     <div class="text">{{ _('Default streams') }}</div>
@@ -88,6 +73,7 @@
                     <i class="icon icon-vector-font"></i>
                     <div class="text">{{ _('Filter settings') }}</div>
                 </li>
+                {% endif %}
             </ul>
         </div>
 
@@ -100,9 +86,9 @@
             </ul>
         </div>
     </div>
-    <div class="content-wrapper right">
+    <div class="content-wrapper">
         <div class="settings-header">
-            <h1>{{ _('Settings') }}<span class="section"></span></h1>
+            <h1>{{ _('Settings') }}</h1>
             <div class="exit">
                 <span class="exit-sign">&times;</span>
             </div>

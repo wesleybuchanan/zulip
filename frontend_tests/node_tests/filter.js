@@ -1,3 +1,5 @@
+global.stub_out_jquery();
+
 add_dependencies({
     people: 'js/people.js',
     stream_data: 'js/stream_data.js',
@@ -210,14 +212,6 @@ function get_predicate(operators) {
     return new Filter(operators).predicate();
 }
 
-function make_sub(name, stream_id) {
-    var sub = {
-        name: name,
-        stream_id: stream_id,
-    };
-    global.stream_data.add_sub(name, sub);
-}
-
 (function test_predicate_basics() {
     // Predicates are functions that accept a message object with the message
     // attributes (not content), and return true if the message belongs in a
@@ -226,21 +220,11 @@ function make_sub(name, stream_id) {
     //
     // To keep these tests simple, we only pass objects with a few relevant attributes
     // rather than full-fledged message objects.
-
-    var stream_id = 42;
-    make_sub('Foo', stream_id);
     var predicate = get_predicate([['stream', 'Foo'], ['topic', 'Bar']]);
-
-    assert(predicate({type: 'stream', stream_id: stream_id, subject: 'bar'}));
-    assert(!predicate({type: 'stream', stream_id: stream_id, subject: 'whatever'}));
-    assert(!predicate({type: 'stream', stream_id: 9999999}));
+    assert(predicate({type: 'stream', stream: 'foo', subject: 'bar'}));
+    assert(!predicate({type: 'stream', stream: 'foo', subject: 'whatever'}));
+    assert(!predicate({type: 'stream', stream: 'wrong'}));
     assert(!predicate({type: 'private'}));
-
-    // For old streams that we are no longer subscribed to, we may not have
-    // a sub, but these should still match by stream name.
-    predicate = get_predicate([['stream', 'old-Stream'], ['topic', 'Bar']]);
-    assert(predicate({type: 'stream', stream: 'Old-stream', subject: 'bar'}));
-    assert(!predicate({type: 'stream', stream: 'no-match', subject: 'whatever'}));
 
     predicate = get_predicate([['search', 'emoji']]);
     assert(predicate({}));
@@ -268,9 +252,8 @@ function make_sub(name, stream_id) {
     predicate = get_predicate([['in', 'all']]);
     assert(predicate({}));
 
-    var unknown_stream_id = 999;
     predicate = get_predicate([['in', 'home']]);
-    assert(!predicate({stream_id: unknown_stream_id, stream: 'unknown'}));
+    assert(!predicate({stream: 'unsub'}));
     assert(predicate({type: 'private'}));
     global.page_params.narrow_stream = 'kiosk';
     assert(predicate({stream: 'kiosk'}));
@@ -316,19 +299,16 @@ function make_sub(name, stream_id) {
     var predicate;
     var narrow;
 
-    var social_stream_id = 555;
-    make_sub('social', social_stream_id);
-
     narrow = [
         {operator: 'stream', operand: 'social', negated: true},
     ];
     predicate = new Filter(narrow).predicate();
-    assert(predicate({type: 'stream', stream_id: 999999}));
-    assert(!predicate({type: 'stream', stream_id: social_stream_id}));
+    assert(predicate({type: 'stream', stream: 'devel'}));
+    assert(!predicate({type: 'stream', stream: 'social'}));
 }());
 
 (function test_mit_exceptions() {
-    global.page_params.realm_is_zephyr_mirror_realm = true;
+    global.page_params.is_zephyr_mirror_realm = true;
 
     var predicate = get_predicate([['stream', 'Foo'], ['topic', 'personal']]);
     assert(predicate({type: 'stream', stream: 'foo', subject: 'personal'}));

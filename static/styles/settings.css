@@ -39,16 +39,6 @@ label {
     min-width: 200px;
 }
 
-.new-style .grid .user-name-section label {
-    min-width: 120px;
-}
-
-.new-style .grid .user-name-section .warning {
-    display: block;
-    width: calc(100% - 20px - 5px);
-    text-align: right;
-}
-
 .new-style .grid .warning {
     display: inline-block;
     vertical-align: top;
@@ -74,35 +64,15 @@ label {
 
 .user-avatar-section,
 .realm-icon-section {
-    position: relative;
-
-    overflow: hidden;
-}
-
-.user-avatar-section .avatar-controls,
-.realm-icon-section .avatar-controls {
+    float: right;
     background-color: #fff;
-    padding: 10px;
-    margin-left: 10px;
-}
-
-.realm-icon-section {
-    float: none;
-    display: inline-block;
+    margin: 20px 0px;
+    padding: 20px;
 }
 
 .user-avatar-section .inline-block,
 .realm-icon-section .inline-block {
-    margin: 10px 20px 0px 0px;
-    vertical-align: top;
-
-    border-radius: 4px;
-    box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-}
-
-.admin-realm-description {
-    height: 16em;
-    width: 36em;
+    display: block;
 }
 
 .padded-container {
@@ -148,13 +118,15 @@ td .button {
 
 .settings-section {
     display: none;
-
-    width: calc(100% - 40px);
+    background-color: #fafafa;
+    border-radius: 2px;
     margin: 20px;
+    border: 1px solid #dfdfdf;
+    border-top: 5px solid #dfdfdf;
 }
 
 #organization .settings-section {
-    display: inline-block;
+    display: block;
 }
 
 .settings-wrapper {
@@ -179,6 +151,7 @@ td .button {
 }
 
 .settings-section form {
+    padding: 0px 20px;
     margin: 0;
 }
 
@@ -188,33 +161,6 @@ td .button {
 
 .settings-section .table.table-condensed.table-striped tbody {
     border-bottom: none;
-}
-
-.settings-section .table-striped thead th {
-    background-color: inherit;
-    color: inherit;
-    border-top: 1px solid #dddddd !important;
-}
-
-.settings-section input[type=text].search {
-    float: right;
-    margin: 2px 5px 2px 0px;
-    padding: 2px 5px;
-    font-size: 0.9em;
-}
-
-.settings-section .settings-section-title {
-    padding: 4px;
-}
-
-.settings-section .settings-section-title .table-title {
-    display: inline-block;
-    padding: 6px 0px;
-    margin-left: 5px;
-}
-
-.settings-section .settings-section-title .table-title i {
-    margin-right: 5px;
 }
 
 .dynamic-input {
@@ -272,14 +218,6 @@ td .button {
 .admin-restricted-to-domain input[type=checkbox] + .inline,
 input[type=checkbox] + .inline-block {
     margin-left: 10px;
-}
-
-.admin-realm-form h3 {
-    margin-bottom: 0px;
-}
-
-.organization-settings-parent div:first-of-type {
-    margin-top: 10px;
 }
 
 #user-settings-avatar,
@@ -526,11 +464,6 @@ input[type=checkbox].inline-block {
     margin: 20px 0 0 0;
 }
 
-.progressive-table-wrapper {
-    max-height: calc(95vh - 200px);
-    overflow: auto;
-}
-
 .bots_list {
     display: none;
     list-style-type: none;
@@ -595,7 +528,7 @@ input[type=checkbox].inline-block {
 .bots_list .bot-information-box {
     position: relative;
     display: inline-block;
-    width: calc(50% - 10px);
+    width: calc(33.3% - 10px);
     max-height: 180px;
     margin: 5px;
 
@@ -726,18 +659,11 @@ input[type=checkbox].inline-block {
     position: inherit;
 }
 
+#alert_words_list,
 #attachments_list {
     list-style-type: none;
     margin: auto;
     background-color: #fff;
-}
-
-#alert_words_list {
-    margin: 0;
-}
-
-#alert_words_list li {
-    list-style-type: none;
 }
 
 #alert_words_list li.alert-word-item:last-child {
@@ -772,12 +698,6 @@ input[type=checkbox].inline-block {
     box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
     width: 200px;
     height: 200px;
-
-    transition: all 0.3s ease;
-}
-
-#user-settings-avatar:hover {
-    -webkit-filter: brightness(0.5);
 }
 
 #realm-settings-icon {
@@ -785,6 +705,7 @@ input[type=checkbox].inline-block {
     box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
     width: 100px;
     height: 100px;
+    margin-left: 25%;
 }
 /* -- new settings overlay -- */
 #settings_page {
@@ -794,8 +715,7 @@ input[type=checkbox].inline-block {
 #settings_page {
     height: 95vh;
     width: 97vw;
-    max-width: 1024px;
-    margin: 2.5vh auto;
+    margin: 2.5vh 1.5vw;
     background-color: #fff;
     overflow: hidden;
     border-radius: 4px;
@@ -843,43 +763,12 @@ input[type=checkbox].inline-block {
     border-bottom: 1px solid #ddd;
 }
 
-#settings_page .content-wrapper .settings-header h1 .section {
-    font-weight: 400;
-    color: #666;
-}
-
-#settings_page .settings-header.mobile {
-    display: none;
-    border-bottom: 1px solid #ddd;
-}
-
-.settings-header.mobile .icon-vector-chevron-left {
-    float: left;
-    position: relative;
-    top: 14px;
-    left: 10px;
-}
-
 #settings_page .content-wrapper #settings_content {
-    position: relative;
     width: 100%;
     height: calc(100% - 45px);
 
     float: left;
     overflow-y: auto;
-    overflow-x: hidden;
-
-    background-color: #fafafa;
-}
-
-#settings_page .table-striped thead th {
-    background-color: inherit;
-    color: inherit;
-}
-
-#settings_page input.search {
-    font-size: 0.9rem;
-    margin: 0px 0px 20px 0px;
 }
 
 #settings_page .form-sidebar {
@@ -1087,36 +976,49 @@ input[type=text]#settings_search {
     bottom: 0px;
 }
 /* -- end new settings overlay -- */
+@media (min-width: 1850px) {
+    .bots_list .bot-information-box {
+        width: calc(20% - 10px);
+    }
+}
+
+@media (min-width: 1500px) and (max-width: 1850px) {
+    .bots_list .bot-information-box {
+        width: calc(25% - 10px);
+    }
+}
+
 @media (max-width: 1215px) {
+    .bots_list .bot-information-box {
+        width: calc(50% - 10px);
+    }
+
     .user-avatar-section,
     .realm-icon-section {
         float: none;
         display: inline-block;
     }
-}
 
-@media (max-width: 786px) {
-    #user-settings-avatar {
-        width: 220px;
-        height: 220px;
+    .user-avatar-section .inline-block,
+    .realm-icon-section .inline-block {
+        display: inline-block;
+        vertical-align: top;
+    }
+
+    .user-avatar-section .inline-block {
+        margin: 0px 10px;
+    }
+
+    .realm-icon-section .inline-block {
+        margin: 0px 25px;
     }
 }
 
-@media (max-width: 700px) {
-    #settings_page .settings-header.mobile {
+@media (max-width: 856px) {
+    .user-avatar-section .inline-block,
+    .realm-icon-section .inline-block {
         display: block;
-    }
-
-    #settings_page .content-wrapper .settings-header {
-        display: none;
-    }
-
-    #settings_page .content-wrapper #settings_content {
-        height: 100%;
-    }
-
-    #settings_page .content-wrapper.right {
-        top: 47px;
+        margin: 0;
     }
 }
 
@@ -1159,34 +1061,6 @@ input[type=text]#settings_search {
     border-bottom: none;
 }
 
-#admin-user-list .last_active {
-    width: 100px;
-}
-
-thead .actions {
-    min-width: 230px;
-}
-
-#settings_page .display-settings-form select {
-    width: 245px;
-}
-
-#attachments_list:empty {
-    padding: 10px;
-}
-
-.required-text:empty::after {
-    content: attr(data-empty);
-    display: block;
-
-    font-style: italic;
-    color: #aaa;
-}
-
-/* This is a hack; essentially the issue is that if the ::after element is on
-   a table, then the width of the ::after @ 100% will be the width of the first
-   table column, so we'll just make the ::after 200% to add more space.
-   This is NOT a pattern that should be repeated or built on for other cases. */
-.required-text.thick:empty::after {
-    width: 200%;
+#admin_users_table .last_active {
+    width: 15%;
 }

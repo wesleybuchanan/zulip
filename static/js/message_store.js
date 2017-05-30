@@ -10,40 +10,55 @@ exports.get = function get(message_id) {
 };
 
 exports.get_pm_emails = function (message) {
-
-    function email(user_id) {
-        var person = people.get_person_from_user_id(user_id);
-        if (!person) {
-            blueslip.error('Unknown user id ' + user_id);
-            return '?';
-        }
-        return person.email;
+    var recipient;
+    var i;
+    var other_recipients = _.filter(message.display_recipient,
+                                  function (element) {
+                                      return !people.is_current_user(element.email);
+                                  });
+    if (other_recipients.length === 0) {
+        // private message with oneself
+        return message.display_recipient[0].email;
     }
 
-    var user_ids = people.pm_with_user_ids(message);
-    var emails = _.map(user_ids, email).sort();
+    recipient = other_recipients[0].email;
 
-    return emails.join(', ');
+    for (i = 1; i < other_recipients.length; i += 1) {
+        var email = other_recipients[i].email;
+        recipient += ', ' + email;
+    }
+    return recipient;
 };
 
 exports.get_pm_full_names = function (message) {
-
-    function name(user_id) {
-        var person = people.get_person_from_user_id(user_id);
-        if (!person) {
-            blueslip.error('Unknown user id ' + user_id);
-            return '?';
+    function name(recip) {
+        if (recip.id) {
+            var person = people.get_person_from_user_id(recip.id);
+            if (person) {
+                return person.full_name;
+            }
         }
-        return person.full_name;
+        return recip.full_name;
     }
 
-    var user_ids = people.pm_with_user_ids(message);
-    var names = _.map(user_ids, name).sort();
+    var other_recipients = _.filter(message.display_recipient,
+                                  function (element) {
+                                      return !people.is_current_user(element.email);
+                                  });
+
+    if (other_recipients.length === 0) {
+        // private message with oneself
+        return name(message.display_recipient[0]);
+    }
+
+    var names = _.map(other_recipients, name).sort();
 
     return names.join(', ');
 };
 
 exports.process_message_for_recent_private_messages = function (message) {
+    var current_timestamp = 0;
+
     var user_ids = people.pm_with_user_ids(message);
     if (!user_ids) {
         return;
@@ -55,40 +70,22 @@ exports.process_message_for_recent_private_messages = function (message) {
         blueslip.warn('Unknown reply_to in message: ' + user_ids_string);
         return;
     }
-    exports.insert_recent_private_message(user_ids_string, message.timestamp);
+
+    // If this conversation is already tracked, we'll replace with new timestamp,
+    // so remove it from the current list.
+    exports.recent_private_messages = _.filter(exports.recent_private_messages,
+                                               function (recent_pm) {
+        return recent_pm.user_ids_string !== user_ids_string;
+    });
+
+    var new_conversation = {user_ids_string: user_ids_string,
+                            timestamp: Math.max(message.timestamp, current_timestamp)};
+
+    exports.recent_private_messages.push(new_conversation);
+    exports.recent_private_messages.sort(function (a, b) {
+        return b.timestamp - a.timestamp;
+    });
 };
-
-exports.insert_recent_private_message = (function () {
-    var recent_timestamps = new Dict({fold_case: true}); // key is user_ids_string
-
-    return function (user_ids_string, timestamp) {
-        var conversation = recent_timestamps.get(user_ids_string);
-
-        if (conversation === undefined) {
-            // This is a new user, so create a new object.
-            conversation = {
-                user_ids_string: user_ids_string,
-                timestamp: timestamp,
-            };
-            recent_timestamps.set(user_ids_string, conversation);
-
-            // Optimistically insert the new message at the front, since that
-            // is usually where it belongs, but we'll re-sort.
-            exports.recent_private_messages.unshift(conversation);
-        } else {
-            if (conversation.timestamp >= timestamp) {
-                return; // don't backdate our conversation
-            }
-
-            // update our timestamp
-            conversation.timestamp = timestamp;
-        }
-
-        exports.recent_private_messages.sort(function (a, b) {
-            return b.timestamp - a.timestamp;
-        });
-    };
-}());
 
 exports.set_topic_edit_properties = function (message) {
     message.always_visible_topic_edit = false;
@@ -156,7 +153,8 @@ exports.add_message_metadata = function (message) {
                 exports.get_pm_emails(message));
         message.display_reply_to = exports.get_pm_full_names(message);
         message.pm_with_url = people.pm_with_url(message);
-        message.to_user_ids = people.pm_reply_user_string(message);
+        message.to_user_ids = people.emails_strings_to_user_ids_string(
+                message.reply_to);
 
         exports.process_message_for_recent_private_messages(message);
         break;

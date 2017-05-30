@@ -352,13 +352,8 @@ form#add_new_subscription {
 }
 
 .subscriber_list_add {
-    width: 100%;
     margin: 10px auto;
-    text-align: right;
-}
-
-.subscriber_list_add .search {
-    float: left;
+    text-align: center;
 }
 
 .subscriber_list_add .form-inline {
@@ -430,8 +425,9 @@ form#add_new_subscription {
     border-bottom: 1px solid #ddd;
 }
 
-.subscriptions-header .icon-vector-chevron-left,
-#settings_overlay_container .settings-header.mobile .icon-vector-chevron-left {
+.subscriptions-header .icon-vector-chevron-left {
+    display: none;
+
     position: relative;
     transform: translate(-50px, 0px);
     opacity: 0;
@@ -445,8 +441,7 @@ form#add_new_subscription {
     transition: all 0.3s ease;
 }
 
-.subscriptions-header.slide-left .icon-vector-chevron-left,
-#settings_overlay_container .settings-header.mobile.slide-left .icon-vector-chevron-left {
+.subscriptions-header.slide-left .icon-vector-chevron-left {
     transform: translate(-0px, 0px);
     opacity: 1;
 }
@@ -589,10 +584,6 @@ form#add_new_subscription {
 .stream-creation-body #make-invite-only label span.icon-vector-lock {
     margin-left: 15px;
     margin-right: 11px;
-}
-
-#announce-new-stream {
-    margin-top: 5px;
 }
 
 .stream-creation-body #announce-new-stream div[class^="icon"] {
@@ -960,9 +951,7 @@ form#add_new_subscription {
     }
 
     #subscription_overlay .left,
-    #subscription_overlay .right,
-    #settings_page .left,
-    #settings_page .right {
+    #subscription_overlay .right {
         position: absolute;
         display: block;
         margin: 0;
@@ -980,8 +969,7 @@ form#add_new_subscription {
         text-align: left;
     }
 
-    #subscription_overlay .right,
-    #settings_page .right {
+    #subscription_overlay .right {
         position: absolute;
         left: 101%;
 
@@ -994,8 +982,7 @@ form#add_new_subscription {
         z-index: 10;
     }
 
-    #subscription_overlay .right.show,
-    #settings_page .right.show {
+    #subscription_overlay .right.show {
         left: 0%;
     }
 

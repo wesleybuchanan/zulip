@@ -28,13 +28,22 @@ class WikipediaHandler(object):
 
     def handle_message(self, message, client, state_handler):
         bot_response = self.get_bot_wiki_response(message, client)
-        client.send_reply(message, bot_response)
+        if message['type'] == 'private':
+            client.send_message(dict(
+                type='private',
+                to=message['sender_email'],
+                content=bot_response,
+            ))
+        else:
+            client.send_message(dict(
+                type='stream',
+                to=message['display_recipient'],
+                subject=message['subject'],
+                content=bot_response,
+            ))
 
     def get_bot_wiki_response(self, message, client):
-        help_text = 'Please enter your message after @mention-bot'
         query = message['content']
-        if query == '':
-            return help_text
         query_wiki_link = ('https://en.wikipedia.org/w/api.php?action=query&'
                            'list=search&srsearch=%s&format=json' % (query,))
         try:

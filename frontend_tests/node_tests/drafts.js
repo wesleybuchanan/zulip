@@ -99,22 +99,19 @@ var draft_2 = {
 
 (function test_snapshot_message() {
     function stub_draft(draft) {
-        global.compose_state.get_message_type = function () {
+        global.compose_state.composing = function () {
             return draft.type;
         };
-        global.compose_state.composing = function () {
-            return !!draft.type;
-        };
-        global.compose_state.message_content = function () {
+        global.compose.message_content = function () {
             return draft.content;
         };
         global.compose_state.recipient = function () {
             return draft.private_message_recipient;
         };
-        global.compose_state.stream_name = function () {
+        global.compose.stream_name = function () {
             return draft.stream;
         };
-        global.compose_state.subject = function () {
+        global.compose.subject = function () {
             return draft.subject;
         };
     }

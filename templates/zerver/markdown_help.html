@@ -1,6 +1,6 @@
 <div class="overlay-modal hide" id="markdown-help" tabindex="-1" role="dialog"
     aria-labelledby="markdown-help-label" aria-hidden="true">
-    <div class="modal-body" tabindex="1">
+    <div class="modal-body">
         <div id="markdown-instructions">
             <table class="table table-striped table-condensed table-rounded table-bordered help-table">
                 <thead><tr>
@@ -26,24 +26,15 @@
                         <td><a href="https://zulip.org" target="_blank">Zulip website</a></td>
                     </tr>
                     <tr>
-                        <td>* Milk<br/>
-                            * Tea<br/>
-                            &nbsp;&nbsp;* Green tea<br/>
-                            &nbsp;&nbsp;* Black tea<br/>
-                            &nbsp;&nbsp;* Oolong tea<br/>
-                            * Coffee
+                        <td>* Archimedes<br/>
+                            * Bohr<br/>
+                            * Curie
                         </td>
                         <td>
                             <ul>
-                                <li>Milk</li>
-                                <li>Tea
-                                    <ul>
-                                        <li>Green tea</li>
-                                        <li>Black tea</li>
-                                        <li>Oolong tea</li>
-                                    </ul>
-                                </li>
-                                <li>Coffee</li>
+                                <li>Archimedes</li>
+                                <li>Bohr</li>
+                                <li>Curie</li>
                             </ul>
                         </td>
                     </tr>
@@ -63,11 +54,6 @@
                     <tr>
                         <td>#**streamName**</td>
                         <td><a>#streamName</a> (links to a stream)</td>
-                    </tr>
-                    <tr>
-                        <td>/me is busy working<br/>
-                          (send a status message as user Iago)</td>
-                        <td><span class="sender_name-in-status">Iago</span> is busy working</td>
                     </tr>
                     <tr>
                         <td>Some inline `code`</td>
@@ -103,24 +89,10 @@ def zulip():
 
                     </tr>
                     <tr>
-                    <td class="preserve_spaces">```quote
+                    <td class="preserve_spaces">``` quote
 Quoted block
 ```</td>
                     <td><blockquote><p>Quoted block</p></blockquote></td>
-                    </tr>
-                    <tr>
-                        <td>Some inline math $$e^{i \pi } + 1 = 0$$</td>
-                        <td>
-                            Some inline math <span class="katex"><span class="katex-mathml"><math><semantics><mrow><msup><mi>e</mi><mrow><mi>i</mi><mi>π</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">e^{i \pi } + 1 = 0</annotation></semantics></math></span><span aria-hidden="true" class="katex-html"><span class="strut" style="height:0.824664em;"></span><span class="strut bottom" style="height:0.907994em;vertical-align:-0.08333em;"></span><span class="base textstyle uncramped"><span class="mord"><span class="mord mathit">e</span><span class="msupsub"><span class="vlist"><span style="top:-0.363em;margin-right:0.05em;"><span class="fontsize-ensurer reset-size5 size5"><span style="font-size:0em;">&#8203;</span></span><span class="reset-textstyle scriptstyle uncramped mtight"><span class="mord scriptstyle uncramped mtight"><span class="mord mathit mtight">i</span><span class="mord mathit mtight" style="margin-right:0.03588em;">π</span></span></span></span><span class="baseline-fix"><span class="fontsize-ensurer reset-size5 size5"><span style="font-size:0em;">&#8203;</span></span>&#8203;</span></span></span></span><span class="mbin">+</span><span class="mord mathrm">1</span><span class="mrel">=</span><span class="mord mathrm">0</span></span></span></span>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="preserve_spaces">```math
-\int_{0}^{1} f(x) dx
-```</td>
-                        <td>
-                            <span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><msubsup><mo>∫</mo><mrow><mn>0</mn></mrow><mrow><mn>1</mn></mrow></msubsup><mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo><mi>d</mi><mi>x</mi></mrow><annotation encoding="application/x-tex">\int_{0}^{1} f(x) dx</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="strut" style="height:1.4251079999999998em;"></span><span class="strut bottom" style="height:2.337358em;vertical-align:-0.91225em;"></span><span class="base displaystyle textstyle uncramped"><span class="mop"><span class="mop op-symbol large-op" style="margin-right:0.44445em;top:-0.0011249999999999316em;">∫</span><span class="msupsub"><span class="vlist"><span style="top:0.91225em;margin-left:-0.44445em;margin-right:0.05em;"><span class="fontsize-ensurer reset-size5 size5"><span style="font-size:0em;">&#8203;</span></span><span class="reset-textstyle scriptstyle cramped mtight"><span class="mord scriptstyle cramped mtight"><span class="mord mathrm mtight">0</span></span></span></span><span style="top:-0.9739999999999999em;margin-right:0.05em;"><span class="fontsize-ensurer reset-size5 size5"><span style="font-size:0em;">&#8203;</span></span><span class="reset-textstyle scriptstyle uncramped mtight"><span class="mord scriptstyle uncramped mtight"><span class="mord mathrm mtight">1</span></span></span></span><span class="baseline-fix"><span class="fontsize-ensurer reset-size5 size5"><span style="font-size:0em;">&#8203;</span></span>&#8203;</span></span></span></span><span class="mord mathit" style="margin-right:0.10764em;">f</span><span class="mopen">(</span><span class="mord mathit">x</span><span class="mclose">)</span><span class="mord mathit">d</span><span class="mord mathit">x</span></span></span></span></span>
-                        </td>
                     </tr>
                     <tr>
                         <td colspan="2">{% trans %}You can also make <a target="_blank"
@@ -132,7 +104,5 @@ Quoted block
                 </tbody>
             </table>
         </div>
-    <hr/>
-    <a href="/help/format-your-message-using-markdown" target="_blank">Detailed message formatting documentation</a>
     </div>
 </div>

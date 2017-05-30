@@ -6,7 +6,7 @@ from typing import cast, AbstractSet, Any, Callable, Dict, List, \
 
 from django.utils.translation import ugettext as _
 from django.conf import settings
-from django.utils.timezone import now as timezone_now
+from django.utils import timezone
 from collections import deque
 import datetime
 import os
@@ -232,7 +232,7 @@ def compute_full_event_type(event):
 class EventQueue(object):
     def __init__(self, id):
         # type: (str) -> None
-        self.queue = deque() # type: ignore # type signature should Deque[Dict[str, Any]] but we need https://github.com/python/mypy/pull/2845 to be merged
+        self.queue = deque() # type: deque[Dict[str, Any]]
         self.next_event_id = 0 # type: int
         self.id = id # type: str
         self.virtual_events = {} # type: Dict[str, Dict[str, Any]]
@@ -678,7 +678,7 @@ def receiver_is_idle(user_profile_id, realm_presences):
     else:
         active_datetime = timestamp_to_datetime(latest_active_timestamp)
         # 140 seconds is consistent with presence.js:OFFLINE_THRESHOLD_SECS
-        idle = timezone_now() - active_datetime > datetime.timedelta(seconds=140)
+        idle = timezone.now() - active_datetime > datetime.timedelta(seconds=140)
 
     return off_zulip or idle
 

@@ -19,10 +19,9 @@ new_shebang_bytes = new_shebang.encode()
 
 with tarfile.open(fileobj=stdin, mode='r|*') as in_tar, \
         tarfile.open(fileobj=stdout, mode='w', format=tarfile.PAX_FORMAT, pax_headers=in_tar.pax_headers) as out_tar:
-    for info in in_tar:
+    for info in in_tar: # type: ignore # https://github.com/python/typeshed/pull/693
         if info.isfile():
             file = in_tar.extractfile(info)
-            assert(file is not None) # this assert convinces mypy that it's okay to do file.read()
             data = file.read()
             if data.startswith(old_shebang_bytes + b' ') or data.startswith(old_shebang_bytes + b'\n'):
                 print('editing', info.name, file=sys.stderr)

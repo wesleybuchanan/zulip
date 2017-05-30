@@ -15,19 +15,6 @@ exports.is_in_progress = function () {
 };
 
 function preserve_state(send_after_reload, save_pointer, save_narrow, save_compose) {
-    if (!localstorage.supported()) {
-        // If local storage is not supported by the browser, we can't
-        // save the browser's position across reloads (since there's
-        // no secure way to pass that state in a signed fashion to the
-        // next instance of the browser client).
-        //
-        // So we jure return here and let the reload proceed without
-        // having preserved state.  We keep the hash the same so we'll
-        // at least save their narrow state.
-        blueslip.log("Can't preserve state; no local storage.");
-        return;
-    }
-
     if (send_after_reload === undefined) {
         send_after_reload = 0;
     }
@@ -35,18 +22,17 @@ function preserve_state(send_after_reload, save_pointer, save_narrow, save_compo
     url += "+csrf_token=" + encodeURIComponent(csrf_token);
 
     if (save_compose) {
-        var msg_type = compose_state.get_message_type();
-        if (msg_type === 'stream') {
+        if (compose_state.composing() === 'stream') {
             url += "+msg_type=stream";
-            url += "+stream=" + encodeURIComponent(compose_state.stream_name());
-            url += "+subject=" + encodeURIComponent(compose_state.subject());
-        } else if (msg_type === 'private') {
+            url += "+stream=" + encodeURIComponent(compose.stream_name());
+            url += "+subject=" + encodeURIComponent(compose.subject());
+        } else if (compose_state.composing() === 'private') {
             url += "+msg_type=private";
             url += "+recipient=" + encodeURIComponent(compose_state.recipient());
         }
 
-        if (msg_type) {
-            url += "+msg=" + encodeURIComponent(compose_state.message_content());
+        if (compose_state.composing()) {
+            url += "+msg=" + encodeURIComponent(compose.message_content());
         }
     }
 
@@ -59,7 +45,7 @@ function preserve_state(send_after_reload, save_pointer, save_narrow, save_compo
 
     if (save_narrow) {
         var row = home_msg_list.selected_row();
-        if (!narrow_state.active()) {
+        if (!narrow.active()) {
             if (row.length > 0) {
                 url += "+offset=" + row.offset().top;
             }
@@ -83,10 +69,6 @@ function preserve_state(send_after_reload, save_pointer, save_narrow, save_compo
     }
     url += "+oldhash=" + encodeURIComponent(oldhash);
 
-    var ls = localstorage();
-    // Delete all the previous preserved states.
-    ls.removeRegex('reload:\\d+');
-
     // To protect the browser against CSRF type attacks, the reload
     // logic uses a random token (to distinct this browser from
     // others) which is passed via the URL to the browser (post
@@ -96,6 +78,7 @@ function preserve_state(send_after_reload, save_pointer, save_narrow, save_compo
     // TODO: Remove the now-unnecessary URL-encoding logic above and
     // just pass the actual data structures through local storage.
     var token = util.random_int(0, 1024*1024*1024*1024);
+    var ls = localstorage();
 
     ls.set("reload:" + token, url);
     window.location.replace("#reload:" + token);
@@ -119,12 +102,7 @@ exports.initialize = function reload__initialize() {
     var ls = localstorage();
     var fragment = ls.get(hash_fragment);
     if (fragment === undefined) {
-        // Since this can happen sometimes with hand-reloading, it's
-        // not really worth throwing an exception if these don't
-        // exist, but be log it so that it's available for future
-        // debugging if an exception happens later.
-        blueslip.info("Invalid hash change reload token");
-        hashchange.changehash("");
+        blueslip.error("Invalid hash change reload token");
         return;
     }
     ls.remove(hash_fragment);
@@ -153,8 +131,8 @@ exports.initialize = function reload__initialize() {
     var pointer = parseInt(vars.pointer, 10);
 
     if (pointer) {
-        page_params.orig_initial_pointer = page_params.pointer;
-        page_params.pointer = pointer;
+        page_params.orig_initial_pointer = page_params.initial_pointer;
+        page_params.initial_pointer = pointer;
     }
     var offset = parseInt(vars.offset, 10);
     if (offset) {
@@ -188,7 +166,7 @@ function do_reload_app(send_after_reload, save_pointer, save_narrow, save_compos
     }
 
     if (message === undefined) {
-        message = "Reloading ...";
+        message = "Reloading";
     }
 
     // TODO: We need a better API for showing messages.

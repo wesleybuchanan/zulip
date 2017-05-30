@@ -163,7 +163,6 @@ def query_chunker(queries, id_collector=None, chunk_size=1000, db_chunk_size=Non
         q = q.order_by('id')
         min_id = -1
         while True:
-            assert db_chunk_size is not None  # Hint for mypy, but also workaround for mypy bug #3442.
             rows = list(q.filter(id__gt=min_id)[0:db_chunk_size])
             if len(rows) == 0:
                 break
@@ -208,7 +207,7 @@ def is_subdomain_root_or_alias(request):
     return not subdomain or subdomain in settings.ROOT_SUBDOMAIN_ALIASES
 
 def check_subdomain(realm_subdomain, user_subdomain):
-    # type: (Optional[Text], Optional[Text]) -> bool
+    # type: (Text, Text) -> bool
     if settings.REALMS_HAVE_SUBDOMAINS and realm_subdomain is not None:
         if (realm_subdomain == "" and user_subdomain is None):
             return True
@@ -224,12 +223,3 @@ def split_by(array, group_size, filler):
     """
     args = [iter(array)] * group_size
     return list(map(list, zip_longest(*args, fillvalue=filler)))
-
-def is_remote_server(identifier):
-    # type: (Text) -> bool
-    """
-    This function can be used to identify the source of API auth
-    request. We can have two types of sources, Remote Zulip Servers
-    and UserProfiles.
-    """
-    return "@" not in identifier

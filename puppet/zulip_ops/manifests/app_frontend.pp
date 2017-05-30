@@ -9,14 +9,6 @@ class zulip_ops::app_frontend {
                    ]
   package { $app_packages: ensure => "installed" }
 
-  file { "/etc/logrotate.d/zulip":
-    ensure => file,
-    owner  => "root",
-    group  => "root",
-    mode => 644,
-    source => "puppet:///modules/zulip/logrotate/zulip",
-  }
-
   file { '/etc/log2zulip.conf':
     ensure     => file,
     owner      => "zulip",

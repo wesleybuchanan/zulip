@@ -74,15 +74,9 @@ class AdminZulipHandler(logging.Handler):
             else:
                 stack_trace = None
                 message = record.getMessage()
-                if '\n' in message:
-                    # Some exception code paths in queue processors
-                    # seem to result in super-long messages
-                    stack_trace = message
-                    message = message.split('\n')[0]
 
             report = dict(
                 node = platform.node(),
-                host = platform.node(),
                 message = message,
                 stack_trace = stack_trace,
             )

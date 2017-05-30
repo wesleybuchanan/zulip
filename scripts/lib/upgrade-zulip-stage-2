@@ -24,9 +24,6 @@ if os.getuid() != 0:
     logging.error("Must be run as root.")
     sys.exit(1)
 
-# make sure we have appropriate file permissions
-os.umask(0o22)
-
 parser = argparse.ArgumentParser()
 parser.add_argument("deploy_path", metavar="deploy_path",
                     help="Path to deployment directory")
@@ -65,11 +62,6 @@ subprocess.check_call([os.path.join(deploy_path, "scripts", "lib", "create-produ
 # Make sure the right version of node is installed
 subprocess.check_call([os.path.join(deploy_path, "scripts", "lib", "install-node"),
                        deploy_path])
-
-# Generate any new secrets that were added in the new version required.
-# TODO: Do caching to only run this when it has changed.
-subprocess.check_call([os.path.join(deploy_path, "scripts", "setup", "generate_secrets.py"),
-                       "--production"])
 
 # And then, building/installing the static assets.
 if args.from_git:

@@ -26,7 +26,7 @@ Fixtures enable the testing of webhook integration code without the need to
 actually contact the service being integrated.
 
 Because `Hello World` is a very simple webhook that does one thing, it requires
-only one fixture, `zerver/webhooks/helloworld/fixtures/hello.json`:
+only one fixture, `zerver/fixtures/helloworld/helloworld_hello.json`:
 
 ```
 {
@@ -72,11 +72,11 @@ from typing import Dict, Any, Iterable, Optional, Text
 
 @api_key_only_webhook_view('HelloWorld')
 @has_request_variables
-def api_helloworld_webhook(request, user_profile,
+def api_helloworld_webhook(request, user_profile, client,
                            payload=REQ(argument_type='body'),
                            stream=REQ(default='test'),
                            topic=REQ(default='Hello World')):
-    # type: (HttpRequest, UserProfile, Dict[str, Iterable[Dict[str, Any]]], Text, Optional[Text]) -> HttpResponse
+    # type: (HttpRequest, UserProfile, Client, Dict[str, Iterable[Dict[str, Any]]], Text, Optional[Text]) -> HttpResponse
 
   # construct the body of the message
   body = 'Hello! I am happy to be here! :smile:'
@@ -90,8 +90,7 @@ def api_helloworld_webhook(request, user_profile,
       return json_error(_("Missing key {} in JSON").format(str(e)))
 
   # send the message
-  check_send_message(user_profile, request.client, 'stream',
-                     [stream], topic, body)
+  check_send_message(user_profile, client, 'stream', [stream], topic, body)
 
   # return json result
   return json_success()
@@ -105,11 +104,10 @@ access request variables with `REQ()`. You can find more about `REQ` and request
 variables in [Writing views](writing-views.html#request-variables).
 
 You must pass the name of your webhook to the `api_key_only_webhook_view`
-decorator so your webhook can access the `user_profile` and `request.client`
-(Zulip's analogue of UserAgent) fields from the request. Here we have used
-`HelloWorld`. To be consistent with Zulip code style, use the name of the
-product you are integrating in camel case, spelled as the product spells
-its own name (except always first letter upper-case).
+decorator so your webhook can access the `user_profile` and `client` fields
+from the request. Here we have used `HelloWorld`. To be consistent with Zulip code
+style, use the name of the product you are integrating in camel case, spelled
+as the product spells its own name (except always first letter upper-case).
 
 The `api_key_only_webhook_view` decorator indicates that the 3rd party service will
 send the authorization as an API key in the query parameters. If your service uses
@@ -121,8 +119,9 @@ You should name your webhook function as such `api_webhookname_webhook` where
 
 At minimum, the webhook function must accept `request` (Django
 [HttpRequest](https://docs.djangoproject.com/en/1.8/ref/request-response/#django.http.HttpRequest)
-object), and `user_profile` (Zulip's user object). You may also want to
-define additional parameters using the `REQ` object.
+object), `user_profile` (Zulip's user object), and `client` (Zulip's analogue
+of UserAgent). You may also want to define additional parameters using the
+`REQ` object.
 
 In the example above, we have defined `payload` which is populated
 from the body of the http request, `stream` with a default of `test`
@@ -188,7 +187,7 @@ Using `manage.py` from within the Zulip development environment:
 ```
 (zulip-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip$
 ./manage.py send_webhook_fixture_message \
-> --fixture=zerver/webhooks/helloworld/fixtures/hello.json \
+> --fixture=zerver/fixtures/helloworld/helloworld_hello.json \
 > '--url=http://localhost:9991/api/v1/external/helloworld?api_key=<api_key>'
 ```
 After which you should see something similar to:
@@ -283,8 +282,8 @@ class called something like `test_goodbye_message`:
                                           content_type="application/x-www-form-urlencoded")
 ```
 
-As well as a new fixture `goodbye.json` in
-`zerver/webhooks/helloworld/fixtures/`:
+As well as a new fixture `helloworld_goodbye.json` in
+`zerver/fixtures/helloworld/`:
 
 ```
 {
@@ -356,7 +355,7 @@ Second, you need to write the actual documentation content in
 <div class="codehilite">
       <pre>(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip$
 ./manage.py send_webhook_fixture_message \
-> --fixture=zerver/webhooks/helloworld/fixtures/hello.json \
+> --fixture=zerver/fixtures/helloworld/helloworld_hello.json \
 > '--url=http://localhost:9991/api/v1/external/helloworld?api_key=&lt;api_key&gt;'
       </pre>
 </div>
@@ -477,24 +476,32 @@ http://myhost/api/v1/external/querytest?api_key=abcdefgh&stream=alerts&topic=que
 It provides values for `stream` and `topic`, and the webhook can get those
 using `REQ` without any special handling. How does this work in a test?
 
-The new attribute `TOPIC` exists only in our class so far. In order to
-construct a URL with a query parameter for `topic`, you can pass the
-attribute `TOPIC` as a keyword argument to `build_webhook_url`, like so:
+The new attribute `TOPIC` exists only in our class, so the default version of
+`build_webhook_url` from `WebhookTestCase` doesn't know how to use it to
+construct the URL. Instead, we provide a custom `build_webhook_url` to
+override the default one:
 
 ```
 class QuerytestHookTests(WebhookTestCase):
 
     STREAM_NAME = 'querytest'
     TOPIC = "Default Topic"
-    URL_TEMPLATE = "/api/v1/external/querytest?api_key={api_key}&stream={stream}"
+    URL_TEMPLATE = "/api/v1/external/querytest?api_key={api_key}&stream={stream}&topic={topic}"
     FIXTURE_DIR_NAME = 'querytest'
+
+    # override the base class behavior so we can include TOPIC
+    def build_webhook_url(self):
+        # type: () -> Text
+
+        api_key = self.get_api_key(self.TEST_USER_EMAIL)
+        return self.URL_TEMPLATE.format(stream=self.STREAM_NAME, api_key=api_key, topic=self.TOPIC)
 
     def test_querytest_test_one(self):
         # type: () -> None
 
         # construct the URL used for this test
         self.TOPIC = u"Query Test"
-        self.url = self.build_webhook_url(topic=self.TOPIC)
+        self.url = self.build_webhook_url()
 
         # define the expected message contents
         expected_subject = u"Query Test"

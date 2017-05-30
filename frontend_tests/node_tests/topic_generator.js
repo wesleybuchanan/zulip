@@ -1,12 +1,3 @@
-add_dependencies({
-    muting: 'js/muting',
-    stream_data: 'js/stream_data',
-    stream_sort: 'js/stream_sort',
-    unread: 'js/unread',
-});
-
-set_global('blueslip', {});
-
 var tg = require('js/topic_generator.js');
 
 function is_even(i) { return i % 2 === 0; }
@@ -70,13 +61,6 @@ function is_odd(i) { return i % 2 === 1; }
     assert.equal(gen.next(), undefined);
     assert.equal(gen.next(), undefined);
 
-    ints = tg.list_generator([10, 20, 30]);
-
-    function mult10(x) { return x * 10; }
-
-    gen = tg.map(ints, mult10);
-    assert.equal(gen.next(), 100);
-    assert.equal(gen.next(), 200);
 }());
 
 (function test_fchain() {
@@ -111,17 +95,6 @@ function is_odd(i) { return i % 2 === 1; }
     assert.equal(gen.next(), undefined);
     assert.equal(gen.next(), undefined);
 
-    var undef = function () {
-        return undefined;
-    };
-
-    global.blueslip.error = function (msg) {
-        assert.equal(msg, 'Invalid generator returned.');
-    };
-
-    ints = tg.list_generator([29, 43]);
-    gen = tg.fchain(ints, undef);
-    gen.next();
 }());
 
 
@@ -151,68 +124,10 @@ function is_odd(i) { return i % 2 === 1; }
             curr_topic);
     }
 
-    assert.deepEqual(next_topic(1, '1a'),
-                     {stream: 1, topic: '1b'});
-    assert.deepEqual(next_topic(1, undefined),
-                     {stream: 1, topic: '1a'});
-    assert.deepEqual(next_topic(2, 'bogus'),
-                     {stream: 3, topic: '3a'});
-    assert.deepEqual(next_topic(3, '3b'),
-                     {stream: 3, topic: '3a'});
-    assert.deepEqual(next_topic(4, '4a'),
-                     {stream: 1, topic: '1a'});
-    assert.deepEqual(next_topic(undefined, undefined),
-                     {stream: 1, topic: '1a'});
-
-
-    // Now test the deeper function that is wired up to
-    // real functions stream_data/stream_sort/unread.
-    var curr_stream = 'announce';
-    var curr_topic = 'whatever';
-
-    global.stream_sort.get_streams = function () {
-        return ['announce', 'muted', 'devel', 'test here'];
-    };
-
-    global.stream_data.get_recent_topics = function (stream) {
-        if (stream === 'muted') {
-            return [
-                {subject: 'red herring'},
-            ];
-        }
-        if (stream === 'devel') {
-            return [
-                {subject: 'muted'},
-                {subject: 'python'},
-            ];
-        }
-    };
-
-    var devel_stream_id = 555;
-
-    global.stream_data.get_stream_id = function (stream_name) {
-        if (stream_name === 'devel') {
-            return devel_stream_id;
-        }
-
-        return 999;
-    };
-
-    global.stream_data.name_in_home_view = function (stream_name) {
-        return (stream_name !== 'muted');
-    };
-
-    global.unread.topic_has_any_unread = function (stream_id) {
-        return (stream_id === devel_stream_id);
-    };
-
-    global.muting.is_topic_muted = function (stream_name, topic) {
-        return (topic === 'muted');
-    };
-
-    var next_item = tg.get_next_topic(curr_stream, curr_topic);
-    assert.deepEqual(next_item, {
-        stream: 'devel',
-        topic: 'python',
-    });
+    assert.equal(next_topic(1, '1a'), '1b');
+    assert.equal(next_topic(1, undefined), '1a');
+    assert.equal(next_topic(2, 'bogus'), '3a');
+    assert.equal(next_topic(3, '3b'), '3a');
+    assert.equal(next_topic(4, '4a'), '1a');
+    assert.equal(next_topic(undefined, undefined), '1a');
 }());

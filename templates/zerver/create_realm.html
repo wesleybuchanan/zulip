@@ -10,28 +10,19 @@ $(function () {
 });
 </script>
 
-<div class="app register-page flex">
-    <div class="app-main register-page-container new-style flex full-page">
-        <div class="bg-image"></div>
+<div class="app register-page">
+    <div class="app-main register-page-container">
 
         <div class="register-form">
-            <div class="lead">
-                <h1 class="get-started">{{ _("Create a new Zulip organization") }}</h1>
-            </div>
+            <p class="lead">
+                <div class="register-page-header">{{ _("Let's get started") }}…</div>
+            </p>
             <form class="form-inline" id="send_confirm" name="email_form"
                 action="{{ current_url() }}" method="post">
                 {{ csrf_input }}
-                <div class="input-box horizontal">
-                    <div class="inline-block relative">
-                        <input type="text" class="email required" placeholder="{{ _("Enter your work email address") }}"
-                               id="email" name="email" required />
-                        <label for="id_username">{{ _('Email') }}</label>
-                        <div class="required"></div>
-                        <img class="valid" src="/static/images/checkbox-valid.svg" alt="{{ _('Valid') }}" />
-                    </div>
-
-                    <button type="submit" class="new-organization-button register-button">{{ _("Create organization") }}</button>
-                </div>
+                <input type="text" class="email required" placeholder="{{ _("Enter your work email address") }}"
+                       id="email" name="email"/>
+                <input type="submit" class="new-organization-button btn btn-primary btn-large register-button" value="{{ _("Create organization") }}"/>
             </form>
             <div id="errors"></div>
             {% if form.email.errors %}
@@ -40,6 +31,8 @@ $(function () {
                 {% endfor %}
             {% endif %}
         </div>
+
     </div>
+    <div class="footer-padder"></div>
 </div>
 {% endblock %}

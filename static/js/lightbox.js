@@ -101,40 +101,15 @@ exports.open = function (image) {
         }
     }
 
-    if (is_open) {
-        return;
-    }
-
-    function lightbox_close_modal() {
-        $(".player-container iframe").remove();
-        is_open = false;
-        document.activeElement.blur();
-    }
-
-    modals.open_overlay({
-        name: 'lightbox',
-        overlay: $("#lightbox_overlay"),
-        on_close: lightbox_close_modal,
-    });
-
+    $("#lightbox_overlay").addClass("show");
     popovers.hide_all();
-    is_open = true;
+    lightbox.is_open = true;
 };
 
 exports.show_from_selected_message = function () {
-    var $message = $(".selected_message");
-    var $image = $message.find("img");
-
-    while ($image.length === 0) {
-        $message = $message.prev();
-        if ($message.length === 0) {
-            break;
-        }
-        $image = $message.find("img");
-    }
-
-    if ($image.length !== 0) {
-        exports.open($image);
+    var selected_msg = $(".selected_message").find("img");
+    if (selected_msg.length !== 0) {
+      exports.open(selected_msg);
     }
 };
 
@@ -145,6 +120,17 @@ exports.prev = function () {
 exports.next = function () {
     $(".image-list .image.selected").next().click();
 };
+
+Object.defineProperty(exports, "is_open", {
+    get: function () {
+        return is_open;
+    },
+    set: function (value) {
+        if (typeof value === "boolean") {
+            is_open = value;
+        }
+    },
+});
 
 // this is a block of events that are required for the lightbox to work.
 $(function () {
@@ -197,7 +183,6 @@ $(function () {
             lightbox[direction]();
         }
     });
-
 });
 
 return exports;

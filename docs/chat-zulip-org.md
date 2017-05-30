@@ -39,7 +39,6 @@ secret/embarrassing, etc.
   Mentioning other users is great for timely questions or making sure
   someone who is not online sees your message.
 * Converse informally; there's no need to use titles like "Sir" or "Madam".
-* Use gender-neutral language.
 * Follow the [community code of conduct](code-of-conduct.html).
 * Participate!  Zulip is a friendly and welcoming community, and we
   love meeting new people, hearing about what brought them to Zulip,
@@ -88,8 +87,6 @@ descriptions for all of them.  Relevant to almost everyone are these:
   project; reviewing other PRs is a great way to develop experience,
   and even just manually testing a proposed new feature and posting
   feedback is super helpful.
-* [#learning](https://chat.zulip.org/#narrow/stream/learning) is for
-  posting great learning resources one comes across.
 
 ## Office hours and sprints
 

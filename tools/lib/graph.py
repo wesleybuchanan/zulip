@@ -3,7 +3,7 @@ from __future__ import print_function
 
 from collections import defaultdict
 
-from typing import Callable, DefaultDict, Iterator, List, Optional, Set, Tuple
+from typing import Callable, DefaultDict, Iterator, List, Set, Tuple
 
 Edge = Tuple[str, str]
 EdgeSet = Set[Edge]
@@ -11,9 +11,9 @@ EdgeSet = Set[Edge]
 class Graph(object):
     def __init__(self, tuples):
         # type: (EdgeSet) -> None
-        self.children = defaultdict(list)  # type: DefaultDict[str, List[str]]
-        self.parents = defaultdict(list)  # type: DefaultDict[str, List[str]]
-        self.nodes = set()  # type: Set[str]
+        self.children = defaultdict(list) # type: DefaultDict[str, List[str]]
+        self.parents = defaultdict(list) # type: DefaultDict[str, List[str]]
+        self.nodes = set() # type: Set[str]
 
         for parent, child in tuples:
             self.parents[child].append(parent)
@@ -47,7 +47,7 @@ class Graph(object):
         # type: () -> None
         still_work_to_do = True
         while still_work_to_do:
-            still_work_to_do = False  # for now
+            still_work_to_do = False # for now
             for node in self.nodes:
                 if self.is_exterior_node(node):
                     self.remove(node)
@@ -87,7 +87,7 @@ class Graph(object):
             print(tup)
 
 def best_edge_to_remove(orig_graph, is_exempt):
-    # type: (Graph, Callable[[Edge], bool]) -> Optional[Edge]
+    # type: (Graph, Callable[[Edge], bool]) -> Edge
     # expects an already reduced graph as input
 
     orig_edges = orig_graph.edges()

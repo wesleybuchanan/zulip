@@ -36,6 +36,7 @@ from zerver.lib.test_classes import (
 from zerver.lib.test_runner import slow
 
 from zerver.models import (
+    get_user_profile_by_email,
     Message,
     Realm,
     Recipient,
@@ -50,19 +51,17 @@ def rm_tree(path):
 class QueryUtilTest(ZulipTestCase):
     def _create_messages(self):
         # type: () -> None
-        for email in [self.example_email('cordelia'),
-                      self.example_email('hamlet'),
-                      self.example_email('iago')]:
+        for email in ['cordelia@zulip.com', 'hamlet@zulip.com', 'iago@zulip.com']:
             for _ in range(5):
-                self.send_message(email, self.example_email('othello'), Recipient.PERSONAL)
+                self.send_message(email, 'othello@zulip.com', Recipient.PERSONAL)
 
     @slow('creates lots of data')
     def test_query_chunker(self):
         # type: () -> None
         self._create_messages()
 
-        cordelia = self.example_user('cordelia')
-        hamlet = self.example_user('hamlet')
+        cordelia = get_user_profile_by_email('cordelia@zulip.com')
+        hamlet = get_user_profile_by_email('hamlet@zulip.com')
 
         def get_queries():
             # type: () -> List[Any]
@@ -80,7 +79,7 @@ class QueryUtilTest(ZulipTestCase):
 
         queries = get_queries()
 
-        all_msg_ids = set()  # type: Set[int]
+        all_msg_ids = set() # type: Set[int]
         chunker = query_chunker(
             queries=queries,
             id_collector=all_msg_ids,
@@ -105,9 +104,9 @@ class QueryUtilTest(ZulipTestCase):
         chunker = query_chunker(
             queries=queries,
             id_collector=all_msg_ids,
-            chunk_size=7,  # use a different size
+            chunk_size=7, # use a different size
         )
-        list(chunker)  # exhaust the iterator
+        list(chunker) # exhaust the iterator
         self.assertEqual(
             len(all_msg_ids),
             len(Message.objects.filter(sender_id__in=[cordelia.id, hamlet.id]))
@@ -121,9 +120,9 @@ class QueryUtilTest(ZulipTestCase):
         chunker = query_chunker(
             queries=queries,
             id_collector=all_msg_ids,
-            chunk_size=11,  # use a different size each time
+            chunk_size=11, # use a different size each time
         )
-        list(chunker)  # exhaust the iterator
+        list(chunker) # exhaust the iterator
         self.assertEqual(
             len(all_msg_ids),
             len(Message.objects.exclude(sender_id=cordelia.id))
@@ -139,10 +138,10 @@ class QueryUtilTest(ZulipTestCase):
         chunker = query_chunker(
             queries=queries,
             id_collector=all_msg_ids,
-            chunk_size=13,  # use a different size each time
+            chunk_size=13, # use a different size each time
         )
         with self.assertRaises(AssertionError):
-            list(chunker)  # exercise the iterator
+            list(chunker) # exercise the iterator
 
         # Try to confuse things with ids part of the query...
         queries = [
@@ -153,10 +152,10 @@ class QueryUtilTest(ZulipTestCase):
         chunker = query_chunker(
             queries=queries,
             id_collector=all_msg_ids,
-            chunk_size=11,  # use a different size each time
+            chunk_size=11, # use a different size each time
         )
-        self.assertEqual(len(all_msg_ids), 0)  # until we actually use the iterator
-        list(chunker)  # exhaust the iterator
+        self.assertEqual(len(all_msg_ids), 0) # until we actually use the iterator
+        list(chunker) # exhaust the iterator
         self.assertEqual(len(all_msg_ids), len(Message.objects.all()))
 
         # Verify that we can just get the first chunk with a next() call.
@@ -167,9 +166,9 @@ class QueryUtilTest(ZulipTestCase):
         chunker = query_chunker(
             queries=queries,
             id_collector=all_msg_ids,
-            chunk_size=10,  # use a different size each time
+            chunk_size=10, # use a different size each time
         )
-        first_chunk = next(chunker)  # type: ignore
+        first_chunk = next(chunker) # type: ignore
         self.assertEqual(len(first_chunk), 10)
         self.assertEqual(len(all_msg_ids), 10)
         expected_msg = Message.objects.all()[0:10][5]
@@ -178,7 +177,7 @@ class QueryUtilTest(ZulipTestCase):
         self.assertEqual(actual_msg.sender_id, expected_msg.sender_id)
 
 
-class ExportTest(ZulipTestCase):
+class ExportTest(TestCase):
 
     def setUp(self):
         # type: () -> None
@@ -268,7 +267,7 @@ class ExportTest(ZulipTestCase):
                 if r['id'] == db_id][0]
 
         exported_user_emails = get_set('zerver_userprofile', 'email')
-        self.assertIn(self.example_email('cordelia'), exported_user_emails)
+        self.assertIn('cordelia@zulip.com', exported_user_emails)
         self.assertIn('default-bot@zulip.com', exported_user_emails)
         self.assertIn('emailgateway@zulip.com', exported_user_emails)
 
@@ -290,18 +289,18 @@ class ExportTest(ZulipTestCase):
         # TODO, extract get_set/find_by_id, so we can split this test up
 
         # Now, restrict users
-        cordelia = self.example_user('cordelia')
-        hamlet = self.example_user('hamlet')
+        cordelia = get_user_profile_by_email('cordelia@zulip.com')
+        hamlet = get_user_profile_by_email('hamlet@zulip.com')
         user_ids = set([cordelia.id, hamlet.id])
 
         full_data = self._export_realm(realm, exportable_user_ids=user_ids)
         data = full_data['realm']
         exported_user_emails = get_set('zerver_userprofile', 'email')
-        self.assertIn(self.example_email('cordelia'), exported_user_emails)
-        self.assertIn(self.example_email('hamlet'), exported_user_emails)
+        self.assertIn('cordelia@zulip.com', exported_user_emails)
+        self.assertIn('hamlet@zulip.com', exported_user_emails)
         self.assertNotIn('default-bot@zulip.com', exported_user_emails)
-        self.assertNotIn(self.example_email('iago'), exported_user_emails)
+        self.assertNotIn('iago@zulip.com', exported_user_emails)
 
         dummy_user_emails = get_set('zerver_userprofile_mirrordummy', 'email')
-        self.assertIn(self.example_email('iago'), dummy_user_emails)
-        self.assertNotIn(self.example_email('cordelia'), dummy_user_emails)
+        self.assertIn('iago@zulip.com', dummy_user_emails)
+        self.assertNotIn('cordelia@zulip.com', dummy_user_emails)

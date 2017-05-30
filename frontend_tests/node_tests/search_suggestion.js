@@ -5,6 +5,8 @@
 // clean up after themselves, and they should explicitly stub all
 // dependencies.
 
+global.stub_out_jquery();
+
 add_dependencies({
     util: 'js/util.js',
     Handlebars: 'handlebars',
@@ -12,7 +14,7 @@ add_dependencies({
     typeahead_helper: 'js/typeahead_helper.js',
     people: 'js/people.js',
     stream_data: 'js/stream_data.js',
-    narrow_state: 'js/narrow_state.js',
+    narrow: 'js/narrow.js',
 });
 
 var people = global.people;
@@ -44,7 +46,7 @@ global.stream_data.populate_stream_topics_for_tests({});
         return [];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return 'office';
     };
 
@@ -63,7 +65,7 @@ global.stream_data.populate_stream_topics_for_tests({});
         return [];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return undefined;
     };
 
@@ -83,7 +85,7 @@ global.stream_data.populate_stream_topics_for_tests({});
         return [];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return undefined;
     };
 
@@ -218,7 +220,7 @@ global.stream_data.populate_stream_topics_for_tests({});
         return [];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return undefined;
     };
 
@@ -330,7 +332,7 @@ init();
         return ['devel', 'office'];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return undefined;
     };
 
@@ -367,7 +369,7 @@ init();
         return [];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return undefined;
     };
 
@@ -426,33 +428,20 @@ init();
         return ['office'];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return 'office';
     };
 
-    var devel_id = 44;
-    var office_id = 77;
-
-    global.stream_data.get_stream_id = function (stream_name) {
-        switch (stream_name) {
-            case 'office': return office_id;
-            case 'devel': return devel_id;
-        }
-    };
-
-    var recent_data = {};
-
-    recent_data[devel_id] = [
-        {subject: 'REXX'},
-    ];
-
-    recent_data[office_id] = [
-        {subject: 'team'},
-        {subject: 'ignore'},
-        {subject: 'test'},
-    ];
-
-    global.stream_data.populate_stream_topics_for_tests(recent_data);
+    global.stream_data.populate_stream_topics_for_tests({
+        devel: [
+            {subject: 'REXX'},
+        ],
+        office: [
+            {subject: 'team'},
+            {subject: 'ignore'},
+            {subject: 'test'},
+        ],
+    });
 
     suggestions = search.get_suggestions('te');
     expected = [
@@ -507,7 +496,7 @@ init();
         return ['office'];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return;
     };
 
@@ -529,7 +518,7 @@ init();
         return ['office'];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return;
     };
 
@@ -552,7 +541,7 @@ init();
         return [];
     };
 
-    global.narrow_state.stream = function () {
+    global.narrow.stream = function () {
         return;
     };
 

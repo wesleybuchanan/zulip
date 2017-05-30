@@ -12,7 +12,7 @@ function maybe_add_narrowed_messages(messages, msg_list, messages_are_new, local
         url:      '/json/messages_in_narrow',
         idempotent: true,
         data:     {msg_ids: JSON.stringify(ids),
-                   narrow:  JSON.stringify(narrow_state.public_operators())},
+                   narrow:  JSON.stringify(narrow.public_operators())},
         timeout:  5000,
         success: function (data) {
             if (msg_list !== current_msg_list) {
@@ -63,8 +63,8 @@ exports.insert_new_messages = function insert_new_messages(messages, local_id) {
     message_util.add_messages(messages, home_msg_list, {messages_are_new: true});
     message_util.add_messages(messages, message_list.all, {messages_are_new: true});
 
-    if (narrow_state.active()) {
-        if (narrow_state.filter().can_apply_locally()) {
+    if (narrow.active()) {
+        if (narrow.filter().can_apply_locally()) {
             message_util.add_messages(messages, message_list.narrowed, {messages_are_new: true});
             notifications.possibly_notify_new_messages_outside_viewport(messages, local_id);
         } else {
@@ -78,7 +78,7 @@ exports.insert_new_messages = function insert_new_messages(messages, local_id) {
     activity.process_loaded_messages(messages);
     message_util.do_unread_count_updates(messages);
 
-    if (narrow_state.narrowed_by_reply()) {
+    if (narrow.narrowed_by_reply()) {
         // If you send a message when narrowed to a recipient, move the
         // pointer to it.
 
@@ -111,7 +111,6 @@ exports.update_messages = function update_messages(events) {
     var msgs_to_rerender = [];
     var topic_edited = false;
     var changed_narrow = false;
-    var message_content_edited = false;
 
     _.each(events, function (event) {
         var msg = message_store.get(event.message_id);
@@ -144,12 +143,12 @@ exports.update_messages = function update_messages(events) {
             var going_forward_change = _.indexOf(['change_later', 'change_all'], event.propagate_mode) >= 0;
 
             var stream_name = stream_data.get_sub_by_id(event.stream_id).name;
-            var compose_stream_name = compose_state.stream_name();
+            var compose_stream_name = compose.stream_name();
 
             if (going_forward_change && stream_name && compose_stream_name) {
                 if (stream_name.toLowerCase() === compose_stream_name.toLowerCase()) {
-                    if (event.orig_subject === compose_state.subject()) {
-                        compose_state.subject(event.subject);
+                    if (event.orig_subject === compose.subject()) {
+                        compose.subject(event.subject);
                     }
                 }
             }
@@ -159,7 +158,7 @@ exports.update_messages = function update_messages(events) {
                 var selection_changed_topic = _.indexOf(event.message_ids, current_id) >= 0;
 
                 if (selection_changed_topic) {
-                    var current_filter = narrow_state.filter();
+                    var current_filter = narrow.filter();
                     if (current_filter && stream_name) {
                         if (current_filter.has_topic(stream_name, event.orig_subject)) {
                             var new_filter = current_filter.filter_with_new_topic(event.subject);
@@ -214,7 +213,6 @@ exports.update_messages = function update_messages(events) {
                 msg.edit_history = [];
             }
             msg.edit_history = [edit_history_entry].concat(msg.edit_history);
-            message_content_edited = true;
         }
 
         msg.last_edit_timestamp = event.edit_timestamp;
@@ -235,10 +233,9 @@ exports.update_messages = function update_messages(events) {
             message_list.narrowed.rerender();
         }
     } else {
-        // If the content of the message was edited, we do a special animation.
-        current_msg_list.view.rerender_messages(msgs_to_rerender, message_content_edited);
+        home_msg_list.view.rerender_messages(msgs_to_rerender);
         if (current_msg_list === message_list.narrowed) {
-            home_msg_list.view.rerender_messages(msgs_to_rerender);
+            message_list.narrowed.view.rerender_messages(msgs_to_rerender);
         }
     }
     unread_ui.update_unread_counts();

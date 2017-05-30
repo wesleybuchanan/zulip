@@ -24,7 +24,7 @@ from zerver.tornado.descriptors import get_descriptor_by_handler_id
 from typing import Any, Callable, Dict, List
 
 current_handler_id = 0
-handlers = {}  # type: Dict[int, AsyncDjangoHandler]
+handlers = {} # type: Dict[int, AsyncDjangoHandler]
 
 def get_handler_by_id(handler_id):
     # type: (int) -> AsyncDjangoHandler
@@ -288,7 +288,7 @@ class AsyncDjangoHandler(tornado.web.RequestHandler, base.BaseHandler):
         return response
 
     def zulip_finish(self, response, request, apply_markdown):
-        # type: (Dict[str, Any], HttpRequest, bool) -> None
+        # type: (HttpResponse, HttpRequest, bool) -> None
         # Make sure that Markdown rendering really happened, if requested.
         # This is a security issue because it's where we escape HTML.
         # c.f. ticket #64

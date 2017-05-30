@@ -106,7 +106,6 @@ exports.show_failed_message_success = function (message_id) {
 };
 
 $(document).ready(function () {
-
     var info_overlay_toggle = components.toggle({
         name: "info-overlay-toggle",
         selected: 0,
@@ -118,7 +117,6 @@ $(document).ready(function () {
         callback: function (name, key) {
             $(".overlay-modal").hide();
             $("#" + key).show();
-            $("#" + key).find(".modal-body").focus();
         },
     }).get();
 
@@ -127,14 +125,12 @@ $(document).ready(function () {
 });
 
 exports.show_info_overlay = function (target) {
-    var overlay = $(".informational-overlays");
+    var el = {
+        overlay: $(".informational-overlays"),
+    };
 
-    if (!overlay.hasClass("show")) {
-        modals.open_overlay({
-            name:  'informationalOverlays',
-            overlay: overlay,
-            on_close: function () {},
-        });
+    if (!el.overlay.hasClass("show")) {
+        $(el.overlay).addClass("show");
     }
 
     if (target) {
@@ -218,12 +214,6 @@ $(function () {
 
     $('#new_message_content').blur(function () {
         saved_compose_cursor = $(this).caret();
-    });
-
-    // on the end of the modified-message fade in, remove the fade-in-message class.
-    var animationEnd = "webkitAnimationEnd oanimationend msAnimationEnd animationend";
-    $("body").on(animationEnd, ".fade-in-message", function () {
-        $(this).removeClass("fade-in-message");
     });
 });
 

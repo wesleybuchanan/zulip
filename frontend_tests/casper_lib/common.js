@@ -113,7 +113,7 @@ exports.then_log_out = function () {
         });
 
     });
-    casper.waitUntilVisible(".login-page-container", function () {
+    casper.waitUntilVisible(".login-page-header", function () {
         casper.test.assertUrlMatch(/accounts\/login\/$/);
         casper.test.info("Logged out");
     });
@@ -329,10 +329,6 @@ exports.expected_messages = function (table, headings, bodies) {
 
 exports.un_narrow = function () {
     casper.test.info('Un-narrowing');
-    if (casper.visible('.message_comp')) {
-        // close the compose box
-        common.keypress(27); // Esc
-    }
     common.keypress(27); // Esc
 };
 

@@ -84,7 +84,7 @@ p.n-margin {
 .top-messages-logo {
     position: absolute;
     left: calc(50% - 12px);
-    top: 57px;
+    top: 67px;
     width: 24px;
     height: 24px;
 }
@@ -129,18 +129,6 @@ p.n-margin {
     100% {
         box-shadow: 0px 0px 30px rgba(0,0,0,0.35);
     }
-}
-
-.fade-in-message {
-    animation-name: fadeInMessage;
-    animation-duration: 1s;
-    animation-iteration-count: 1;
-}
-
-.fade-in-message .message_edit_notice {
-    animation-name: fadeInEditNotice;
-    animation-duration: 1s;
-    animation-iteration-count: 1;
 }
 
 #unmute_muted_topic_notification .btn {
@@ -294,25 +282,24 @@ li,
 
 .copy_message,
 .copy_message:focus {
+    background-image: url('/static/images/clippy.svg');
+    background-size: contain;
+    background-repeat: no-repeat;
     background-color: white;
+    background-position: center;
     height: 20px;
     width: 15px;
     padding: 5px 10px;
-    border: none;
+    border-radius: 2px;
     position: relative;
-    top: 28px;
+    top: 32px;
     left: -5px;
-    margin-top: -24px;
+    margin-top: -8px;
     display: block;
 }
 
-#clipboard_image {
-    margin-top: -5px;
-    margin-left: -8px;
-}
-
-.copy_message:hover svg path {
-    fill: black;
+.copy_message:hover {
+    background-color: #dadada;
 }
 
 .btn-large {
@@ -340,6 +327,7 @@ li,
 #user-settings-avatar {
     width: 100px;
     height: 100px;
+    margin-top: 10px;
 }
 
 /* Classes for hiding and showing controls */
@@ -472,8 +460,7 @@ a:hover code {
 }
 
 .sidebar-title {
-    font-size: 1em;
-    color: #aaa;
+    font-size: 11px;
     font-weight: normal;
     display: inline;
 }
@@ -517,7 +504,7 @@ li.actual-dropdown-menu i {
 
 .message_area_padder {
     /* The height of the header and the tabbar plus a small gap */
-    margin-top: 93px;
+    margin-top: 100px;
     /* This is needed for the floating recipient bar
        in Firefox only, for some reason;
        otherwise it gets a scrollbar */
@@ -597,30 +584,6 @@ td.pointer {
     transition: background-color 2.7s ease-in, color 2.7s ease-in;
 }
 
-/* The way this overrides the menus with a background-color and a high
-   z-index is kinda hacky, and requires some annoying color-matching,
-   but it works. */
-.alert-copied {
-    position: absolute;
-    right: -110px;
-    font-size: 14px;
-    color: #52c2af;
-    background-color: white;
-    z-index: 999;
-    padding-left: 20px;
-    padding-right: 40px;
-    font-weight: 400;
-    display: none;
-}
-
-.private-message .alert-copied {
-    background-color: #f0f4f5;
-}
-
-.include-sender .alert-copied {
-    top: -3px;
-}
-
 .status-time {
     top: 8px !important;
 }
@@ -679,10 +642,6 @@ td.pointer {
     border-bottom: 1px solid #e2e2e2;
     border-top: 1px solid #e2e2e2;
     margin-bottom: 10px;
-}
-
-.floating_recipient .recipient_row {
-    border-top: 1px solid #e2e2e2;
 }
 
 .stream_label {
@@ -893,60 +852,6 @@ td.pointer {
     }
 }
 
-@-webkit-keyframes fadeInMessage {
-    0% {
-        opacity: 0;
-    }
-    100% {
-        opacity: 1;
-    }
-}
-
-@-moz-keyframes fadeInMessage {
-    0% {
-        opacity: 0;
-    }
-    100% {
-        opacity: 1;
-    }
-}
-
-@keyframes fadeInMessage {
-    0% {
-        opacity: 0;
-    }
-    100% {
-        opacity: 1;
-    }
-}
-
-@-webkit-keyframes fadeInEditNotice {
-    0% {
-        transform: translateX(-10px);
-    }
-    100% {
-        transform: translateX(0px);
-    }
-}
-
-@-moz-keyframes fadeInEditNotice {
-    0% {
-        transform: translateX(-10px);
-    }
-    100% {
-        transform: translateX(0px);
-    }
-}
-
-@keyframes fadeInEditNotice {
-    0% {
-        transform: translateX(-10px);
-    }
-    100% {
-        transform: translateX(0px);
-    }
-}
-
 .messagebox-bottom {
     height: 3px;
     background-color: #fff;
@@ -991,10 +896,10 @@ td.pointer {
 
 .private-message .messagebox,
 .message_header_private_message .message-header-contents {
-    background-color: #f0f4f5;
+    background-color: #feffe0;
 }
 
-.message-header-contents {
+.floating_recipient .message-header-contents {
     border-right: 1px solid #e2e2e2;
 }
 
@@ -1087,15 +992,15 @@ td.pointer {
 }
 
 .sender-status {
-    display: inline-block;
-    margin: 8px 0px 8px -3px;
-    /* this normalizes the margin of the emoji reactions with normal messages. */
-    padding-bottom: 5px;
+    display: block;
+    left: 46px;
+    top: -26px;
+    padding-bottom: 6px;
+    padding-right: 35px;
     vertical-align: middle;
     line-height: 18px;
     font-size: 14px;
     position: relative;
-    max-width: calc(100% - 50px);
 }
 
 .message_controls.sender-status-controls {
@@ -1198,7 +1103,7 @@ a.message_label_clickable:hover {
 }
 
 .message_hovered .reactions_hover,
-.has_emoji_popover .reactions_hover {
+.has_reactions_popover .reactions_hover {
     opacity: 1;
 }
 
@@ -1221,12 +1126,7 @@ a.dark_background:hover,
 }
 
 .message_top_line {
-    pointer-events: none;
     position: relative;
-}
-
-.message_top_line * {
-    pointer-events: auto;
 }
 
 .include-sender .message_top_line {
@@ -1283,7 +1183,7 @@ div.focused_table {
     display: block;
 }
 
-.include-sender .message_content:not(:empty) {
+.include-sender .message_content {
     margin-top: -16px;
 }
 
@@ -1295,14 +1195,8 @@ div.focused_table {
     position: relative;
 }
 
-.message_content:empty {
-    display: none;
-}
-
 .message_edit_content {
     line-height: 18px;
-    resize: vertical!important;
-    max-height: 24em;
 }
 
 .message_edit_countdown_timer {
@@ -1656,7 +1550,7 @@ blockquote p {
     position: absolute;
     width: 100%;
     top: 40px;
-    height: 10px;
+    height: 20px;
     z-index: 99;
 }
 
@@ -2061,16 +1955,8 @@ div.floating_recipient {
     white-space: initial;
 }
 
-.katex-display .katex-html {
-    line-height: 3em;
-}
-
-.katex-display {
-    margin: 0em 0;
-}
-
 .tex-error {
-    color: gray;
+    color: red;
 }
 
 .hotkeys_table {
@@ -2113,7 +1999,7 @@ div.floating_recipient {
 #loading_more_messages_indicator_box {
     position: relative;
     left: -50%;
-    top: -43px;
+    top: -40px;
     z-index: 1;
     -webkit-border-radius: 6px;
     -moz-border-radius: 6px;
@@ -2132,7 +2018,7 @@ div.floating_recipient {
 #page_loading_indicator_box {
     position: relative;
     left: -50%;
-    top: -43px;
+    top: -40px;
     z-index: 1;
     -webkit-border-radius: 6px;
     -moz-border-radius: 6px;
@@ -2149,8 +2035,8 @@ div.floating_recipient {
 }
 
 .conversation-partners {
-    display: inline-block;
-    line-height: 1.2;
+    display: block;
+    line-height: 1.2em;
     width: 90%;
     overflow: hidden;
 }
@@ -2348,16 +2234,6 @@ button.topic_edit_cancel {
     margin-top: -7px;
 }
 
-div.emoji {
-    /* This is needed when using the sprite sheets */
-    top: 6px;
-}
-
-img.emoji {
-    /* This is the right offset for <img> style emoji */
-    top: 3px;
-}
-
 .emoji.realm-emoji {
     background-size: contain;
     background-position: center;
@@ -2368,7 +2244,6 @@ img.emoji {
     border: 1px solid #ddd;
     padding: .5em .75em;
     margin-bottom: 0.25em;
-    word-break: break-word;
 }
 
 .twitter-avatar {
@@ -2485,6 +2360,12 @@ img.emoji {
 /* Reduce some of the heavy padding from Bootstrap. */
 #message_edit_form {
     margin-bottom: 10px;
+}
+#message_edit_form .edit-control-label {
+    vertical-align: top;
+    padding-top: 0px;
+    margin-right: 10px;
+    font-size: 80%;
 }
 #message_edit_form .edit-controls {
     margin-left: 0px;

@@ -18,7 +18,7 @@ exports.initialize = function () {
 
 exports.load_settings_section = function (section) {
     if (!load_func_dict.has(section)) {
-        blueslip.error('Unknown section ' + section);
+        // admin sections don't have loaders yet, and that's ok
         return;
     }
 

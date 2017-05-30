@@ -12,12 +12,6 @@ var get_events_timeout;
 var get_events_failures = 0;
 var get_events_params = {};
 
-// This field keeps track of whether we are attempting to
-// force-reconnect to the events server due to suspecting we are
-// offline.  It is important for avoiding races with the presence
-// system when coming back from unsuspend.
-exports.suspect_offline = false;
-
 function dispatch_normal_event(event) {
     switch (event.type) {
     case 'alert_words':
@@ -26,7 +20,7 @@ function dispatch_normal_event(event) {
 
     case 'default_streams':
         page_params.realm_default_streams = event.default_streams;
-        settings_streams.update_default_streams_table();
+        admin.update_default_streams_table();
         break;
 
     case 'hotspots':
@@ -68,7 +62,7 @@ function dispatch_normal_event(event) {
             notifications.redraw_title();
         } else if (event.op === 'update' && event.property === 'description') {
             page_params.realm_description = event.value;
-            settings_org.update_realm_description(event.value);
+            admin.update_realm_description(event.value);
         } else if (event.op === 'update' && event.property === 'invite_required') {
             page_params.realm_invite_required = event.value;
         } else if (event.op === 'update' && event.property === 'invite_by_admins_only') {
@@ -84,27 +78,27 @@ function dispatch_normal_event(event) {
             }
         } else if (event.op === 'update' && event.property === 'name_changes_disabled') {
             page_params.realm_name_changes_disabled = event.value;
-            settings_org.toggle_name_change_display();
+            admin.toggle_name_change_display();
         } else if (event.op === 'update' && event.property === 'email_changes_disabled') {
             page_params.realm_email_changes_disabled = event.value;
-            settings_org.toggle_email_change_display();
+            admin.toggle_email_change_display();
         } else if (event.op === 'update' && event.property === 'add_emoji_by_admins_only') {
             page_params.add_emoji_by_admins_only = event.value;
         } else if (event.op === 'update' && event.property === 'restricted_to_domain') {
             page_params.realm_restricted_to_domain = event.value;
         } else if (event.op === 'update' && event.property === 'message_retention_days') {
             page_params.message_retention_days = event.value;
-            settings_org.update_message_retention_days();
+            admin.update_message_retention_days();
         } else if (event.op === 'update_dict' && event.property === 'default') {
             $.each(event.data, function (key, value) {
                 page_params['realm_' + key] = value;
             });
             if (event.data.authentication_methods !== undefined) {
-                settings_org.populate_auth_methods(event.data.authentication_methods);
+                admin.populate_auth_methods(event.data.authentication_methods);
             }
         } else if (event.op === 'update' && event.property === 'default_language') {
             page_params.realm_default_language = event.value;
-            settings_org.reset_realm_default_language();
+            admin.reset_realm_default_language();
         } else if (event.op === 'update' && event.property === 'waiting_period_threshold') {
             page_params.realm_waiting_period_threshold = event.value;
         } else if (event.op === 'update_dict' && event.property === 'icon') {
@@ -118,52 +112,51 @@ function dispatch_normal_event(event) {
     case 'realm_bot':
         if (event.op === 'add') {
             bot_data.add(event.bot);
-            settings_users.update_user_data(event.bot.user_id, event.bot);
+            admin.update_user_data(event.bot.user_id, event.bot);
         } else if (event.op === 'remove') {
             bot_data.deactivate(event.bot.email);
             event.bot.is_active = false;
-            settings_users.update_user_data(event.bot.user_id, event.bot);
+            admin.update_user_data(event.bot.user_id, event.bot);
         } else if (event.op === 'update') {
             if (_.has(event.bot, 'owner_id')) {
                 event.bot.owner = people.get_person_from_user_id(event.bot.owner_id).email;
             }
             bot_data.update(event.bot.email, event.bot);
-            settings_users.update_user_data(event.bot.user_id, event.bot);
+            admin.update_user_data(event.bot.user_id, event.bot);
         }
         break;
 
     case 'realm_emoji':
         emoji.update_emojis(event.realm_emoji);
-        settings_emoji.populate_emoji(event.realm_emoji);
+        admin.populate_emoji(event.realm_emoji);
         break;
 
     case 'realm_filters':
         page_params.realm_filters = event.realm_filters;
-        markdown.set_realm_filters(page_params.realm_filters);
-        settings_filters.populate_filters(page_params.realm_filters);
+        echo.set_realm_filters(page_params.realm_filters);
+        admin.populate_filters(page_params.realm_filters);
         break;
 
     case 'realm_domains':
         var i;
         if (event.op === 'add') {
-            page_params.realm_domains.push(event.realm_domain);
+            page_params.domains.push(event.realm_domain);
         } else if (event.op === 'change') {
-            for (i = 0; i < page_params.realm_domains.length; i += 1) {
-                if (page_params.realm_domains[i].domain === event.realm_domain.domain) {
-                    page_params.realm_domains[i].allow_subdomains =
-                        event.realm_domain.allow_subdomains;
+            for (i = 0; i < page_params.domains.length; i += 1) {
+                if (page_params.domains[i].domain === event.realm_domain.domain) {
+                    page_params.domains[i].allow_subdomains = event.realm_domain.allow_subdomains;
                     break;
                 }
             }
         } else if (event.op === 'remove') {
-            for (i = 0; i < page_params.realm_domains.length; i += 1) {
-                if (page_params.realm_domains[i].domain === event.domain) {
-                    page_params.realm_domains.splice(i, 1);
+            for (i = 0; i < page_params.domains.length; i += 1) {
+                if (page_params.domains[i].domain === event.domain) {
+                    page_params.domains.splice(i, 1);
                     break;
                 }
             }
         }
-        settings_org.populate_realm_domains(page_params.realm_domains);
+        admin.populate_realm_domains(page_params.domains);
         break;
 
     case 'realm_user':
@@ -188,7 +181,7 @@ function dispatch_normal_event(event) {
                 event.property,
                 event.value
             );
-            settings_streams.update_default_streams_table();
+            admin.update_default_streams_table();
         } else if (event.op === 'create') {
             stream_data.create_streams(event.streams);
         } else if (event.op === 'delete') {
@@ -198,7 +191,7 @@ function dispatch_normal_event(event) {
                 }
                 subs.remove_stream(stream.stream_id);
                 stream_data.delete_sub(stream.stream_id);
-                settings_streams.remove_default_stream(stream.stream_id);
+                admin.remove_default_stream(stream.stream_id);
                 stream_data.remove_default_stream(stream.stream_id);
             });
         }
@@ -299,23 +292,6 @@ function dispatch_normal_event(event) {
             // TODO: Make this change the view immediately rather
             // than requiring a reload or page resize.
             page_params.default_language = event.setting;
-        }
-        if (event.setting_name === 'timezone') {
-            page_params.timezone = event.setting;
-        }
-        if (event.setting_name === 'emojiset') {
-            page_params.emojiset = event.setting;
-            var sprite = new Image();
-            sprite.onload = function () {
-                $("#emoji-spritesheet").attr('href', "/static/generated/emoji/" + page_params.emojiset + "_sprite.css");
-                if ($("#display-settings-status").length) {
-                    loading.destroy_indicator($("#emojiset_spinner"));
-                    $("#emojiset_select").val(page_params.emojiset);
-                    ui_report.success(i18n.t("Emojiset changed successfully!!"),
-                                      $('#display-settings-status').expectOne());
-                }
-            };
-            sprite.src = "/static/generated/emoji/sheet_" + page_params.emojiset + "_32.png";
         }
         if ($("#settings.tab-pane.active").length) {
             settings_display.update_page();
@@ -468,16 +444,8 @@ function get_events(options) {
     }
 
     get_events_params.dont_block = options.dont_block || get_events_failures > 0;
-
-    if (get_events_params.dont_block) {
-        // If we're requesting an immediate re-connect to the server,
-        // that means it's fairly likely that this client has been off
-        // the Internet and thus may have stale state (which is
-        // important for potential presence issues).
-        exports.suspect_offline = true;
-    }
     if (get_events_params.queue_id === undefined) {
-        get_events_params.queue_id = page_params.queue_id;
+        get_events_params.queue_id = page_params.event_queue_id;
         get_events_params.last_event_id = page_params.last_event_id;
     }
 
@@ -494,7 +462,6 @@ function get_events(options) {
         idempotent: true,
         timeout:  page_params.poll_timeout,
         success: function (data) {
-            exports.suspect_offline = false;
             try {
                 get_events_xhr = undefined;
                 get_events_failures = 0;
@@ -572,9 +539,8 @@ exports.home_view_loaded = function home_view_loaded() {
     $(document).trigger("home_view_loaded.zulip");
 };
 
-
 var watchdog_time = $.now();
-exports.check_for_unsuspend = function () {
+setInterval(function () {
     var new_time = $.now();
     if ((new_time - watchdog_time) > 20000) { // 20 seconds.
         // Defensively reset watchdog_time here in case there's an
@@ -585,8 +551,7 @@ exports.check_for_unsuspend = function () {
         $(document).trigger($.Event('unsuspend'));
     }
     watchdog_time = new_time;
-};
-setInterval(exports.check_for_unsuspend, 5000);
+}, 5000);
 
 util.execute_early(function () {
     $(document).on('unsuspend', function () {
@@ -607,7 +572,7 @@ exports.cleanup_event_queue = function cleanup_event_queue() {
     page_params.event_queue_expired = true;
     channel.del({
         url:      '/json/events',
-        data:     {queue_id: page_params.queue_id},
+        data:     {queue_id: page_params.event_queue_id},
     });
 };
 

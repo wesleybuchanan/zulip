@@ -2,12 +2,10 @@
 
 var csrf_token;
 $(function () {
+    // if the client is mobile, disable websockets for message sending
+    // (it doesn't work on iOS for some reason).
     if (util.is_mobile()) {
-        // if the client is mobile, disable websockets for message sending
-        // (it doesn't work on iOS for some reason).
         page_params.use_websockets = false;
-        // Also disable the tutorial; it's ugly on mobile.
-        page_params.needs_tutorial = false;
     }
 
     page_params.page_load_time = new Date().getTime();

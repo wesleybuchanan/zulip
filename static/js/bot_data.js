@@ -55,11 +55,11 @@ var bot_data = (function () {
         return bots[email];
     };
 
-    exports.initialize = function () {
-        _.each(page_params.realm_bots, function (bot) {
+    $(function init() {
+        _.each(page_params.bot_list, function (bot) {
             exports.add(bot);
         });
-    };
+    });
 
     return exports;
 }());

@@ -30,7 +30,7 @@ def chunkize(text, in_tag):
     # type: (Text, bool) -> Tuple[List[Tuple[Text, Text]], bool]
     start = 0
     idx = 0
-    chunks = []  # type: List[Tuple[Text, Text]]
+    chunks = [] # type: List[Tuple[Text, Text]]
     for c in text:
         if c == '<':
             in_tag = True
@@ -116,13 +116,13 @@ def highlight_html_differences(s1, s2):
 
     if not verify_html(retval):
         from zerver.lib.actions import internal_send_message
-        from zerver.models import get_system_bot
+        from zerver.models import get_user_profile_by_email
         # We probably want more information here
         logging.getLogger('').error('HTML diff produced mal-formed HTML')
 
         if settings.ERROR_BOT is not None:
             subject = "HTML diff failure on %s" % (platform.node(),)
-            realm = get_system_bot(settings.ERROR_BOT).realm
+            realm = get_user_profile_by_email(settings.ERROR_BOT).realm
             internal_send_message(realm, settings.ERROR_BOT, "stream",
                                   "errors", subject, "HTML diff produced malformed HTML")
         return s2

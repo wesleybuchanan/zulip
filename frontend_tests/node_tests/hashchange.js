@@ -1,3 +1,5 @@
+global.stub_out_jquery();
+
 add_dependencies({
     hash_util: 'js/hash_util.js',
     people: 'js/people.js',

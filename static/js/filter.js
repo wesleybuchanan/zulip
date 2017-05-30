@@ -41,7 +41,7 @@ function message_in_home(message) {
         return true;
     }
 
-    return stream_data.in_home_view(message.stream_id);
+    return stream_data.in_home_view(message.stream);
 }
 
 function message_matches_search_term(message, operator, operand) {
@@ -79,20 +79,9 @@ function message_matches_search_term(message, operator, operand) {
         }
 
         operand = operand.toLowerCase();
-        if (page_params.realm_is_zephyr_mirror_realm) {
+        if (page_params.is_zephyr_mirror_realm) {
             return zephyr_stream_name_match(message, operand);
         }
-
-        // Try to match by stream_id if have a valid sub for
-        // the operand.
-        var stream_id = stream_data.get_stream_id(operand);
-        if (stream_id) {
-            return (message.stream_id === stream_id);
-        }
-
-        // We need this fallback logic in case we have a message
-        // loaded for a stream that we are no longer
-        // subscribed to (or that was deleted).
         return (message.stream.toLowerCase() === operand);
 
     case 'topic':
@@ -101,7 +90,7 @@ function message_matches_search_term(message, operator, operand) {
         }
 
         operand = operand.toLowerCase();
-        if (page_params.realm_is_zephyr_mirror_realm) {
+        if (page_params.is_zephyr_mirror_realm) {
             return zephyr_topic_name_match(message, operand);
         }
         return (message.subject.toLowerCase() === operand);

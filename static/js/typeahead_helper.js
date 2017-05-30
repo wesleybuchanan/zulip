@@ -182,24 +182,6 @@ exports.sort_for_at_mentioning = function (objs, current_stream) {
     return subs_sorted.concat(non_subs_sorted);
 };
 
-exports.compare_by_popularity = function (lang_a, lang_b) {
-    var diff = pygments_data.langs[lang_b] - pygments_data.langs[lang_a];
-    if (diff !== 0) {
-        return diff;
-    }
-    return util.strcmp(lang_a, lang_b);
-};
-
-exports.sort_languages = function (matches, query) {
-    var results = prefix_sort(query, matches, function (x) { return x; });
-
-    // Languages that start with the query
-    results.matches = results.matches.sort(exports.compare_by_popularity);
-    // Languages that have the query somewhere in their name
-    results.rest = results.rest.sort(exports.compare_by_popularity);
-    return results.matches.concat(results.rest);
-};
-
 exports.sort_recipients = function (matches, query, current_stream) {
     var name_results =  prefix_sort(query, matches, function (x) { return x.full_name; });
     var email_results = prefix_sort(query, name_results.rest, function (x) { return x.email; });
@@ -221,31 +203,8 @@ exports.sort_emojis = function (matches, query) {
     return results.matches.concat(results.rest);
 };
 
-// Gives stream a score from 0 to 3 based on its activity
-function activity_score(sub) {
-    var stream_score = 0;
-    if (sub.pin_to_top) {
-        stream_score += 2;
-    }
-    // Note: A pinned stream may accumulate a 3rd point if it is active
-    if (stream_data.is_active(sub)) {
-        stream_score += 1;
-    }
-    return stream_score;
-}
-
-// Sort streams by ranking them by activity. If activity is equal,
-// as defined bv activity_score, decide based on subscriber count.
-exports.compare_by_activity = function (stream_a, stream_b) {
-    var diff = activity_score(stream_b) - activity_score(stream_a);
-    if (diff !== 0) {
-        return diff;
-    }
-    diff = stream_b.subscribers.num_items() - stream_a.subscribers.num_items();
-    if (diff !== 0) {
-        return diff;
-    }
-    return util.strcmp(stream_a.name, stream_b.name);
+exports.compare_by_sub_count = function (stream_a, stream_b) {
+    return stream_a.subscribers.num_items() < stream_b.subscribers.num_items();
 };
 
 exports.sort_streams = function (matches, query) {
@@ -254,11 +213,11 @@ exports.sort_streams = function (matches, query) {
         = prefix_sort(query, name_results.rest, function (x) { return x.description; });
 
     // Streams that start with the query.
-    name_results.matches = name_results.matches.sort(exports.compare_by_activity);
+    name_results.matches = name_results.matches.sort(exports.compare_by_sub_count);
     // Streams with descriptions that start with the query.
-    desc_results.matches = desc_results.matches.sort(exports.compare_by_activity);
+    desc_results.matches = desc_results.matches.sort(exports.compare_by_sub_count);
     // Streams with names and descriptions that don't start with the query.
-    desc_results.rest = desc_results.rest.sort(exports.compare_by_activity);
+    desc_results.rest = desc_results.rest.sort(exports.compare_by_sub_count);
 
     return name_results.matches.concat(desc_results.matches.concat(desc_results.rest));
 };

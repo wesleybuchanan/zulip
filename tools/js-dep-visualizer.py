@@ -133,17 +133,6 @@ def find_edges_to_remove(graph, methods):
         ('ui', 'message_fetch'),
         ('ui', 'unread_ops'),
         ('condense', 'message_viewport'),
-        ('compose_actions', 'compose'),
-        ('compose_actions', 'resize'),
-        ('settings_streams', 'stream_data'),
-        ('drafts', 'hashchange'),
-        ('settings_notifications', 'stream_edit'),
-        ('compose', 'stream_edit'),
-        ('subs', 'stream_edit'),
-        ('narrow_state', 'stream_data'),
-        ('stream_edit', 'stream_list'),
-        ('reactions', 'emoji_picker'),
-        ('message_edit', 'resize'),
     ] # type: List[Edge]
 
     def is_exempt(edge):
@@ -159,7 +148,6 @@ def find_edges_to_remove(graph, methods):
         return edge in EXEMPT_EDGES
 
     APPROVED_CUTS = [
-        ('stream_edit', 'stream_events'),
         ('unread_ui', 'pointer'),
         ('typing_events', 'narrow'),
         ('echo', 'message_events'),
@@ -179,11 +167,7 @@ def find_edges_to_remove(graph, methods):
         ('message_fetch', 'tutorial'),
         ('settings', 'subs'),
         ('activity', 'narrow'),
-        ('compose', 'compose_actions'),
         ('compose', 'subs'),
-        ('compose_actions', 'drafts'),
-        ('compose_actions', 'narrow'),
-        ('compose_actions', 'unread_ops'),
         ('drafts', 'compose'),
         ('drafts', 'echo'),
         ('echo', 'compose'),
@@ -207,7 +191,6 @@ def find_edges_to_remove(graph, methods):
         ('muting_ui', 'stream_popover'),
         ('popovers', 'stream_popover'),
         ('topic_list', 'stream_popover'),
-        ('stream_edit', 'subs'),
         ('topic_list', 'narrow'),
         ('stream_list', 'narrow'),
         ('stream_list', 'pm_list'),
@@ -221,15 +204,12 @@ def find_edges_to_remove(graph, methods):
         ('subs', 'narrow'),
         ('unread_ui', 'pm_list'),
         ('unread_ui', 'stream_list'),
-        ('modals', 'hashchange'),
-        ('emoji_picker', 'reactions'),
     ]
 
     def cut_is_legal(edge):
         # type: (Edge) -> bool
         parent, child = edge
-        if child in ['reload', 'popovers', 'modals', 'notifications',
-                     'server_events', 'compose_actions']:
+        if child in ['reload', 'popovers', 'modals', 'notifications', 'server_events']:
             return True
         return edge in APPROVED_CUTS
 

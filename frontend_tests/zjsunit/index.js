@@ -39,9 +39,6 @@ global.write_handlebars_output = output.write_handlebars_output;
 global.write_test_output = output.write_test_output;
 global.append_test_output = output.append_test_output;
 
-// Set up fake jQuery
-global.make_zjquery = require('./zjquery.js').make_zjquery;
-
 var noop = function () {};
 
 output.start_writing();

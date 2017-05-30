@@ -120,13 +120,7 @@ exports.initialize = function () {
         },
     });
 
-    modals.open_overlay({
-        name: 'invite',
-        overlay: $('#invite-user'),
-        on_close: function () {
-            hashchange.exit_modal();
-        },
-    });
+    $("#invite-user").addClass("show");
 };
 
 $(function () {

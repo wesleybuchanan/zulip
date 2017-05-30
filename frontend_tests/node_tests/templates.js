@@ -122,28 +122,12 @@ function render(template_name, args) {
 (function admin_default_streams_list() {
     var html = '<table>';
     var streams = ['devel', 'trac', 'zulip'];
-
-    // When the logged in user is admin
     _.each(streams, function (stream) {
-        var args = {stream: {name: stream, invite_only: false},
-                    can_modify: true,
-                    };
+        var args = {stream: {name: stream, invite_only: false}};
         html += render('admin_default_streams_list', args);
     });
     html += "</table>";
     var span = $(html).find(".default_stream_name:first");
-    assert.equal(span.text(), "devel");
-
-    // When the logged in user is not admin
-    html = '<table>';
-    _.each(streams, function (stream) {
-        var args = {stream: {name: stream, invite_only: false},
-                    can_modify: false,
-                    };
-        html += render('admin_default_streams_list', args);
-    });
-    html += "</table>";
-    span = $(html).find(".default_stream_name:first");
     assert.equal(span.text(), "devel");
     global.write_handlebars_output("admin_default_streams_list", html);
 }());
@@ -172,14 +156,11 @@ function render(template_name, args) {
 }());
 
 (function admin_filter_list() {
-
-    // When the logged in user is admin
     var args = {
         filter: {
             pattern: "#(?P<id>[0-9]+)",
             url_format_string: "https://trac.example.com/ticket/%(id)s",
         },
-        can_modify: true,
     };
 
     var html = '';
@@ -187,30 +168,10 @@ function render(template_name, args) {
     html += render('admin_filter_list', args);
     html += '</tbody>';
 
-    var filter_pattern = $(html).find('tr.filter_row:first span.filter_pattern');
-    var filter_format = $(html).find('tr.filter_row:first span.filter_url_format_string');
-
-    assert.equal(filter_pattern.text(), '#(?P<id>[0-9]+)');
-    assert.equal(filter_format.text(), 'https://trac.example.com/ticket/%(id)s');
-
-    // When the logged in user is not admin
-    args = {
-        filter: {
-            pattern: "#(?P<id>[0-9]+)",
-            url_format_string: "https://trac.example.com/ticket/%(id)s",
-        },
-        can_modify: false,
-    };
-
-    html = '';
-    html += '<tbody id="admin_filters_table">';
-    html += render('admin_filter_list', args);
-    html += '</tbody>';
-
     global.write_test_output('admin_filter_list', html);
 
-    filter_pattern = $(html).find('tr.filter_row:first span.filter_pattern');
-    filter_format = $(html).find('tr.filter_row:first span.filter_url_format_string');
+    var filter_pattern = $(html).find('tr.filter_row:first span.filter_pattern');
+    var filter_format = $(html).find('tr.filter_row:first span.filter_url_format_string');
 
     assert.equal(filter_pattern.text(), '#(?P<id>[0-9]+)');
     assert.equal(filter_format.text(), 'https://trac.example.com/ticket/%(id)s');
@@ -246,8 +207,6 @@ function render(template_name, args) {
 (function admin_user_list() {
     var html = '<table>';
     var users = ['alice', 'bob', 'carl'];
-
-    // When the logged in user is admin
     _.each(users, function (user) {
         var args = {
             user: {
@@ -256,7 +215,6 @@ function render(template_name, args) {
                 email: user + '@zulip.com',
                 full_name: user,
             },
-            can_modify: true,
         };
         html += render('admin_user_list', args);
     });
@@ -272,25 +230,6 @@ function render(template_name, args) {
 
     assert.equal($(buttons[2]).attr('title').trim(), "Edit user");
     assert($(buttons[2]).hasClass("open-user-form"));
-
-    // When the logged in user is not admin
-    html = '<table>';
-    _.each(users, function (user) {
-        var args = {
-            user: {
-                is_active: true,
-                is_active_human: true,
-                email: user + '@zulip.com',
-                full_name: user,
-            },
-            can_modify: false,
-        };
-        html += render('admin_user_list', args);
-    });
-    html += "</table>";
-
-    buttons = $(html).find('.button');
-    assert.equal($(buttons).length, 6);
 
     global.write_handlebars_output("admin_user_list", html);
 }());
@@ -511,6 +450,8 @@ function render(template_name, args) {
     var row_2 = $(html).find(".draft-row[data-draft-id='2']");
     assert.equal(row_2.find(".stream_label").text().trim(), "You and Jordan, Michael");
     assert(row_2.find(".message_row").hasClass("private-message"));
+    assert.equal(row_2.find(".messagebox").css("box-shadow"),
+                 "inset 2px 0px 0px 0px #444444, -1px 0px 0px 0px #444444");
     assert.equal(row_2.find(".message_content").text().trim(), "Private draft");
 }());
 
@@ -523,14 +464,23 @@ function render(template_name, args) {
 }());
 
 (function emoji_popover_content() {
-    var args = {
-        search: 'Search',
-        message_id: 1,
-        emojis: [{
-            name: '100',
-            css_class: '100',
-        }],
-    };
+    var args = (function () {
+        var map = {};
+        for (var x in global.emoji.emojis_name_to_css_class) {
+            if (!global.emoji.realm_emojis[x]) {
+                map[x] = {
+                    name: x,
+                    css_name: global.emoji.emojis_name_to_css_class[x],
+                    url: global.emoji.emojis_by_name[x],
+                };
+            }
+        }
+
+        return {
+            emoji_list: map,
+            realm_emoji: global.emoji.realm_emojis,
+        };
+    }());
 
     var html = '<div style="height: 250px">';
     html += render('emoji_popover_content', args);
@@ -649,7 +599,6 @@ function render(template_name, args) {
             message_ids: [1, 2],
             message_containers: messages,
             show_date: '"<span id="timerender82">Jan&nbsp;07</span>"',
-            show_date_separator: true,
             subject: 'two messages',
             match_subject: '<span class="highlight">two</span> messages',
         },
@@ -688,7 +637,7 @@ function render(template_name, args) {
     global.write_test_output("message_edit_history.handlebars", html);
     var edited_message = $(html).find("div.messagebox-content");
     assert.equal(edited_message.text().trim(),
-                "1468132659\n            Let's go to dinner!\n            Edited by Alice");
+                "1468132659\n        Let's go to dinner!\n        Edited by Alice");
 }());
 
 (function message_reaction() {
@@ -750,17 +699,36 @@ function render(template_name, args) {
     assert.equal(button_area.find(".no_propagate_notifications").text().trim(), 'No');
 }());
 
+(function reaction_popover_content() {
+    var args = {
+        search: 'Search',
+        message_id: 1,
+        emojis: [{
+            name: '100',
+            css_class: '100',
+        }],
+    };
+
+    var html = '<div style="height: 250px">';
+    html += render('reaction_popover_content', args);
+    html += "</div>";
+    // test to make sure the first emoji is present in the popover
+    var emoji_key = $(html).find(".emoji-100").attr('title');
+    assert.equal(emoji_key, ':100:');
+    global.write_handlebars_output("reaction_popover_content", html);
+}());
+
 (function settings_tab() {
     var page_param_checkbox_options = {
-        enable_stream_desktop_notifications: true,
-        enable_stream_sounds: true, enable_desktop_notifications: true,
-        enable_sounds: true, enable_offline_email_notifications: true,
+        stream_desktop_notifications_enabled: true,
+        stream_sounds_enabled: true, desktop_notifications_enabled: true,
+        sounds_enabled: true, enable_offline_email_notifications: true,
         enable_offline_push_notifications: true, enable_online_push_notifications: true,
         enable_digest_emails: true, persistent_desktop_notifications_enabled: true,
         autoscroll_forever: true, default_desktop_notifications: true,
     };
     var page_params = $.extend(page_param_checkbox_options, {
-        full_name: "Alyssa P. Hacker", password_auth_enabled: true,
+        fullname: "Alyssa P. Hacker", password_auth_enabled: true,
         avatar_url: "https://google.com",
     });
 
@@ -868,46 +836,10 @@ function render(template_name, args) {
     html += render('stream_sidebar_row', args);
     html += '</ul>';
 
-    // because it won't mark the template as read otherwise.
-    render('stream_privacy');
-
     global.write_handlebars_output("stream_sidebar_row", html);
 
-    var swatch = $(html).find(".stream-privacy");
-    assert.equal(swatch.attr('id'), 'stream_sidebar_privacy_swatch_999');
-
-    // test to ensure that the hashtag element from stream_privacy exists.
-    assert.equal($(html).find(".stream-privacy").children("*").attr("class"), "hashtag");
-}());
-
-
-(function subscription_settings() {
-    var sub = {
-        name: 'devel',
-        subscribed: true,
-        notifications: true,
-        is_admin: true,
-        render_subscribers: true,
-        color: 'purple',
-        invite_only: true,
-        can_make_public: true,
-        can_make_private: true, /* not logical, but that's ok */
-        email_address: 'xxxxxxxxxxxxxxx@zulip.com',
-        stream_id: 888,
-        in_home_view: true,
-    };
-
-    var html = '';
-    html += render('subscription_settings', sub);
-
-    global.write_handlebars_output("subscription_settings", html);
-
-    var div = $(html).find(".subscription-type");
-    assert(div.text().indexOf('invite-only stream') > 0);
-
-    var anchor = $(html).find(".change-stream-privacy:first");
-    assert.equal(anchor.data("is-private"), true);
-    assert.equal(anchor.text(), "[Change]");
+    var swatch = $(html).find(".streamlist_swatch");
+    assert.equal(swatch.attr('id'), 'stream_sidebar_swatch_999');
 }());
 
 
@@ -963,6 +895,13 @@ function render(template_name, args) {
 
     var span = $(html).find(".stream-name:first");
     assert.equal(span.text(), 'devel');
+
+    var div = $(html).find(".subscription-type");
+    assert(div.text().indexOf('invite-only stream') > 0);
+
+    var anchor = $(html).find(".change-stream-privacy:first");
+    assert.equal(anchor.data("is-private"), true);
+    assert.equal(anchor.text(), "[Change]");
 }());
 
 

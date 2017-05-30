@@ -10,12 +10,11 @@ from zerver.models import UserProfile, get_client, get_user_profile_by_email
 from zerver.lib.response import json_error, json_unauthorized, json_success
 from django.shortcuts import resolve_url
 from django.utils.decorators import available_attrs
-from django.utils.timezone import now as timezone_now
+from django.utils import timezone
 from django.conf import settings
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.timestamp import datetime_to_timestamp, timestamp_to_datetime
-from zerver.lib.utils import statsd, get_subdomain, check_subdomain, \
-    is_remote_server
+from zerver.lib.utils import statsd, get_subdomain, check_subdomain
 from zerver.exceptions import RateLimited
 from zerver.lib.rate_limiter import incr_ratelimit, is_ratelimited, \
     api_calls_left
@@ -27,36 +26,26 @@ import base64
 import datetime
 import logging
 import cProfile
-import ujson
 from io import BytesIO
+from zerver.lib.mandrill_client import get_mandrill_client
 from six.moves import zip, urllib
 
-from typing import Union, Any, Callable, Sequence, Dict, Optional, TypeVar, Text, cast
+from typing import Union, Any, Callable, Sequence, Dict, Optional, TypeVar, Text
 from zerver.lib.str_utils import force_bytes
 
-# This is a hack to ensure that RemoteZulipServer always exists even
-# if Zilencer isn't enabled.
 if settings.ZILENCER_ENABLED:
-    from zilencer.models import get_remote_server_by_uuid, RemoteZulipServer
+    from zilencer.models import get_deployment_by_domain, Deployment
 else:
     from mock import Mock
-    get_remote_server_by_uuid = Mock()
-    RemoteZulipServer = Mock() # type: ignore # https://github.com/JukkaL/mypy/issues/1188
+    get_deployment_by_domain = Mock()
+    Deployment = Mock() # type: ignore # https://github.com/JukkaL/mypy/issues/1188
 
 FuncT = TypeVar('FuncT', bound=Callable[..., Any])
 ViewFuncT = TypeVar('ViewFuncT', bound=Callable[..., HttpResponse])
 
-## logger setup
-log_format = "%(asctime)s: %(message)s"
-
-formatter = logging.Formatter(log_format)
-file_handler = logging.FileHandler(
-    settings.API_KEY_ONLY_WEBHOOK_LOG_PATH)
-file_handler.setFormatter(formatter)
-
-webhook_logger = logging.getLogger("zulip.zerver.webhooks")
-webhook_logger.setLevel(logging.DEBUG)
-webhook_logger.addHandler(file_handler)
+def get_deployment_or_userprofile(role):
+    # type: (Text) -> Union[UserProfile, Deployment]
+    return get_user_profile_by_email(role) if "@" in role else get_deployment_by_domain(role)
 
 class _RespondAsynchronously(object):
     pass
@@ -95,7 +84,7 @@ def update_user_activity(request, user_profile):
 
     event = {'query': query,
              'user_profile_id': user_profile.id,
-             'time': datetime_to_timestamp(timezone_now()),
+             'time': datetime_to_timestamp(timezone.now()),
              'client': request.client.name}
     queue_json_publish("user_activity", event, lambda event: None)
 
@@ -163,9 +152,8 @@ def get_client_name(request, is_json_view):
         else:
             return "Unspecified"
 
-def process_client(request, user_profile, is_json_view=False, client_name=None,
-                   remote_server_request=False):
-    # type: (HttpRequest, UserProfile, bool, Optional[Text], bool) -> None
+def process_client(request, user_profile, is_json_view=False, client_name=None):
+    # type: (HttpRequest, UserProfile, bool, Optional[Text]) -> None
     if client_name is None:
         client_name = get_client_name(request, is_json_view)
 
@@ -175,24 +163,19 @@ def process_client(request, user_profile, is_json_view=False, client_name=None,
         client_name = 'ZulipiOS'
 
     request.client = get_client(client_name)
-    if not remote_server_request:
-        update_user_activity(request, user_profile)
+    update_user_activity(request, user_profile)
 
 def validate_api_key(request, role, api_key, is_webhook=False):
-    # type: (HttpRequest, Text, Text, bool) -> Union[UserProfile, RemoteZulipServer]
+    # type: (HttpRequest, Text, Text, bool) -> Union[UserProfile, Deployment]
     # Remove whitespace to protect users from trivial errors.
     role, api_key = role.strip(), api_key.strip()
 
-    if not is_remote_server(role):
-        try:
-            profile = get_user_profile_by_email(role) # type: Union[UserProfile, RemoteZulipServer]
-        except UserProfile.DoesNotExist:
-            raise JsonableError(_("Invalid user: %s") % (role,))
-    else:
-        try:
-            profile = get_remote_server_by_uuid(role)
-        except RemoteZulipServer.DoesNotExist:
-            raise JsonableError(_("Invalid Zulip server: %s") % (role,))
+    try:
+        profile = get_deployment_or_userprofile(role)
+    except UserProfile.DoesNotExist:
+        raise JsonableError(_("Invalid user: %s") % (role,))
+    except Deployment.DoesNotExist:
+        raise JsonableError(_("Invalid deployment: %s") % (role,))
 
     if api_key != profile.api_key:
         if len(api_key) != 32:
@@ -201,22 +184,16 @@ def validate_api_key(request, role, api_key, is_webhook=False):
         else:
             reason = _("Invalid API key for role '%s'")
         raise JsonableError(reason % (role,))
-
-    # early exit for RemoteZulipServer instances
-    if settings.ZILENCER_ENABLED and isinstance(profile, RemoteZulipServer):
-        if not check_subdomain(get_subdomain(request), ""):
-            raise JsonableError(_("This API key only works on the root subdomain"))
-        return profile
-
-    profile = cast(UserProfile, profile) # is UserProfile
     if not profile.is_active:
         raise JsonableError(_("Account not active"))
     if profile.is_incoming_webhook and not is_webhook:
         raise JsonableError(_("Account is not valid to post webhook messages"))
-
-    if profile.realm.deactivated:
-        raise JsonableError(_("Realm for account has been deactivated"))
-
+    try:
+        if profile.realm.deactivated:
+            raise JsonableError(_("Realm for account has been deactivated"))
+    except AttributeError:
+        # Deployment objects don't have realms
+        pass
     if (not check_subdomain(get_subdomain(request), profile.realm.subdomain) and
         # Allow access to localhost for Tornado
         not (settings.RUNNING_INSIDE_TORNADO and
@@ -260,30 +237,7 @@ def api_key_only_webhook_view(client_name):
             process_client(request, user_profile, client_name=webhook_client_name)
             if settings.RATE_LIMITING:
                 rate_limit_user(request, user_profile, domain='all')
-            try:
-                return view_func(request, user_profile, *args, **kwargs)
-            except Exception:
-                if request.content_type == 'application/json':
-                    request_body = ujson.dumps(ujson.loads(request.body), indent=4)
-                else:
-                    request_body = str(request.body)
-                message = """
-user: {email} ({realm})
-client: {client_name}
-URL: {path_info}
-body:
-
-{body}
-                """.format(
-                    email=user_profile.email,
-                    realm=user_profile.realm.string_id,
-                    client_name=webhook_client_name,
-                    body=request_body,
-                    path_info=request.META.get('PATH_INFO', None),
-                )
-                webhook_logger.exception(message)
-                raise
-
+            return view_func(request, user_profile, request.client, *args, **kwargs)
         return _wrapped_func_arguments
     return _wrapped_view_func
 
@@ -308,7 +262,7 @@ def redirect_to_login(next, login_url=None,
 
 # From Django 1.8
 def user_passes_test(test_func, login_url=None, redirect_field_name=REDIRECT_FIELD_NAME):
-    # type: (Callable[[HttpResponse], bool], Optional[Text], Text) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]
+    # type: (Callable[[UserProfile], bool], Optional[Text], Text) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]
     """
     Decorator for views that checks that the user passes the given test,
     redirecting to the log-in page if necessary. The test should be a callable
@@ -356,16 +310,6 @@ def add_logging_data(view_func):
         return rate_limit()(view_func)(request, *args, **kwargs)
     return _wrapped_view_func  # type: ignore # https://github.com/python/mypy/issues/1927
 
-def human_users_only(view_func):
-    # type: (ViewFuncT) -> ViewFuncT
-    @wraps(view_func)
-    def _wrapped_view_func(request, *args, **kwargs):
-        # type: (HttpRequest, *Any, **Any) -> HttpResponse
-        if request.user.is_bot:
-            return json_error(_("This endpoint does not accept bot requests."))
-        return view_func(request, *args, **kwargs)
-    return _wrapped_view_func  # type: ignore # https://github.com/python/mypy/issues/1927
-
 # Based on Django 1.8's @login_required
 def zulip_login_required(function=None,
                          redirect_field_name=REDIRECT_FIELD_NAME,
@@ -381,7 +325,7 @@ def zulip_login_required(function=None,
         return actual_decorator(add_logging_data(function))
     return actual_decorator
 
-def require_server_admin(view_func):
+def zulip_internal(view_func):
     # type: (ViewFuncT) -> ViewFuncT
     @zulip_login_required
     @wraps(view_func)
@@ -450,20 +394,18 @@ def authenticated_rest_api_view(is_webhook=False):
 
             # Now we try to do authentication or die
             try:
-                # profile is a Union[UserProfile, RemoteZulipServer]
+                # Could be a UserProfile or a Deployment
                 profile = validate_api_key(request, role, api_key, is_webhook)
             except JsonableError as e:
                 return json_unauthorized(e.error)
             request.user = profile
-            if is_remote_server(role):
-                assert isinstance(profile, RemoteZulipServer)  # type: ignore # https://github.com/python/mypy/issues/2957
-                request._email = "zulip-server:" + role
-                profile.rate_limits = ""
-                process_client(request, profile, remote_server_request=True)
-            else:
-                assert isinstance(profile, UserProfile)  # type: ignore # https://github.com/python/mypy/issues/2957
+            process_client(request, profile)
+            if isinstance(profile, UserProfile):
                 request._email = profile.email
-                process_client(request, profile)
+            else:
+                assert isinstance(profile, Deployment)  # type: ignore # https://github.com/python/mypy/issues/2957
+                request._email = "deployment:" + role
+                profile.rate_limits = ""
             # Apply rate limiting
             return rate_limit()(view_func)(request, profile, *args, **kwargs)
         return _wrapped_func_arguments
@@ -569,32 +511,22 @@ def client_is_exempt_from_rate_limiting(request):
             (is_local_addr(request.META['REMOTE_ADDR']) or
              settings.DEBUG_RATE_LIMITING))
 
-def internal_notify_view(is_tornado_view):
-    # type: (bool) ->  Callable[..., HttpResponse]
-    # This function can't be typed perfectly because returning a generic function
-    # isn't supported in mypy - https://github.com/python/mypy/issues/1551.
-    """Used for situations where something running on the Zulip server
-    needs to make a request to the (other) Django/Tornado processes running on
-    the server."""
-    def _wrapped_view_func(view_func):
-        # type: (Callable[..., HttpResponse]) -> Callable[..., HttpResponse]
-        @csrf_exempt
-        @require_post
-        @wraps(view_func)
-        def _wrapped_func_arguments(request, *args, **kwargs):
-            # type: (HttpRequest, *Any, **Any) -> HttpResponse
-            if not authenticate_notify(request):
-                return json_error(_('Access denied'), status=403)
-            is_tornado_request = hasattr(request, '_tornado_handler')
-            # These next 2 are not security checks; they are internal
-            # assertions to help us find bugs.
-            if is_tornado_view and not is_tornado_request:
-                raise RuntimeError('Tornado notify view called with no Tornado handler')
-            if not is_tornado_view and is_tornado_request:
-                raise RuntimeError('Django notify view called with Tornado handler')
-            request._email = "internal"
-            return view_func(request, *args, **kwargs)
-        return _wrapped_func_arguments
+def internal_notify_view(view_func):
+    # type: (ViewFuncT) -> ViewFuncT
+    @csrf_exempt
+    @require_post
+    @wraps(view_func)
+    def _wrapped_view_func(request, *args, **kwargs):
+        # type: (HttpRequest, *Any, **Any) -> HttpResponse
+        if not authenticate_notify(request):
+            return json_error(_('Access denied'), status=403)
+        if not hasattr(request, '_tornado_handler'):
+            # We got called through the non-Tornado server somehow.
+            # This is not a security check; it's an internal assertion
+            # to help us find bugs.
+            raise RuntimeError('notify view called with no Tornado handler')
+        request._email = "internal"
+        return view_func(request, *args, **kwargs)
     return _wrapped_view_func
 
 # Converter functions for use with has_request_variables
@@ -732,6 +664,19 @@ def profiled(func):
         retval = prof.runcall(func, *args, **kwargs) # type: Any
         prof.dump_stats(fn)
         return retval
+    return wrapped_func # type: ignore # https://github.com/python/mypy/issues/1927
+
+def uses_mandrill(func):
+    # type: (FuncT) -> FuncT
+    """
+    This decorator takes a function with keyword argument "mail_client" and
+    fills it in with the mail_client for the Mandrill account.
+    """
+    @wraps(func)
+    def wrapped_func(*args, **kwargs):
+        # type: (*Any, **Any) -> Any
+        kwargs['mail_client'] = get_mandrill_client()
+        return func(*args, **kwargs)
     return wrapped_func # type: ignore # https://github.com/python/mypy/issues/1927
 
 def return_success_on_head_request(view_func):

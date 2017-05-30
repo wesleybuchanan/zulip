@@ -36,7 +36,9 @@
                     {{t 'Nothing selected.' }}
                 </div>
                 <div class="settings">
-                    {{!-- edit stream here --}}
+                    {{#each subscriptions}}
+                    {{ partial "subscription_settings" }}
+                    {{/each}}
                 </div>
                 {{ partial "subscription_creation_form" }}
             </div>
