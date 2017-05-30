@@ -25,7 +25,7 @@ import logging
 import re
 import DNS
 
-from typing import Any, Callable, List, Optional, Text
+from typing import Any, Callable, List, Optional, Text, Dict
 
 MIT_VALIDATION_ERROR = u'That user does not exist at MIT or is a ' + \
                        u'<a href="https://ist.mit.edu/email-lists">mailing list</a>. ' + \
@@ -127,18 +127,24 @@ class HomepageForm(forms.Form):
 
         if realm is None:
             if settings.REALMS_HAVE_SUBDOMAINS:
-                raise ValidationError(_("The organization you are trying to join does not exist."))
+                raise ValidationError(_("The organization you are trying to "
+                                        "join using {email} does not "
+                                        "exist.").format(email=email))
             else:
-                raise ValidationError(_("Your email address does not correspond to any existing organization."))
+                raise ValidationError(_("Your email address, {email}, does not "
+                                        "correspond to any existing "
+                                        "organization.").format(email=email))
 
         if realm.invite_required:
-            raise ValidationError(_("Please request an invite from the organization administrator."))
+            raise ValidationError(_("Please request an invite for {email} "
+                                    "from the organization "
+                                    "administrator.").format(email=email))
 
         if not email_allowed_for_realm(email, realm):
             raise ValidationError(
-                _("The organization you are trying to join, %(string_id)s, only allows users with e-mail "
-                  "addresses within the organization. Please try a different e-mail address."
-                  % {'string_id': realm.string_id}))
+                _("Your email address, {email}, is not in one of the domains "
+                  "that are allowed to register for accounts in this organization.").format(
+                      string_id=realm.string_id, email=email))
 
         if realm.is_zephyr_mirror_realm:
             email_is_not_mit_mailing_list(email)
@@ -178,6 +184,48 @@ class ZulipPasswordResetForm(PasswordResetForm):
         if len(result) == 0:
             logging.info("Password reset attempted for %s; no active account." % (email,))
         return result
+
+    def send_mail(self, subject_template_name, email_template_name,
+                  context, from_email, to_email, html_email_template_name=None):
+        # type: (str, str, Dict[str, Any], str, str, str) -> None
+        """
+        Currently we don't support accounts in multiple subdomains using
+        a single email addresss. We override this function so that we do
+        not send a reset link to an email address if the reset attempt is
+        done on the subdomain which does not match user.realm.subdomain.
+
+        Once we start supporting accounts with the same email in
+        multiple subdomains, we may be able to delete or refactor this
+        function.
+        """
+        user_realm = get_user_profile_by_email(to_email).realm
+        attempted_subdomain = get_subdomain(getattr(self, 'request'))
+        context['attempted_realm'] = False
+        if not check_subdomain(user_realm.subdomain, attempted_subdomain):
+            context['attempted_realm'] = get_realm(attempted_subdomain)
+
+        super(ZulipPasswordResetForm, self).send_mail(
+            subject_template_name,
+            email_template_name,
+            context,
+            from_email,
+            to_email,
+            html_email_template_name=html_email_template_name
+        )
+
+    def save(self, *args, **kwargs):
+        # type: (*Any, **Any) -> None
+        """Currently we don't support accounts in multiple subdomains using
+        a single email addresss. We override this function so that we can
+        inject request parameter in context. This parameter will be used
+        by send_mail function.
+
+        Once we start supporting accounts with the same email in
+        multiple subdomains, we may be able to delete or refactor this
+        function.
+        """
+        setattr(self, 'request', kwargs.get('request'))
+        super(ZulipPasswordResetForm, self).save(*args, **kwargs)
 
 class CreateUserForm(forms.Form):
     full_name = forms.CharField(max_length=100)
@@ -224,12 +272,12 @@ class MultiEmailField(forms.Field):
 
 class FindMyTeamForm(forms.Form):
     emails = MultiEmailField(
-        help_text="Add up to 10 comma-separated email addresses.")
+        help_text=_("Add up to 10 comma-separated email addresses."))
 
     def clean_emails(self):
         # type: () -> List[Text]
         emails = self.cleaned_data['emails']
         if len(emails) > 10:
-            raise forms.ValidationError("Please enter at most 10 emails.")
+            raise forms.ValidationError(_("Please enter at most 10 emails."))
 
         return emails

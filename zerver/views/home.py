@@ -16,17 +16,16 @@ from zerver.models import Message, UserProfile, Stream, Subscription, Huddle, \
     Recipient, Realm, UserMessage, DefaultStream, RealmEmoji, RealmDomain, \
     RealmFilter, PreregistrationUser, UserActivity, \
     UserPresence, get_recipient, name_changes_disabled, email_to_username, \
-    list_of_domains_for_realm
+    get_realm_domains
 from zerver.lib.events import do_events_register
 from zerver.lib.actions import update_user_presence, do_change_tos_version, \
-    do_update_pointer, get_cross_realm_dicts, realm_user_count
+    do_update_pointer, realm_user_count
 from zerver.lib.avatar import avatar_url
 from zerver.lib.i18n import get_language_list, get_language_name, \
     get_language_list_for_templates
 from zerver.lib.push_notifications import num_push_devices_for_user
 from zerver.lib.streams import access_stream_by_name
 from zerver.lib.utils import statsd, get_subdomain
-from zproject.backends import password_auth_enabled
 
 import calendar
 import datetime
@@ -117,7 +116,7 @@ def home_real(request):
        int(settings.TOS_VERSION.split('.')[0]) > user_profile.major_tos_version():
         return accounts_accept_terms(request)
 
-    narrow = [] # type: List[List[Text]]
+    narrow = []  # type: List[List[Text]]
     narrow_stream = None
     narrow_topic = request.GET.get("topic")
     if request.GET.get("stream"):
@@ -173,15 +172,6 @@ def home_real(request):
             logging.warning("%s has invalid pointer %s" % (user_profile.email, user_profile.pointer))
             latest_read = None
 
-    desktop_notifications_enabled = user_profile.enable_desktop_notifications
-    if narrow_stream is not None:
-        desktop_notifications_enabled = False
-
-    if user_profile.realm.notifications_stream:
-        notifications_stream = user_profile.realm.notifications_stream.name
-    else:
-        notifications_stream = ""
-
     # Set default language and make it persist
     default_language = register_ret['default_language']
     url_lang = '/{}'.format(request.LANGUAGE_CODE)
@@ -209,116 +199,26 @@ def home_real(request):
         server_inline_image_preview = settings.INLINE_IMAGE_PREVIEW,
         server_inline_url_embed_preview = settings.INLINE_URL_EMBED_PREVIEW,
 
-        # realm data.
-        # TODO: Move all of these data to register_ret and pull from there
-        realm_uri             = user_profile.realm.uri,
-        password_auth_enabled = password_auth_enabled(user_profile.realm),
-        domains               = list_of_domains_for_realm(user_profile.realm),
-        name_changes_disabled = name_changes_disabled(user_profile.realm),
-        mandatory_topics      = user_profile.realm.mandatory_topics,
-        show_digest_email     = user_profile.realm.show_digest_email,
-        realm_presence_disabled = user_profile.realm.presence_disabled,
-        is_zephyr_mirror_realm = user_profile.realm.is_zephyr_mirror_realm,
-
-        # user_profile data.
-        # TODO: Move all of these data to register_ret and pull from there
-        fullname              = user_profile.full_name,
-        email                 = user_profile.email,
-        enter_sends           = user_profile.enter_sends,
-        user_id               = user_profile.id,
-        is_admin              = user_profile.is_realm_admin,
-        can_create_streams    = user_profile.can_create_streams(),
-        autoscroll_forever = user_profile.autoscroll_forever,
-        default_desktop_notifications = user_profile.default_desktop_notifications,
-        avatar_url            = avatar_url(user_profile),
-        avatar_url_medium     = avatar_url(user_profile, medium=True),
-        avatar_source         = user_profile.avatar_source,
-        timezone              = user_profile.timezone,
-
-        # Stream message notification settings:
-        stream_desktop_notifications_enabled = user_profile.enable_stream_desktop_notifications,
-        stream_sounds_enabled = user_profile.enable_stream_sounds,
-
-        # Private message and @-mention notification settings:
-        desktop_notifications_enabled = desktop_notifications_enabled,
-        sounds_enabled = user_profile.enable_sounds,
-        enable_offline_email_notifications = user_profile.enable_offline_email_notifications,
-        pm_content_in_desktop_notifications = user_profile.pm_content_in_desktop_notifications,
-        enable_offline_push_notifications = user_profile.enable_offline_push_notifications,
-        enable_online_push_notifications = user_profile.enable_online_push_notifications,
-        enable_digest_emails  = user_profile.enable_digest_emails,
-        persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
-
-        # Realm foreign key data from register_ret.
-        # TODO: Rename these to match register_ret values.
-        subbed_info           = register_ret['subscriptions'],
-        unsubbed_info         = register_ret['unsubscribed'],
-        neversubbed_info      = register_ret['never_subscribed'],
-        people_list           = register_ret['realm_users'],
-        bot_list              = register_ret['realm_bots'],
-        initial_pointer       = register_ret['pointer'],
-        initial_presences     = register_ret['presences'],
-        event_queue_id        = register_ret['queue_id'],
-
         # Misc. extra data.
         have_initial_messages = user_has_messages,
-        initial_servertime    = time.time(), # Used for calculating relative presence age
+        initial_servertime    = time.time(),  # Used for calculating relative presence age
         default_language_name = get_language_name(register_ret['default_language']),
         language_list_dbl_col = get_language_list_for_templates(register_ret['default_language']),
         language_list         = get_language_list(),
         needs_tutorial        = needs_tutorial,
         first_in_realm        = first_in_realm,
         prompt_for_invites    = prompt_for_invites,
-        notifications_stream  = notifications_stream,
-        cross_realm_bots      = list(get_cross_realm_dicts()),
         unread_count          = approximate_unread_count(user_profile),
         furthest_read_time    = sent_time_in_epoch_seconds(latest_read),
         has_mobile_devices    = num_push_devices_for_user(user_profile) > 0,
+        persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
+
     )
 
-    # These fields will be automatically copied from register_ret into
-    # page_params.  It is a goal to move more of the page_params list
-    # into this sort of cleaner structure.
-    page_params_core_fields = [
-        'alert_words',
-        'attachments',
-        'default_language',
-        'emoji_alt_code',
-        'hotspots',
-        'last_event_id',
-        'left_side_userlist',
-        'max_icon_file_size',
-        'max_message_id',
-        'muted_topics',
-        'realm_add_emoji_by_admins_only',
-        'realm_allow_message_editing',
-        'realm_authentication_methods',
-        'realm_bot_domain',
-        'realm_create_stream_by_admins_only',
-        'realm_default_language',
-        'realm_default_streams',
-        'realm_email_changes_disabled',
-        'realm_emoji',
-        'realm_filters',
-        'realm_icon_source',
-        'realm_icon_url',
-        'realm_invite_by_admins_only',
-        'realm_inline_image_preview',
-        'realm_inline_url_embed_preview',
-        'realm_invite_required',
-        'realm_message_content_edit_limit_seconds',
-        'realm_message_retention_days',
-        'realm_name',
-        'realm_description',
-        'realm_name_changes_disabled',
-        'realm_restricted_to_domain',
-        'realm_waiting_period_threshold',
-        'referrals',
-        'twenty_four_hour_time',
-        'zulip_version',
+    undesired_register_ret_fields = [
+        'streams',
     ]
-
-    for field_name in page_params_core_fields:
+    for field_name in set(register_ret.keys()) - set(undesired_register_ret_fields):
         page_params[field_name] = register_ret[field_name]
 
     if narrow_stream is not None:
@@ -333,8 +233,9 @@ def home_real(request):
             page_params["narrow_topic"] = narrow_topic
         page_params["narrow"] = [dict(operator=term[0], operand=term[1]) for term in narrow]
         page_params["max_message_id"] = initial_pointer
-        page_params["initial_pointer"] = initial_pointer
+        page_params["pointer"] = initial_pointer
         page_params["have_initial_messages"] = (initial_pointer != -1)
+        page_params["enable_desktop_notifications"] = False
 
     statsd.incr('views.home')
     show_invites = True

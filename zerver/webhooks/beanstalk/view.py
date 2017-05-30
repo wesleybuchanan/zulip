@@ -13,7 +13,7 @@ from functools import wraps
 
 from zerver.webhooks.github.view import build_message_from_gitlog
 
-from typing import Any, Callable, Dict, TypeVar
+from typing import Any, Callable, Dict, TypeVar, Optional, Text
 from zerver.lib.str_utils import force_str, force_bytes
 
 ViewFuncT = TypeVar('ViewFuncT', bound=Callable[..., HttpResponse])
@@ -27,7 +27,7 @@ def beanstalk_decoder(view_func):
     def _wrapped_view_func(request, *args, **kwargs):
         # type: (HttpRequest, *Any, **Any) -> HttpResponse
         try:
-            auth_type, encoded_value = request.META['HTTP_AUTHORIZATION'].split() # type: str, str
+            auth_type, encoded_value = request.META['HTTP_AUTHORIZATION'].split()  # type: str, str
             if auth_type.lower() == "basic":
                 email, api_key = base64.b64decode(force_bytes(encoded_value)).decode('utf-8').split(":")
                 email = email.replace('%40', '@')
@@ -39,20 +39,26 @@ def beanstalk_decoder(view_func):
 
         return view_func(request, *args, **kwargs)
 
-    return _wrapped_view_func # type: ignore # https://github.com/python/mypy/issues/1927
+    return _wrapped_view_func  # type: ignore # https://github.com/python/mypy/issues/1927
 
 @beanstalk_decoder
 @authenticated_rest_api_view(is_webhook=True)
 @has_request_variables
 def api_beanstalk_webhook(request, user_profile,
-                          payload=REQ(validator=check_dict([]))):
-    # type: (HttpRequest, UserProfile, Dict[str, Any]) -> HttpResponse
+                          payload=REQ(validator=check_dict([])),
+                          branches=REQ(default=None)):
+    # type: (HttpRequest, UserProfile, Dict[str, Any], Optional[Text]) -> HttpResponse
     # Beanstalk supports both SVN and git repositories
     # We distinguish between the two by checking for a
     # 'uri' key that is only present for git repos
     git_repo = 'uri' in payload
     if git_repo:
+        if branches is not None and branches.find(payload['branch']) == -1:
+            return json_success()
         # To get a linkable url,
+        for commit in payload['commits']:
+            commit['author'] = {'username': commit['author']['name']}
+
         subject, content = build_message_from_gitlog(user_profile, payload['repository']['name'],
                                                      payload['ref'], payload['commits'],
                                                      payload['before'], payload['after'],
@@ -62,7 +68,7 @@ def api_beanstalk_webhook(request, user_profile,
         author = payload.get('author_full_name')
         url = payload.get('changeset_url')
         revision = payload.get('revision')
-        (short_commit_msg, _, _) = payload.get('message').partition("\n")
+        (short_commit_msg, _, _) = payload['message'].partition("\n")
 
         subject = "svn r%s" % (revision,)
         content = "%s pushed [revision %s](%s):\n\n> %s" % (author, revision, url, short_commit_msg)

@@ -27,7 +27,7 @@ from django.http import HttpRequest, HttpResponse
 from zerver.lib.actions import check_send_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-from zerver.models import UserProfile, Client
+from zerver.models import UserProfile
 
 import ujson
 from six.moves import range
@@ -35,9 +35,9 @@ from six.moves import range
 
 @api_key_only_webhook_view('Taiga')
 @has_request_variables
-def api_taiga_webhook(request, user_profile, client, message=REQ(argument_type='body'),
+def api_taiga_webhook(request, user_profile, message=REQ(argument_type='body'),
                       stream=REQ(default='taiga'), topic=REQ(default='General')):
-    # type: (HttpRequest, UserProfile, Client, Dict[str, Any], Text, Text) -> HttpResponse
+    # type: (HttpRequest, UserProfile, Dict[str, Any], Text, Text) -> HttpResponse
     parsed_events = parse_message(message)
 
     content_lines = []
@@ -45,7 +45,7 @@ def api_taiga_webhook(request, user_profile, client, message=REQ(argument_type='
         content_lines.append(generate_content(event) + '\n')
     content = "".join(sorted(content_lines))
 
-    check_send_message(user_profile, client, 'stream', [stream], topic, content)
+    check_send_message(user_profile, request.client, 'stream', [stream], topic, content)
 
     return json_success()
 
@@ -101,7 +101,7 @@ templates = {
     },
     'issue': {
         'create': u':bulb: %(user)s created issue **%(subject)s**.',
-        'set_assigned_to': u':busts_in_silhouette: %(user)s assigned issue **%(subject)s** to %(new)s.', #
+        'set_assigned_to': u':busts_in_silhouette: %(user)s assigned issue **%(subject)s** to %(new)s.',
         'unset_assigned_to': u':busts_in_silhouette: %(user)s unassigned issue **%(subject)s**.',
         'changed_assigned_to': u':busts_in_silhouette: %(user)s reassigned issue **%(subject)s**'
         ' from %(old)s to %(new)s.',
@@ -165,7 +165,7 @@ def parse_create_or_delete(message):
 
 
 def parse_change_event(change_type, message):
-    # type: (str, Mapping[str, Any]) -> Dict[str, Any]
+    # type: (str, Mapping[str, Any]) -> Optional[Dict[str, Any]]
     """ Parses change event. """
     evt = {}  # type: Dict[str, Any]
     values = {

@@ -110,6 +110,18 @@ exports.filter = function (gen, filter_func) {
     };
 };
 
+exports.map = function (gen, map_func) {
+    return {
+        next: function () {
+            var val = gen.next();
+            if (val === undefined) {
+                return;
+            }
+            return map_func(val);
+        },
+    };
+};
+
 exports.next_topic = function (streams, get_topics, has_unread_messages, curr_stream, curr_topic) {
     var stream_gen = exports.wrap(streams, curr_stream);
 
@@ -121,17 +133,57 @@ exports.next_topic = function (streams, get_topics, has_unread_messages, curr_st
         } else {
             gen = exports.list_generator(get_topics(which_stream));
         }
-        var has_unread = function (topic) {
-            return has_unread_messages(which_stream, topic);
-        };
 
-        return exports.filter(gen, has_unread);
+        function has_unread(topic) {
+            return has_unread_messages(which_stream, topic);
+        }
+
+        function make_object(topic) {
+            return {
+                stream: which_stream,
+                topic: topic,
+            };
+        }
+
+        gen = exports.filter(gen, has_unread);
+        gen = exports.map(gen, make_object);
+
+        return gen;
     }
 
     var outer_gen = exports.fchain(stream_gen, get_topic_gen);
     return outer_gen.next();
 };
 
+exports.get_next_topic = function (curr_stream, curr_topic) {
+    var my_streams = stream_sort.get_streams();
+
+    my_streams = _.filter(my_streams, function (stream_name) {
+        return stream_data.name_in_home_view(stream_name);
+    });
+
+    function get_unmuted_topics(stream_name) {
+        var topic_objs = stream_data.get_recent_topics(stream_name) || [];
+        var topics = _.map(topic_objs, function (obj) { return obj.subject; });
+        topics = _.reject(topics, function (topic) {
+            return muting.is_topic_muted(stream_name, topic);
+        });
+        return topics;
+    }
+
+    function has_unread_messages(stream_name, topic) {
+        var stream_id = stream_data.get_stream_id(stream_name);
+        return unread.topic_has_any_unread(stream_id, topic);
+    }
+
+    return exports.next_topic(
+        my_streams,
+        get_unmuted_topics,
+        has_unread_messages,
+        curr_stream,
+        curr_topic
+    );
+};
 
 return exports;
 }());

@@ -3,7 +3,6 @@ from __future__ import absolute_import
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
-from django.test import TestCase
 
 from zerver.forms import email_is_not_mit_mailing_list
 
@@ -17,7 +16,6 @@ from zerver.lib.actions import compute_mit_user_fullname
 from zerver.lib.test_classes import (
     ZulipTestCase,
 )
-from zerver.models import get_user_profile_by_email
 
 import DNS
 import mock
@@ -28,11 +26,11 @@ from six.moves import urllib
 from six.moves import range
 from typing import Text
 
-class MITNameTest(TestCase):
+class MITNameTest(ZulipTestCase):
     def test_valid_hesiod(self):
         # type: () -> None
         with mock.patch('DNS.dnslookup', return_value=[['starnine:*:84233:101:Athena Consulting Exchange User,,,:/mit/starnine:/bin/bash']]):
-            self.assertEqual(compute_mit_user_fullname("starnine@mit.edu"), "Athena Consulting Exchange User")
+            self.assertEqual(compute_mit_user_fullname(self.mit_email("starnine")), "Athena Consulting Exchange User")
         with mock.patch('DNS.dnslookup', return_value=[['sipbexch:*:87824:101:Exch Sipb,,,:/mit/sipbexch:/bin/athena/bash']]):
             self.assertEqual(compute_mit_user_fullname("sipbexch@mit.edu"), "Exch Sipb")
 
@@ -78,8 +76,8 @@ class RateLimitTests(ZulipTestCase):
 
     def test_headers(self):
         # type: () -> None
-        email = "hamlet@zulip.com"
-        user = get_user_profile_by_email(email)
+        user = self.example_user('hamlet')
+        email = user.email
         clear_user_history(user)
 
         result = self.send_api_message(email, "some stuff")
@@ -89,8 +87,8 @@ class RateLimitTests(ZulipTestCase):
 
     def test_ratelimit_decrease(self):
         # type: () -> None
-        email = "hamlet@zulip.com"
-        user = get_user_profile_by_email(email)
+        user = self.example_user('hamlet')
+        email = user.email
         clear_user_history(user)
         result = self.send_api_message(email, "some stuff")
         limit = int(result['X-RateLimit-Remaining'])
@@ -101,24 +99,27 @@ class RateLimitTests(ZulipTestCase):
 
     def test_hit_ratelimits(self):
         # type: () -> None
-        email = "cordelia@zulip.com"
-        user = get_user_profile_by_email(email)
+        user = self.example_user('cordelia')
+        email = user.email
         clear_user_history(user)
 
+        start_time = time.time()
         for i in range(6):
-            result = self.send_api_message(email, "some stuff %s" % (i,))
+            with mock.patch('time.time', return_value=(start_time + i * 0.1)):
+                result = self.send_api_message(email, "some stuff %s" % (i,))
 
         self.assertEqual(result.status_code, 429)
         json = ujson.loads(result.content)
         self.assertEqual(json.get("result"), "error")
-        self.assertIn("API usage exceeded rate limit, try again in", json.get("msg"))
+        self.assertIn("API usage exceeded rate limit", json.get("msg"))
+        self.assertEqual(json.get('retry-after'), 0.5)
         self.assertTrue('Retry-After' in result)
-        self.assertIn(result['Retry-After'], json.get("msg"))
+        self.assertEqual(result['Retry-After'], '0.5')
 
         # We actually wait a second here, rather than force-clearing our history,
         # to make sure the rate-limiting code automatically forgives a user
         # after some time has passed.
-        with mock.patch('time.time', return_value=(time.time() + 1)):
+        with mock.patch('time.time', return_value=(start_time + 1.0)):
             result = self.send_api_message(email, "Good message")
 
             self.assert_json_success(result)

@@ -119,7 +119,7 @@ UBUNTU_COMMON_APT_DEPENDENCIES = [
     "yui-compressor",
     "wget",
     "ca-certificates",      # Explicit dependency in case e.g. wget is already installed
-    "puppet",               # Used by lint-all
+    "puppet",               # Used by lint
     "gettext",              # Used by makemessages i18n
     "curl",                 # Used for fetching PhantomJS as wget occasionally fails on redirects
     "netcat",               # Used for flushing memcached
@@ -217,7 +217,9 @@ def main(options):
     if not os.path.isdir(EMOJI_CACHE_PATH):
         run(["sudo", "mkdir", EMOJI_CACHE_PATH])
     run(["sudo", "chown", "%s:%s" % (user_id, user_id), EMOJI_CACHE_PATH])
+    run(["tools/setup/emoji/download-emoji-data"])
     run(["tools/setup/emoji/build_emoji"])
+    run(["tools/setup/build_pygments_data.py"])
     run(["scripts/setup/generate_secrets.py", "--development"])
     run(["tools/update-authors-json", "--use-fixture"])
     if options.is_travis and not options.is_production_travis:

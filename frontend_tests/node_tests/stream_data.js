@@ -1,8 +1,6 @@
-global.stub_out_jquery();
-
 set_global('page_params', {
     is_admin: false,
-    people_list: [],
+    realm_users: [],
 });
 
 add_dependencies({
@@ -70,11 +68,11 @@ var people = global.people;
     assert.equal(stream_data.get_name('denMARK'), 'Denmark');
     assert.equal(stream_data.get_name('unknown Stream'), 'unknown Stream');
 
-    assert(stream_data.in_home_view('social'));
-    assert(!stream_data.in_home_view('denmark'));
+    assert(stream_data.in_home_view(social.stream_id));
+    assert(!stream_data.in_home_view(denmark.stream_id));
 }());
 
-(function test_get_by_id() {
+(function test_renames() {
     stream_data.clear_subscriptions();
     var id = 42;
     var sub = {
@@ -93,6 +91,15 @@ var people = global.people;
     sub = stream_data.get_sub_by_id(id);
     assert.equal(sub.color, 'red');
     assert.equal(sub.name, 'Sweden');
+
+    sub = stream_data.get_sub('Denmark');
+    assert.equal(sub, undefined);
+
+    sub = stream_data.get_sub_by_name('Denmark');
+    assert.equal(sub.name, 'Sweden');
+
+    var actual_id = stream_data.get_stream_id('Denmark');
+    assert.equal(actual_id, 42);
 }());
 
 (function test_unsubscribe() {
@@ -231,8 +238,17 @@ var people = global.people;
 }());
 
 (function test_process_message_for_recent_topics() {
+    var stream_id = 55;
+
+    var rome = {
+        name: 'Rome',
+        stream_id: stream_id,
+    };
+
+    stream_data.add_sub('Rome', rome);
+
     var message = {
-        stream: 'Rome',
+        stream_id: stream_id,
         timestamp: 101,
         subject: 'toPic1',
     };
@@ -249,7 +265,7 @@ var people = global.people;
     ]);
 
     message = {
-        stream: 'Rome',
+        stream_id: stream_id,
         timestamp: 102,
         subject: 'Topic1',
     };
@@ -265,7 +281,7 @@ var people = global.people;
     ]);
 
     message = {
-        stream: 'Rome',
+        stream_id: stream_id,
         timestamp: 103,
         subject: 'topic2',
     };
@@ -298,9 +314,38 @@ var people = global.people;
     ]);
 }());
 
+(function test_is_active() {
+    stream_data.clear_subscriptions();
+
+    var sub = {name: 'pets', subscribed: false, stream_id: 1};
+    stream_data.add_sub('pets', sub);
+
+    assert(!stream_data.is_active(sub));
+
+    stream_data.subscribe_myself(sub);
+    assert(stream_data.is_active(sub));
+
+    stream_data.unsubscribe_myself(sub);
+    assert(!stream_data.is_active(sub));
+
+    sub = {name: 'lunch', subscribed: false, stream_id: 222};
+    stream_data.add_sub('lunch', sub);
+
+    assert(!stream_data.is_active(sub));
+
+    var message = {
+        stream_id: 222,
+        timestamp: 108,
+        subject: 'topic2',
+    };
+    stream_data.process_message_for_recent_topics(message);
+
+    assert(stream_data.is_active(sub));
+}());
+
 (function test_admin_options() {
     function make_sub() {
-        return {
+        var sub = {
             subscribed: false,
             color: 'blue',
             name: 'stream_to_admin',
@@ -308,12 +353,14 @@ var people = global.people;
             in_home_view: false,
             invite_only: false,
         };
+        stream_data.add_sub(sub.name, sub);
+        return sub;
     }
 
     // non-admins can't do anything
     global.page_params.is_admin = false;
     var sub = make_sub();
-    stream_data.add_admin_options(sub);
+    stream_data.update_calculated_fields(sub);
     assert(!sub.is_admin);
     assert(!sub.can_make_public);
     assert(!sub.can_make_private);
@@ -326,7 +373,7 @@ var people = global.people;
 
     // admins can make public streams become private
     sub = make_sub();
-    stream_data.add_admin_options(sub);
+    stream_data.update_calculated_fields(sub);
     assert(sub.is_admin);
     assert(!sub.can_make_public);
     assert(sub.can_make_private);
@@ -336,7 +383,7 @@ var people = global.people;
     sub = make_sub();
     sub.invite_only = true;
     sub.subscribed = false;
-    stream_data.add_admin_options(sub);
+    stream_data.update_calculated_fields(sub);
     assert(sub.is_admin);
     assert(!sub.can_make_public);
     assert(!sub.can_make_private);
@@ -344,7 +391,7 @@ var people = global.people;
     sub = make_sub();
     sub.invite_only = true;
     sub.subscribed = true;
-    stream_data.add_admin_options(sub);
+    stream_data.update_calculated_fields(sub);
     assert(sub.is_admin);
     assert(sub.can_make_public);
     assert(!sub.can_make_private);

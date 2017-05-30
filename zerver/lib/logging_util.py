@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
-from django.utils import timezone
+from django.utils.timezone import now as timezone_now
+from django.utils.timezone import utc as timezone_utc
 
 import hashlib
 import logging
@@ -12,7 +13,7 @@ from zerver.lib.str_utils import force_bytes
 # Adapted http://djangosnippets.org/snippets/2242/ by user s29 (October 25, 2010)
 
 class _RateLimitFilter(object):
-    last_error = datetime.min.replace(tzinfo=timezone.utc)
+    last_error = datetime.min.replace(tzinfo=timezone_utc)
 
     def filter(self, record):
         # type: (logging.LogRecord) -> bool
@@ -41,10 +42,10 @@ class _RateLimitFilter(object):
                 if not duplicate:
                     cache.set(key, 1, rate)
             else:
-                min_date = timezone.now() - timedelta(seconds=rate)
+                min_date = timezone_now() - timedelta(seconds=rate)
                 duplicate = (self.last_error >= min_date)
                 if not duplicate:
-                    self.last_error = timezone.now()
+                    self.last_error = timezone_now()
 
         return not duplicate
 

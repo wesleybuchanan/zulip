@@ -61,6 +61,10 @@ AVATAR_SALT = get_secret("avatar_salt")
 # restarted for triggering browser clients to reload.
 SERVER_GENERATION = int(time.time())
 
+# Key to authenticate this server to zulip.org for push notifications, etc.
+ZULIP_ORG_KEY = get_secret("zulip_org_key")
+ZULIP_ORG_ID = get_secret("zulip_org_id")
+
 if 'DEBUG' not in globals():
     # Uncomment end of next line to test JS/CSS minification.
     DEBUG = DEVELOPMENT # and platform.node() != 'your-machine'
@@ -119,6 +123,7 @@ DEFAULT_SETTINGS = {'TWITTER_CONSUMER_KEY': '',
                     'MAX_FILE_UPLOAD_SIZE': 25,
                     'MAX_AVATAR_FILE_SIZE': 5,
                     'MAX_ICON_FILE_SIZE': 5,
+                    'MAX_EMOJI_FILE_SIZE': 5,
                     'ERROR_REPORTING': True,
                     'BROWSER_ERROR_REPORTING': False,
                     'STAGING_ERROR_NOTIFICATIONS': False,
@@ -182,7 +187,7 @@ DEFAULT_SETTINGS = {'TWITTER_CONSUMER_KEY': '',
                     'SOCIAL_AUTH_GITHUB_KEY': None,
                     'SOCIAL_AUTH_GITHUB_ORG_NAME': None,
                     'SOCIAL_AUTH_GITHUB_TEAM_ID': None,
-                    'SOCIAL_AUTH_FIELDS_STORED_IN_SESSION': ['subdomain'],
+                    'SOCIAL_AUTH_FIELDS_STORED_IN_SESSION': ['subdomain', 'is_signup'],
                     'DBX_APNS_CERT_FILE': None,
                     'DBX_APNS_KEY_FILE': None,
                     'PERSONAL_ZMIRROR_SERVER': None,
@@ -209,6 +214,7 @@ DEFAULT_SETTINGS = {'TWITTER_CONSUMER_KEY': '',
                     'PASSWORD_MIN_LENGTH': 6,
                     'PASSWORD_MIN_ZXCVBN_QUALITY': 0.5,
                     'OFFLINE_THRESHOLD_SECS': 5 * 60,
+                    'PUSH_NOTIFICATION_BOUNCER_URL': None,
                     }
 
 for setting_name, setting_val in six.iteritems(DEFAULT_SETTINGS):
@@ -228,7 +234,7 @@ REQUIRED_SETTINGS = [("EXTERNAL_HOST", "zulip.example.com"),
                      # case, it seems worth having in this list
                      ("SECRET_KEY", ""),
                      ("AUTHENTICATION_BACKENDS", ()),
-                     ("NOREPLY_EMAIL_ADDRESS", "noreply@example.com"),
+                     ("NOREPLY_EMAIL_ADDRESS", "Zulip <noreply@example.com>"),
                      ("DEFAULT_FROM_EMAIL", "Zulip <zulip@example.com>"),
                      ]
 
@@ -292,6 +298,7 @@ if PRODUCTION:
 
 TEMPLATES = [
     {
+        'NAME': 'Jinja2',
         'BACKEND': 'zproject.jinja2.backends.Jinja2',
         'DIRS': [
             os.path.join(DEPLOY_ROOT, 'templates'),
@@ -305,9 +312,10 @@ TEMPLATES = [
                 'jinja2.ext.i18n',
                 'jinja2.ext.autoescape',
                 'pipeline.jinja2.PipelineExtension',
+                'webpack_loader.contrib.jinja2ext.WebpackExtension',
             ],
             'context_processors': [
-                'zerver.context_processors.add_settings',
+                'zerver.context_processors.zulip_default_context',
                 'zerver.context_processors.add_metrics',
                 'django.template.context_processors.i18n',
             ],
@@ -353,6 +361,7 @@ INSTALLED_APPS = [
     'confirmation',
     'guardian',
     'pipeline',
+    'webpack_loader',
     'zerver',
     'social_django',
 ]
@@ -531,9 +540,6 @@ DROPBOX_APP_KEY = get_secret("dropbox_app_key")
 
 MAILCHIMP_API_KEY = get_secret("mailchimp_api_key")
 
-# This comes from our mandrill accounts page
-MANDRILL_API_KEY = get_secret("mandrill_api_key")
-
 # Twitter API credentials
 # Secrecy not required because its only used for R/O requests.
 # Please don't make us go over our rate limit.
@@ -678,6 +684,7 @@ PIPELINE = {
             'source_filenames': (
                 'third/zocial/zocial.css',
                 'styles/portico.css',
+                'styles/portico-signin.css',
                 'styles/pygments.css',
                 'third/thirdparty-fonts.css',
                 'styles/fonts.css',
@@ -751,6 +758,30 @@ PIPELINE = {
             ),
             'output_filename': 'min/common.css'
         },
+        'apple_sprite': {
+            'source_filenames': (
+                'generated/emoji/google_sprite.css',
+            ),
+            'output_filename': 'min/google_sprite.css',
+        },
+        'emojione_sprite': {
+            'source_filenames': (
+                'generated/emoji/google_sprite.css',
+            ),
+            'output_filename': 'min/google_sprite.css',
+        },
+        'google_sprite': {
+            'source_filenames': (
+                'generated/emoji/google_sprite.css',
+            ),
+            'output_filename': 'min/google_sprite.css',
+        },
+        'twitter_sprite': {
+            'source_filenames': (
+                'generated/emoji/google_sprite.css',
+            ),
+            'output_filename': 'min/google_sprite.css',
+        },
     },
     'JAVASCRIPT': {},
 }
@@ -765,6 +796,8 @@ JS_SPECS = {
             'js/blueslip.js',
             'third/bootstrap/js/bootstrap.js',
             'js/common.js',
+            'node_modules/moment/moment.js',
+            'node_modules/moment-timezone/builds/moment-timezone-with-data.js',
         ],
         'output_filename': 'min/common.js'
     },
@@ -819,10 +852,13 @@ JS_SPECS = {
             'node_modules/handlebars/dist/handlebars.runtime.js',
             'third/marked/lib/marked.js',
             'generated/emoji/emoji_codes.js',
+            'generated/pygments_data.js',
             'templates/compiled.js',
             'js/feature_flags.js',
             'js/loading.js',
             'js/util.js',
+            'js/dynamic_text.js',
+            'js/rtl.js',
             'js/dict.js',
             'js/components.js',
             'js/localstorage.js',
@@ -839,29 +875,37 @@ JS_SPECS = {
             'js/unread.js',
             'js/topic_list.js',
             'js/pm_list.js',
+            'js/stream_sort.js',
+            'js/topic_generator.js',
             'js/stream_list.js',
             'js/filter.js',
             'js/message_list_view.js',
             'js/message_list.js',
             'js/message_live_update.js',
+            'js/narrow_state.js',
             'js/narrow.js',
             'js/reload.js',
             'js/compose_fade.js',
             'js/fenced_code.js',
+            'js/markdown.js',
             'js/echo.js',
             'js/socket.js',
+            'js/compose_state.js',
+            'js/compose_actions.js',
             'js/compose.js',
             'js/stream_color.js',
             'js/stream_data.js',
             'js/stream_muting.js',
             'js/stream_events.js',
+            'js/stream_create.js',
+            'js/stream_edit.js',
             'js/subs.js',
             'js/message_edit.js',
             'js/condense.js',
             'js/resize.js',
+            'js/list_rendering.js',
             'js/floating_recipient_bar.js',
             'js/lightbox.js',
-            'js/ui_state.js',
             'js/ui_report.js',
             'js/ui.js',
             'js/ui_util.js',
@@ -913,7 +957,13 @@ JS_SPECS = {
             'js/settings_muting.js',
             'js/settings_lab.js',
             'js/settings_sections.js',
+            'js/settings_emoji.js',
+            'js/settings_org.js',
+            'js/settings_users.js',
+            'js/settings_streams.js',
+            'js/settings_filters.js',
             'js/settings.js',
+            'js/admin_sections.js',
             'js/admin.js',
             'js/tab_bar.js',
             'js/emoji.js',
@@ -926,8 +976,8 @@ JS_SPECS = {
             'js/typing_data.js',
             'js/typing_events.js',
             'js/ui_init.js',
-            'js/shim.js',
-            # JS bundled by webpack is also included here if PIPELINE_ENABLED setting is true
+            'js/emoji_picker.js',
+            'js/compose_ui.js',
         ],
         'output_filename': 'min/app.js'
     },
@@ -959,11 +1009,15 @@ JS_SPECS = {
     }
 }
 
-if PIPELINE_ENABLED:
-    # This is also done in test_settings.py, see comment there..
-    JS_SPECS['app']['source_filenames'].append('js/bundle.js')
-
 app_srcs = JS_SPECS['app']['source_filenames']
+
+WEBPACK_STATS_FILE = 'webpack-stats-dev.json' if DEVELOPMENT else 'webpack-stats-production.json'
+WEBPACK_LOADER = {
+    'DEFAULT': {
+        'BUNDLE_DIR_NAME': 'webpack-bundles/',
+        'STATS_FILE': os.path.join(STATIC_ROOT, 'webpack-bundles', WEBPACK_STATS_FILE),
+    }
+}
 
 ########################################################################
 # LOGGING SETTINGS
@@ -983,6 +1037,7 @@ ZULIP_PATHS = [
     ("STATS_DIR", "/home/zulip/stats"),
     ("DIGEST_LOG_PATH", "/var/log/zulip/digest.log"),
     ("ANALYTICS_LOG_PATH", "/var/log/zulip/analytics.log"),
+    ("API_KEY_ONLY_WEBHOOK_LOG_PATH", "/var/log/zulip/webhooks_errors.log"),
 ]
 
 # The Event log basically logs most significant database changes,
@@ -1128,6 +1183,11 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': False,
         },
+        'zulip.zerver.webhooks': {
+            'handlers': ['file', 'errors_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
         ## Uncomment the following to get all database queries logged to the console
         # 'django.db': {
         #     'handlers': ['console'],
@@ -1150,7 +1210,6 @@ POLL_TIMEOUT = 90 * 1000
 
 # iOS App IDs
 ZULIP_IOS_APP_ID = 'com.zulip.Zulip'
-DBX_IOS_APP_ID = 'com.dropbox.Zulip'
 
 ########################################################################
 # SSO AND LDAP SETTINGS
@@ -1187,7 +1246,7 @@ else:
 # SOCIAL_AUTH_GITHUB_KEY is set in /etc/zulip/settings.py
 SOCIAL_AUTH_GITHUB_SECRET = get_secret('social_auth_github_secret')
 SOCIAL_AUTH_LOGIN_ERROR_URL = '/login/'
-SOCIAL_AUTH_GITHUB_SCOPE = ['email']
+SOCIAL_AUTH_GITHUB_SCOPE = ['user:email']
 SOCIAL_AUTH_GITHUB_ORG_KEY = SOCIAL_AUTH_GITHUB_KEY
 SOCIAL_AUTH_GITHUB_ORG_SECRET = SOCIAL_AUTH_GITHUB_SECRET
 SOCIAL_AUTH_GITHUB_TEAM_KEY = SOCIAL_AUTH_GITHUB_KEY

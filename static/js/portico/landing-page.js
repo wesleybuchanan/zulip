@@ -113,6 +113,18 @@ var integration_events = function () {
     });
 };
 
+var hello_events = function () {
+    var counter = 0;
+    $(window).scroll(function () {
+        if (counter % 2 === 0) {
+            $(".screen.hero-screen .message-feed").css("transform", "translateY(-" + $(this).scrollTop() / 5 + "px)");
+        }
+        counter += 1;
+    });
+
+    $(".footer").addClass("hello");
+};
+
 var events = function () {
     ScrollTo();
 
@@ -138,7 +150,7 @@ var events = function () {
     $("body").click(function (e) {
         var $e = $(e.target);
 
-        var should_close = !$e.is("ul, #hamburger") && $e.closest("ul, #hamburger").length === 0;
+        var should_close = !$e.is("ul, .hamburger") && $e.closest("ul, .hamburger").length === 0;
 
         // this means that it is in mobile sidebar mode.
         if ($("nav ul").height() === window.innerHeight && should_close) {
@@ -146,9 +158,10 @@ var events = function () {
         }
     });
 
-    $("#hamburger").click(function () {
+    $(".hamburger").click(function () {
         $("nav ul").addClass("show");
     });
+
     (function () {
         var $last = $(".details-box").eq(0).addClass("show");
         var $li = $("ul.sidebar li");
@@ -203,6 +216,10 @@ var events = function () {
 
     if (/\/integrations\/*/.test(window.location.pathname)) {
         integration_events();
+    }
+
+    if (/\/hello\/*/.test(window.location.pathname)) {
+        hello_events();
     }
 };
 

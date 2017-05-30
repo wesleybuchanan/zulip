@@ -32,8 +32,15 @@ set_global('echo', {
     process_from_server: function (messages) {
         return messages;
     },
+});
+
+set_global('markdown', {
     set_realm_filters: noop,
 });
+
+// To support popovers object referenced in server_events.js
+add_dependencies({emoji_picker: 'js/emoji_picker.js'});
+add_dependencies({popovers: 'js/popovers.js'});
 
 // page_params is highly coupled to dispatching now
 set_global('page_params', {test_suite: false});
@@ -412,7 +419,7 @@ with_overrides(function () {
 with_overrides(function (override) {
     // default_streams
     var event = event_fixtures.default_streams;
-    override('admin.update_default_streams_table', noop);
+    override('settings_streams.update_default_streams_table', noop);
     dispatch(event);
     assert_same(page_params.realm_default_streams, event.default_streams);
 
@@ -513,7 +520,7 @@ with_overrides(function (override) {
     global.with_stub(function (bot_stub) {
         global.with_stub(function (admin_stub) {
             override('bot_data.add', bot_stub.f);
-            override('admin.update_user_data', admin_stub.f);
+            override('settings_users.update_user_data', admin_stub.f);
             dispatch(event);
             var args = bot_stub.get_args('bot');
             assert_same(args.bot, event.bot);
@@ -526,7 +533,7 @@ with_overrides(function (override) {
     global.with_stub(function (bot_stub) {
         global.with_stub(function (admin_stub) {
             override('bot_data.deactivate', bot_stub.f);
-            override('admin.update_user_data', admin_stub.f);
+            override('settings_users.update_user_data', admin_stub.f);
             dispatch(event);
             var args = bot_stub.get_args('email');
             assert_same(args.email, event.bot.email);
@@ -539,7 +546,7 @@ with_overrides(function (override) {
     global.with_stub(function (bot_stub) {
         global.with_stub(function (admin_stub) {
             override('bot_data.update', bot_stub.f);
-            override('admin.update_user_data', admin_stub.f);
+            override('settings_users.update_user_data', admin_stub.f);
 
             dispatch(event);
 
@@ -560,7 +567,7 @@ with_overrides(function (override) {
 
     global.with_stub(function (stub) {
         override('emoji.update_emojis', stub.f);
-        override('admin.populate_emoji', noop);
+        override('settings_emoji.populate_emoji', noop);
         dispatch(event);
         var args = stub.get_args('realm_emoji');
         assert_same(args.realm_emoji, event.realm_emoji);
@@ -571,7 +578,7 @@ with_overrides(function (override) {
     // realm_filters
     var event = event_fixtures.realm_filters;
     page_params.realm_filters = [];
-    override('admin.populate_filters', noop);
+    override('settings_filters.populate_filters', noop);
     dispatch(event);
     assert_same(page_params.realm_filters, event.realm_filters);
 
@@ -634,7 +641,7 @@ with_overrides(function (override) {
 
     global.with_stub(function (stub) {
         override('stream_events.update_property', stub.f);
-        override('admin.update_default_streams_table', noop);
+        override('settings_streams.update_default_streams_table', noop);
         dispatch(event);
         var args = stub.get_args('stream_id', 'property', 'value');
         assert_same(args.stream_id, event.stream_id);

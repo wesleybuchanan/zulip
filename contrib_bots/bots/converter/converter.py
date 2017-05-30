@@ -2,7 +2,6 @@
 
 from __future__ import absolute_import
 from __future__ import division
-from past.utils import old_div
 
 import copy
 import importlib
@@ -50,19 +49,7 @@ class ConverterHandler(object):
 
     def handle_message(self, message, client, state_handler):
         bot_response = get_bot_converter_response(message, client)
-        if message['type'] == 'private':
-            client.send_message(dict(
-                type='private',
-                to=message['sender_email'],
-                content=bot_response,
-            ))
-        else:
-            client.send_message(dict(
-                type='stream',
-                to=message['display_recipient'],
-                subject=message['subject'],
-                content=bot_response,
-            ))
+        client.send_reply(message, bot_response)
 
 def get_bot_converter_response(message, client):
     content = message['content']
@@ -121,7 +108,7 @@ def get_bot_converter_response(message, client):
             number_res /= ut_to_std[1]
 
             if base_unit == 'bit':
-                number_res *= 1024 ** (old_div(exponent, float(3)))
+                number_res *= 1024 ** (exponent // 3)
             else:
                 number_res *= 10 ** exponent
             number_res = round_to(number_res, 7)

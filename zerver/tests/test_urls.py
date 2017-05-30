@@ -59,7 +59,7 @@ class PublicURLTest(ZulipTestCase):
             if doc.startswith(".") or '~' in doc or '#' in doc:
                 continue  # nocoverage -- just here for convenience
             if doc not in {'main.html', 'index.md', 'include'}:
-                get_urls[200].append('/help/' + os.path.splitext(doc)[0]) # Strip the extension.
+                get_urls[200].append('/help/' + os.path.splitext(doc)[0])  # Strip the extension.
 
         post_urls = {200: ["/accounts/login/"],
                      302: ["/accounts/logout/"],
@@ -67,7 +67,7 @@ class PublicURLTest(ZulipTestCase):
                            "/json/invite_users",
                            "/json/settings/change",
                            "/json/subscriptions/exists",
-                           "/json/subscriptions/property",
+                           "/api/v1/users/me/subscriptions/properties",
                            "/json/fetch_api_key",
                            "/json/users/me/pointer",
                            "/json/users/me/subscriptions",

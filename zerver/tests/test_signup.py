@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.sites.models import Site
 from django.http import HttpResponse
 from django.test import TestCase
-from django.utils import timezone
+from django.utils.timezone import now as timezone_now
 
 from mock import patch, MagicMock
 from zerver.lib.test_helpers import MockLDAP
@@ -17,34 +17,37 @@ from zilencer.models import Deployment
 
 from zerver.forms import HomepageForm, WRONG_SUBDOMAIN_ERROR
 from zerver.lib.actions import do_change_password
+from zerver.views.auth import login_or_register_remote_user
 from zerver.views.invite import get_invitee_emails_set
-from zerver.views.registration import confirmation_key
+from zerver.views.registration import confirmation_key, \
+    redirect_and_log_into_subdomain, send_registration_completion_email
+
 from zerver.models import (
-    get_realm, get_prereg_user_by_email, get_user_profile_by_email,
-    get_unique_open_realm, completely_open,
-    PreregistrationUser, Realm, RealmDomain, Recipient,
+    get_realm, get_prereg_user_by_email, get_user,
+    get_unique_open_realm, completely_open, get_recipient,
+    PreregistrationUser, Realm, RealmDomain, Recipient, Message,
     Referral, ScheduledJob, UserProfile, UserMessage,
     Stream, Subscription, ScheduledJob, flush_per_request_caches
 )
-from zerver.management.commands.deliver_email import send_email_job
-
 from zerver.lib.actions import (
     set_default_streams,
     do_change_is_admin,
-    get_stream
+    get_stream,
+    do_create_realm,
 )
-
+from zerver.lib.send_email import display_email, send_email, send_future_email
 from zerver.lib.initial_password import initial_password
 from zerver.lib.actions import (
     do_deactivate_realm,
     do_set_realm_property,
     add_new_user_history,
 )
-from zerver.lib.digest import send_digest_email
-from zerver.lib.notifications import (
-    enqueue_welcome_emails, one_click_unsubscribe_link, send_local_email_template_with_delay)
+from zerver.lib.mobile_auth_otp import xor_hex_strings, ascii_to_hex, \
+    otp_encrypt_api_key, is_valid_otp, hex_to_ascii, otp_decrypt_api_key
+from zerver.lib.notifications import enqueue_welcome_emails, \
+    one_click_unsubscribe_link
 from zerver.lib.test_helpers import find_pattern_in_email, find_key_by_email, queries_captured, \
-    HostRequestMock
+    HostRequestMock, unsign_subdomain_cookie, POSTRequestMock
 from zerver.lib.test_classes import (
     ZulipTestCase,
 )
@@ -52,15 +55,35 @@ from zerver.lib.test_runner import slow
 from zerver.lib.sessions import get_session_dict_user
 from zerver.context_processors import common_context
 
+from collections import defaultdict
 import re
 import ujson
 
-from typing import Dict, List, Set, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from six.moves import urllib
 from six.moves import range
 from typing import Any, Text
 import os
+
+class RedirectAndLogIntoSubdomainTestCase(ZulipTestCase):
+    def test_cookie_data(self):
+        # type: () -> None
+        realm = Realm.objects.all().first()
+        name = 'Hamlet'
+        email = self.example_email("hamlet")
+        response = redirect_and_log_into_subdomain(realm, name, email)
+        data = unsign_subdomain_cookie(response)
+        self.assertDictEqual(data, {'name': name, 'email': email,
+                                    'subdomain': realm.subdomain,
+                                    'is_signup': False})
+
+        response = redirect_and_log_into_subdomain(realm, name, email,
+                                                   is_signup=True)
+        data = unsign_subdomain_cookie(response)
+        self.assertDictEqual(data, {'name': name, 'email': email,
+                                    'subdomain': realm.subdomain,
+                                    'is_signup': True})
 
 class AddNewUserHistoryTest(ZulipTestCase):
     def test_add_new_user_history_race(self):
@@ -71,15 +94,16 @@ class AddNewUserHistoryTest(ZulipTestCase):
             "Denmark": {"description": "A Scandinavian country", "invite_only": False},
             "Verona": {"description": "A city in Italy", "invite_only": False}
         }  # type: Dict[Text, Dict[Text, Any]]
-        set_default_streams(get_realm("zulip"), stream_dict)
+        realm = get_realm('zulip')
+        set_default_streams(realm, stream_dict)
         with patch("zerver.lib.actions.add_new_user_history"):
-            self.register("test@zulip.com", "test")
-        user_profile = get_user_profile_by_email("test@zulip.com")
+            self.register(self.nonreg_email('test'), "test")
+        user_profile = self.nonreg_user('test')
 
         subs = Subscription.objects.select_related("recipient").filter(
             user_profile=user_profile, recipient__type=Recipient.STREAM)
         streams = Stream.objects.filter(id__in=[sub.recipient.type_id for sub in subs])
-        self.send_message("hamlet@zulip.com", streams[0].name, Recipient.STREAM, "test")
+        self.send_message(self.example_email('hamlet'), streams[0].name, Recipient.STREAM, "test")
         add_new_user_history(user_profile, streams)
 
 class PasswordResetTest(ZulipTestCase):
@@ -89,14 +113,14 @@ class PasswordResetTest(ZulipTestCase):
 
     def test_password_reset(self):
         # type: () -> None
-        email = 'hamlet@zulip.com'
+        email = self.example_email("hamlet")
         old_password = initial_password(email)
 
         self.login(email)
 
         # test password reset template
         result = self.client_get('/accounts/password/reset/')
-        self.assert_in_response('Reset your password.', result)
+        self.assert_in_response('Reset your password', result)
 
         # start the password reset process by supplying an email address
         result = self.client_post('/accounts/password/reset/', {'email': email})
@@ -125,11 +149,68 @@ class PasswordResetTest(ZulipTestCase):
 
         # log back in with new password
         self.login(email, password='new_password')
-        user_profile = get_user_profile_by_email('hamlet@zulip.com')
+        user_profile = self.example_user('hamlet')
         self.assertEqual(get_session_dict_user(self.client.session), user_profile.id)
 
         # make sure old password no longer works
         self.login(email, password=old_password, fails=True)
+
+    def test_invalid_subdomain(self):
+        # type: () -> None
+        email = self.example_email("hamlet")
+        string_id = 'hamlet'
+        name = 'Hamlet'
+        do_create_realm(
+            string_id,
+            name,
+            restricted_to_domain=False,
+            invite_required=False
+        )
+
+        with self.settings(REALMS_HAVE_SUBDOMAINS=True):
+            with patch('zerver.forms.get_subdomain', return_value=string_id):
+                # start the password reset process by supplying an email address
+                result = self.client_post(
+                    '/accounts/password/reset/', {'email': email})
+
+        # check the redirect link telling you to check mail for password reset link
+        self.assertEqual(result.status_code, 302)
+        self.assertTrue(result["Location"].endswith(
+            "/accounts/password/reset/done/"))
+        result = self.client_get(result["Location"])
+
+        self.assert_in_response("Check your email to finish the process.", result)
+
+        from django.core.mail import outbox
+        self.assertEqual(len(outbox), 1)
+        message = outbox.pop()
+        self.assertIn("hamlet@zulip.com does not\nhave an active account in http://",
+                      message.body)
+
+    def test_correct_subdomain(self):
+        # type: () -> None
+        email = self.example_email("hamlet")
+        string_id = 'zulip'
+
+        with self.settings(REALMS_HAVE_SUBDOMAINS=True):
+            with patch('zerver.forms.get_subdomain', return_value=string_id):
+                # start the password reset process by supplying an email address
+                result = self.client_post(
+                    '/accounts/password/reset/', {'email': email})
+
+        # check the redirect link telling you to check mail for password reset link
+        self.assertEqual(result.status_code, 302)
+        self.assertTrue(result["Location"].endswith(
+            "/accounts/password/reset/done/"))
+        result = self.client_get(result["Location"])
+
+        self.assert_in_response("Check your email to finish the process.", result)
+
+        from django.core.mail import outbox
+        self.assertEqual(len(outbox), 1)
+        message = outbox.pop()
+        self.assertIn("Psst. Word on the street is that you forgot your password,",
+                      message.body)
 
     def test_redirect_endpoints(self):
         # type: () -> None
@@ -155,13 +236,13 @@ class LoginTest(ZulipTestCase):
 
     def test_login(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        user_profile = get_user_profile_by_email('hamlet@zulip.com')
+        self.login(self.example_email("hamlet"))
+        user_profile = self.example_user('hamlet')
         self.assertEqual(get_session_dict_user(self.client.session), user_profile.id)
 
     def test_login_bad_password(self):
         # type: () -> None
-        self.login("hamlet@zulip.com", password="wrongpassword", fails=True)
+        self.login(self.example_email("hamlet"), password="wrongpassword", fails=True)
         self.assertIsNone(get_session_dict_user(self.client.session))
 
     def test_login_nonexist_user(self):
@@ -184,10 +265,10 @@ class LoginTest(ZulipTestCase):
         Site.objects.clear_cache()
 
         with queries_captured() as queries:
-            self.register("test@zulip.com", "test")
+            self.register(self.nonreg_email('test'), "test")
         # Ensure the number of queries we make is not O(streams)
         self.assert_length(queries, 47)
-        user_profile = get_user_profile_by_email('test@zulip.com')
+        user_profile = self.nonreg_user('test')
         self.assertEqual(get_session_dict_user(self.client.session), user_profile.id)
         self.assertFalse(user_profile.enable_stream_desktop_notifications)
 
@@ -201,11 +282,11 @@ class LoginTest(ZulipTestCase):
         realm.deactivated = True
         realm.save(update_fields=["deactivated"])
 
-        result = self.register("test@zulip.com", "test")
+        result = self.register(self.nonreg_email('test'), "test")
         self.assert_in_response("has been deactivated", result)
 
         with self.assertRaises(UserProfile.DoesNotExist):
-            get_user_profile_by_email('test@zulip.com')
+            self.nonreg_user('test')
 
     def test_login_deactivated(self):
         # type: () -> None
@@ -216,12 +297,14 @@ class LoginTest(ZulipTestCase):
         realm.deactivated = True
         realm.save(update_fields=["deactivated"])
 
-        result = self.login_with_return("hamlet@zulip.com")
+        result = self.login_with_return(self.example_email("hamlet"))
         self.assert_in_response("has been deactivated", result)
 
     def test_logout(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
+        # We use the logout API, not self.logout, to make sure we test
+        # the actual logout code path.
         self.client_post('/accounts/logout/')
         self.assertIsNone(get_session_dict_user(self.client.session))
 
@@ -230,18 +313,18 @@ class LoginTest(ZulipTestCase):
         """
         You can log in even if your password contain non-ASCII characters.
         """
-        email = "test@zulip.com"
+        email = self.nonreg_email('test')
         password = u"hÃ¼mbÃ¼Çµ"
 
         # Registering succeeds.
-        self.register("test@zulip.com", password)
-        user_profile = get_user_profile_by_email(email)
+        self.register(email, password)
+        user_profile = self.nonreg_user('test')
         self.assertEqual(get_session_dict_user(self.client.session), user_profile.id)
-        self.client_post('/accounts/logout/')
+        self.logout()
         self.assertIsNone(get_session_dict_user(self.client.session))
 
         # Logging in succeeds.
-        self.client_post('/accounts/logout/')
+        self.logout()
         self.login(email, password)
         self.assertEqual(get_session_dict_user(self.client.session), user_profile.id)
 
@@ -250,14 +333,14 @@ class LoginTest(ZulipTestCase):
         """You will be redirected to the app's main page if you land on the
         login page when already logged in.
         """
-        self.login("cordelia@zulip.com")
+        self.login(self.example_email("cordelia"))
         response = self.client_get("/login/")
         self.assertEqual(response["Location"], "/")
 
 class InviteUserTest(ZulipTestCase):
 
     def invite(self, users, streams, body=''):
-        # type: (str, List[Text], str) -> HttpResponse
+        # type: (Text, List[Text], str) -> HttpResponse
         """
         Invites the specified users to Zulip with the specified streams.
 
@@ -273,7 +356,7 @@ class InviteUserTest(ZulipTestCase):
                                  "custom_body": body})
 
     def check_sent_emails(self, correct_recipients, custom_body=None):
-        # type: (List[str], Optional[str]) -> None
+        # type: (List[Text], Optional[str]) -> None
         from django.core.mail import outbox
         self.assertEqual(len(outbox), len(correct_recipients))
         email_recipients = [email.recipients()[0] for email in outbox]
@@ -287,37 +370,13 @@ class InviteUserTest(ZulipTestCase):
             self.assertIn("Message from ", outbox[0].body)
             self.assertIn(custom_body, outbox[0].body)
 
-    def test_bulk_invite_users(self):
-        # type: () -> None
-        """The bulk_invite_users code path is for the first user in a realm."""
-        self.login('hamlet@zulip.com')
-        invitees = ['alice@zulip.com', 'bob@zulip.com']
-        params = {
-            'invitee_emails': ujson.dumps(invitees),
-        }
-        result = self.client_post('/json/invite/bulk', params)
-        self.assert_json_success(result)
-        self.check_sent_emails(invitees)
-
-    def test_bulk_invite_users_invalid_emails(self):
-        # type: () -> None
-        self.login('hamlet@zulip.com')
-        invitees = ['alice@zulip.com', 'bobnoatzulip.com']
-        params = {
-            'invitee_emails': ujson.dumps(invitees),
-        }
-        self.assert_json_error(
-            self.client_post('/json/invite/bulk', params),
-            'Some emails did not validate, so we didn\'t send any invitations.')
-        self.check_sent_emails([])
-
     def test_successful_invite_user(self):
         # type: () -> None
         """
         A call to /json/invite_users with valid parameters causes an invitation
         email to be sent.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         invitee = "alice-test@zulip.com"
         self.assert_json_success(self.invite(invitee, ["Denmark"]))
         self.assertTrue(find_key_by_email(invitee))
@@ -329,7 +388,7 @@ class InviteUserTest(ZulipTestCase):
         A call to /json/invite_users with valid parameters causes an invitation
         email to be sent.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         invitee = "alice-test@zulip.com"
         body = "Custom Text."
         self.assert_json_success(self.invite(invitee, ["Denmark"], body))
@@ -342,7 +401,7 @@ class InviteUserTest(ZulipTestCase):
         A call to /json/invite_users with valid parameters causes an invitation
         email to be sent.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         email = "alice-test@zulip.com"
         invitee = "Alice Test <{}>".format(email)
         self.assert_json_success(self.invite(invitee, ["Denmark"]))
@@ -355,7 +414,7 @@ class InviteUserTest(ZulipTestCase):
         A call to /json/invite_users with valid parameters causes an invitation
         email to be sent.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         email = "alice-test@zulip.com"
         email2 = "bob-test@zulip.com"
         invitee = "Alice Test <{}>, {}".format(email, email2)
@@ -376,7 +435,7 @@ class InviteUserTest(ZulipTestCase):
         realm.notifications_stream = notifications_stream
         realm.save()
 
-        self.login('hamlet@zulip.com')
+        self.login(self.example_email("hamlet"))
         invitee = 'alice-test@zulip.com'
         self.assert_json_success(self.invite(invitee, ['Denmark']))
         self.assertTrue(find_key_by_email(invitee))
@@ -392,21 +451,21 @@ class InviteUserTest(ZulipTestCase):
         Test that a new user invited to a stream receives some initial
         history but only from public streams.
         """
-        self.login("hamlet@zulip.com")
-        user_profile = get_user_profile_by_email("hamlet@zulip.com")
+        self.login(self.example_email('hamlet'))
+        user_profile = self.example_user('hamlet')
         private_stream_name = "Secret"
         self.make_stream(private_stream_name, invite_only=True)
         self.subscribe_to_stream(user_profile.email, private_stream_name)
-        public_msg_id = self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM,
+        public_msg_id = self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM,
                                           "Public topic", "Public message")
-        secret_msg_id = self.send_message("hamlet@zulip.com", private_stream_name, Recipient.STREAM,
+        secret_msg_id = self.send_message(self.example_email("hamlet"), private_stream_name, Recipient.STREAM,
                                           "Secret topic", "Secret message")
-        invitee = "alice-test@zulip.com"
+        invitee = self.nonreg_email('alice')
         self.assert_json_success(self.invite(invitee, [private_stream_name, "Denmark"]))
         self.assertTrue(find_key_by_email(invitee))
 
-        self.submit_reg_form_for_user("alice-test@zulip.com", "password")
-        invitee_profile = get_user_profile_by_email(invitee)
+        self.submit_reg_form_for_user(invitee, "password")
+        invitee_profile = self.nonreg_user('alice')
         invitee_msg_ids = [um.message_id for um in
                            UserMessage.objects.filter(user_profile=invitee_profile)]
         self.assertTrue(public_msg_id in invitee_msg_ids)
@@ -417,7 +476,7 @@ class InviteUserTest(ZulipTestCase):
         """
         Invites multiple users with a variety of delimiters.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         # Intentionally use a weird string.
         self.assert_json_success(self.invite(
             """bob-test@zulip.com,     carol-test@zulip.com,
@@ -435,7 +494,7 @@ earl-test@zulip.com""", ["Denmark"]))
         """
         Tests inviting with various missing or invalid parameters.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         self.assert_json_error(
             self.client_post("/json/invite_users", {"invitee_emails": "foo@zulip.com",
                                                     "custom_body": ''}),
@@ -457,7 +516,7 @@ earl-test@zulip.com""", ["Denmark"]))
         """
         Tests inviting to a non-existent stream.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         self.assert_json_error(self.invite("iago-test@zulip.com", ["NotARealStream"]),
                                "Stream does not exist: NotARealStream. No invites were sent.")
         self.check_sent_emails([])
@@ -467,16 +526,16 @@ earl-test@zulip.com""", ["Denmark"]))
         """
         If you invite an address already using Zulip, no invitation is sent.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         self.assert_json_error(
             self.client_post("/json/invite_users",
-                             {"invitee_emails": "hamlet@zulip.com",
+                             {"invitee_emails": self.example_email("hamlet"),
                               "stream": ["Denmark"],
                               "custom_body": ''}),
             "We weren't able to invite anyone.")
         self.assertRaises(PreregistrationUser.DoesNotExist,
                           lambda: PreregistrationUser.objects.get(
-                              email="hamlet@zulip.com"))
+                              email=self.example_email("hamlet")))
         self.check_sent_emails([])
 
     def test_invite_some_existing_some_new(self):
@@ -485,9 +544,9 @@ earl-test@zulip.com""", ["Denmark"]))
         If you invite a mix of already existing and new users, invitations are
         only sent to the new users.
         """
-        self.login("hamlet@zulip.com")
-        existing = ["hamlet@zulip.com", "othello@zulip.com"]
-        new = ["foo-test@zulip.com", "bar-test@zulip.com"]
+        self.login(self.example_email("hamlet"))
+        existing = [self.example_email("hamlet"), u"othello@zulip.com"]
+        new = [u"foo-test@zulip.com", u"bar-test@zulip.com"]
 
         result = self.client_post("/json/invite_users",
                                   {"invitee_emails": "\n".join(existing + new),
@@ -521,7 +580,7 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
         zulip_realm.restricted_to_domain = True
         zulip_realm.save()
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         external_address = "foo@example.com"
 
         self.assert_json_error(
@@ -538,7 +597,7 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
         zulip_realm.restricted_to_domain = False
         zulip_realm.save()
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         external_address = "foo@example.com"
 
         self.assert_json_success(self.invite(external_address, ["Denmark"]))
@@ -556,7 +615,7 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
         zulip_realm.restricted_to_domain = False
         zulip_realm.save()
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         external_address = "foo@example.com"
 
         self.assert_json_success(self.invite(external_address, ["Denmark"]))
@@ -574,20 +633,20 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
         """
         Inviting someone to streams with non-ASCII characters succeeds.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         invitee = "alice-test@zulip.com"
 
         stream_name = u"hÃ¼mbÃ¼Çµ"
 
         # Make sure we're subscribed before inviting someone.
-        self.subscribe_to_stream("hamlet@zulip.com", stream_name)
+        self.subscribe_to_stream(self.example_email("hamlet"), stream_name)
 
         self.assert_json_success(self.invite(invitee, [stream_name]))
 
     def test_refer_friend(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        self.login(self.example_email("hamlet"))
+        user = self.example_user('hamlet')
         user.invites_granted = 1
         user.invites_used = 0
         user.save()
@@ -599,13 +658,13 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
         # verify this works
         Referral.objects.get(user_profile=user, email=invitee)
 
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        user = self.example_user('hamlet')
         self.assertEqual(user.invites_used, 1)
 
     def test_refer_friend_no_email(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        self.login(self.example_email("hamlet"))
+        user = self.example_user('hamlet')
         user.invites_granted = 1
         user.invites_used = 0
         user.save()
@@ -614,13 +673,13 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
             self.client_post('/json/refer_friend', dict(email='')),
             "No email address specified")
 
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        user = self.example_user('hamlet')
         self.assertEqual(user.invites_used, 0)
 
     def test_refer_friend_no_invites(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        self.login(self.example_email("hamlet"))
+        user = self.example_user('hamlet')
         user.invites_granted = 1
         user.invites_used = 1
         user.save()
@@ -630,45 +689,46 @@ so we didn't send them an invitation. We did send invitations to everyone else!"
             self.client_post('/json/refer_friend', dict(email=invitee)),
             "Insufficient invites")
 
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        user = self.example_user('hamlet')
         self.assertEqual(user.invites_used, 1)
 
     def test_invitation_reminder_email(self):
         # type: () -> None
         from django.core.mail import outbox
-        current_user_email = "hamlet@zulip.com"
+
+        # All users belong to zulip realm
+        referrer_user = 'hamlet'
+        current_user_email = self.example_email(referrer_user)
         self.login(current_user_email)
-        invitee = "alice-test@zulip.com"
+        invitee = self.nonreg_email('alice')
         self.assert_json_success(self.invite(invitee, ["Denmark"]))
         self.assertTrue(find_key_by_email(invitee))
         self.check_sent_emails([invitee])
 
         data = {"email": invitee, "referrer_email": current_user_email}
         invitee = get_prereg_user_by_email(data["email"])
-        referrer = get_user_profile_by_email(data["referrer_email"])
+        referrer = self.example_user(referrer_user)
         link = Confirmation.objects.get_link_for_object(invitee, host=referrer.realm.host)
         context = common_context(referrer)
         context.update({
             'activate_url': link,
-            'referrer': referrer,
+            'referrer_name': referrer.full_name,
+            'referrer_email': referrer.email,
+            'referrer_realm_name': referrer.realm.name,
             'verbose_support_offers': settings.VERBOSE_SUPPORT_OFFERS,
             'support_email': settings.ZULIP_ADMINISTRATOR
         })
         with self.settings(EMAIL_BACKEND='django.core.mail.backends.console.EmailBackend'):
-            send_local_email_template_with_delay(
-                [{'email': data["email"], 'name': ""}],
-                "zerver/emails/invitation/invitation_reminder_email",
-                context,
-                datetime.timedelta(days=0),
-                tags=["invitation-reminders"],
-                sender={'email': settings.ZULIP_ADMINISTRATOR, 'name': 'Zulip'})
+            send_future_email(
+                "zerver/emails/invitation_reminder", data["email"],
+                from_email=settings.ZULIP_ADMINISTRATOR, context=context)
         email_jobs_to_deliver = ScheduledJob.objects.filter(
             type=ScheduledJob.EMAIL,
-            scheduled_timestamp__lte=timezone.now())
+            scheduled_timestamp__lte=timezone_now())
         self.assertEqual(len(email_jobs_to_deliver), 1)
         email_count = len(outbox)
         for job in email_jobs_to_deliver:
-            self.assertTrue(send_email_job(job))
+            self.assertTrue(send_email(**ujson.loads(job.data)))
         self.assertEqual(len(outbox), email_count + 1)
 
 class InviteeEmailsParserTests(TestCase):
@@ -712,7 +772,7 @@ class EmailUnsubscribeTests(ZulipTestCase):
         self.assert_in_response('Unknown email unsubscribe request', result)
 
         # An unknown message type "fake" produces an error.
-        user_profile = get_user_profile_by_email("hamlet@zulip.com")
+        user_profile = self.example_user('hamlet')
         unsubscribe_link = one_click_unsubscribe_link(user_profile, "fake")
         result = self.client_get(urllib.parse.urlparse(unsubscribe_link).path)
         self.assert_in_response('Unknown email unsubscribe request', result)
@@ -724,7 +784,7 @@ class EmailUnsubscribeTests(ZulipTestCase):
         e-mails that you can click even when logged out to update your
         email notification settings.
         """
-        user_profile = get_user_profile_by_email("hamlet@zulip.com")
+        user_profile = self.example_user('hamlet')
         user_profile.enable_offline_email_notifications = True
         user_profile.save()
 
@@ -734,7 +794,7 @@ class EmailUnsubscribeTests(ZulipTestCase):
 
         self.assertEqual(result.status_code, 200)
         # Circumvent user_profile caching.
-        user_profile = UserProfile.objects.get(email="hamlet@zulip.com")
+        user_profile = UserProfile.objects.get(email=self.example_email("hamlet"))
         self.assertFalse(user_profile.enable_offline_email_notifications)
 
     def test_welcome_unsubscribe(self):
@@ -743,8 +803,8 @@ class EmailUnsubscribeTests(ZulipTestCase):
         We provide one-click unsubscribe links in welcome e-mails that you can
         click even when logged out to stop receiving them.
         """
-        email = "hamlet@zulip.com"
-        user_profile = get_user_profile_by_email("hamlet@zulip.com")
+        email = self.example_email("hamlet")
+        user_profile = self.example_user('hamlet')
 
         # Simulate a new user signing up, which enqueues 2 welcome e-mails.
         enqueue_welcome_emails(email, "King Hamlet")
@@ -769,12 +829,15 @@ class EmailUnsubscribeTests(ZulipTestCase):
         Unsubscribing from these emails also dequeues any digest email jobs that
         have been queued.
         """
-        email = "hamlet@zulip.com"
-        user_profile = get_user_profile_by_email("hamlet@zulip.com")
+        email = self.example_email("hamlet")
+        user_profile = self.example_user('hamlet')
         self.assertTrue(user_profile.enable_digest_emails)
 
         # Enqueue a fake digest email.
-        send_digest_email(user_profile, "", "", "")
+        context = {'name': '', 'realm_uri': '', 'unread_pms': [], 'hot_conversations': [],
+                   'new_users': [], 'new_streams': {'plain': []}, 'unsubscribe_link': ''}
+        send_future_email('zerver/emails/digest', display_email(user_profile), context=context)
+
         self.assertEqual(1, len(ScheduledJob.objects.filter(
             type=ScheduledJob.EMAIL, filter_string__iexact=email)))
 
@@ -785,7 +848,7 @@ class EmailUnsubscribeTests(ZulipTestCase):
         # The setting is toggled off, and scheduled jobs have been removed.
         self.assertEqual(result.status_code, 200)
         # Circumvent user_profile caching.
-        user_profile = UserProfile.objects.get(email="hamlet@zulip.com")
+        user_profile = UserProfile.objects.get(email=self.example_email("hamlet"))
         self.assertFalse(user_profile.enable_digest_emails)
         self.assertEqual(0, len(ScheduledJob.objects.filter(
             type=ScheduledJob.EMAIL, filter_string__iexact=email)))
@@ -823,7 +886,7 @@ class RealmCreationTest(ZulipTestCase):
             realm = get_realm(string_id)
             self.assertIsNotNone(realm)
             self.assertEqual(realm.string_id, string_id)
-            self.assertEqual(get_user_profile_by_email(email).realm, realm)
+            self.assertEqual(get_user(email, realm).realm, realm)
 
             # Check defaults
             self.assertEqual(realm.org_type, Realm.COMMUNITY)
@@ -832,6 +895,14 @@ class RealmCreationTest(ZulipTestCase):
 
             self.assertTrue(result["Location"].endswith("/"))
 
+            # Check welcome messages
+            for stream_name in ['general', 'social', 'zulip']:
+                stream = get_stream(stream_name, realm)
+                recipient = get_recipient(Recipient.STREAM, stream.id)
+                messages = Message.objects.filter(recipient=recipient)
+                self.assertEqual(len(messages), 1)
+                self.assertIn('Welcome to', messages[0].content)
+
     def test_create_realm_existing_email(self):
         # type: () -> None
         """
@@ -839,7 +910,7 @@ class RealmCreationTest(ZulipTestCase):
         a login page.
         """
         with self.settings(OPEN_REALM_CREATION=True):
-            email = 'hamlet@zulip.com'
+            email = self.example_email("hamlet")
             result = self.client_post('/create_realm/', {'email': email})
             self.assertEqual(result.status_code, 302)
             self.assertIn('login', result['Location'])
@@ -897,7 +968,7 @@ class RealmCreationTest(ZulipTestCase):
             realm = get_realm(string_id)
             self.assertIsNotNone(realm)
             self.assertEqual(realm.string_id, string_id)
-            self.assertEqual(get_user_profile_by_email(email).realm, realm)
+            self.assertEqual(get_user(email, realm).realm, realm)
 
             self.assertEqual(realm.name, realm_name)
             self.assertEqual(realm.subdomain, string_id)
@@ -943,14 +1014,15 @@ class RealmCreationTest(ZulipTestCase):
 
 class UserSignUpTest(ZulipTestCase):
 
-    def test_user_default_language(self):
+    def test_user_default_language_and_timezone(self):
         # type: () -> None
         """
         Check if the default language of new user is the default language
         of the realm.
         """
-        email = "newguy@zulip.com"
+        email = self.nonreg_email('newguy')
         password = "newpassword"
+        timezone = "US/Mountain"
         realm = get_realm('zulip')
         do_set_realm_property(realm, 'default_language', u"de")
 
@@ -967,11 +1039,12 @@ class UserSignUpTest(ZulipTestCase):
         self.assertEqual(result.status_code, 200)
 
         # Pick a password and agree to the ToS.
-        result = self.submit_reg_form_for_user(email, password)
+        result = self.submit_reg_form_for_user(email, password, timezone=timezone)
         self.assertEqual(result.status_code, 302)
 
-        user_profile = get_user_profile_by_email(email)
+        user_profile = self.nonreg_user('newguy')
         self.assertEqual(user_profile.default_language, realm.default_language)
+        self.assertEqual(user_profile.timezone, timezone)
         from django.core.mail import outbox
         outbox.pop()
 
@@ -980,7 +1053,7 @@ class UserSignUpTest(ZulipTestCase):
         """
         Check if signing up with an active email redirects to a login page.
         """
-        email = 'hamlet@zulip.com'
+        email = self.example_email("hamlet")
         result = self.client_post('/accounts/home/', {'email': email})
         self.assertEqual(result.status_code, 302)
         self.assertIn('login', result['Location'])
@@ -1016,7 +1089,7 @@ class UserSignUpTest(ZulipTestCase):
         password_auth_enabled is False.
         """
 
-        email = "newuser@zulip.com"
+        email = self.nonreg_email('newuser')
 
         result = self.client_post('/accounts/home/', {'email': email})
         self.assertEqual(result.status_code, 302)
@@ -1042,7 +1115,7 @@ class UserSignUpTest(ZulipTestCase):
 
         # User should now be logged in.
         self.assertEqual(result.status_code, 302)
-        user_profile = get_user_profile_by_email(email)
+        user_profile = self.nonreg_user('newuser')
         self.assertEqual(get_session_dict_user(self.client.session), user_profile.id)
 
     def test_signup_without_full_name(self):
@@ -1074,6 +1147,39 @@ class UserSignUpTest(ZulipTestCase):
              'key': find_key_by_email(email),
              'realm_org_type': Realm.COMMUNITY,
              'terms': True,
+             'from_confirmation': '1'})
+        self.assert_in_success_response(["You're almost there."], result)
+
+    def test_signup_with_full_name(self):
+        # type: () -> None
+        """
+        Check if signing up without a full name redirects to a registration
+        form.
+        """
+        email = "newguy@zulip.com"
+        password = "newpassword"
+
+        result = self.client_post('/accounts/home/', {'email': email})
+        self.assertEqual(result.status_code, 302)
+        self.assertTrue(result["Location"].endswith(
+            "/accounts/send_confirm/%s" % (email,)))
+        result = self.client_get(result["Location"])
+        self.assert_in_response("Check your email so we can get started.", result)
+
+        # Visit the confirmation link.
+        confirmation_url = self.get_confirmation_url_from_outbox(email)
+        result = self.client_get(confirmation_url)
+        self.assertEqual(result.status_code, 200)
+
+        result = self.client_post(
+            '/accounts/register/',
+            {'password': password,
+             'realm_name': 'Zulip Test',
+             'realm_subdomain': 'zuliptest',
+             'key': find_key_by_email(email),
+             'realm_org_type': Realm.COMMUNITY,
+             'terms': True,
+             'full_name': "New Guy",
              'from_confirmation': '1'})
         self.assert_in_success_response(["You're almost there."], result)
 
@@ -1239,8 +1345,10 @@ class UserSignUpTest(ZulipTestCase):
         with self.settings(REALMS_HAVE_SUBDOMAINS = True):
             request = HostRequestMock(host = realm.host)
             request.session = {} # type: ignore
-            form = HomepageForm({'email': 'user@acme.com'}, realm=realm)
-            self.assertIn("trying to join, zulip, only allows users with e-mail", form.errors['email'][0])
+            email = 'user@acme.com'
+            form = HomepageForm({'email': email}, realm=realm)
+            self.assertIn("Your email address, {}, is not in one of the domains".format(email),
+                          form.errors['email'][0])
 
     def test_failed_signup_due_to_invite_required(self):
         # type: () -> None
@@ -1249,16 +1357,20 @@ class UserSignUpTest(ZulipTestCase):
         realm.save()
         request = HostRequestMock(host = realm.host)
         request.session = {} # type: ignore
-        form = HomepageForm({'email': 'user@zulip.com'}, realm=realm)
-        self.assertIn("Please request an invite from", form.errors['email'][0])
+        email = 'user@zulip.com'
+        form = HomepageForm({'email': email}, realm=realm)
+        self.assertIn("Please request an invite for {} from".format(email),
+                      form.errors['email'][0])
 
     def test_failed_signup_due_to_nonexistent_realm(self):
         # type: () -> None
         with self.settings(REALMS_HAVE_SUBDOMAINS = True):
             request = HostRequestMock(host = 'acme.' + settings.EXTERNAL_HOST)
             request.session = {} # type: ignore
-            form = HomepageForm({'email': 'user@acme.com'}, realm=None)
-            self.assertIn("organization you are trying to join does not exist", form.errors['email'][0])
+            email = 'user@acme.com'
+            form = HomepageForm({'email': email}, realm=None)
+            self.assertIn("organization you are trying to join using {} does "
+                          "not exist".format(email), form.errors['email'][0])
 
     def test_registration_through_ldap(self):
         # type: () -> None
@@ -1376,14 +1488,39 @@ class UserSignUpTest(ZulipTestCase):
         mock_initialize.stop()
 
     @patch('DNS.dnslookup', return_value=[['sipbtest:*:20922:101:Fred Sipb,,,:/mit/sipbtest:/bin/athena/tcsh']])
+    def test_registration_email_for_mirror_dummy_user(self, ignored):
+        # type: (Any) -> None
+        user_profile = self.mit_user("sipbtest")
+        email = user_profile.email
+        user_profile.is_mirror_dummy = True
+        user_profile.is_active = False
+        user_profile.save()
+
+        with self.settings(REALMS_HAVE_SUBDOMAINS=True):
+            with patch('zerver.forms.get_subdomain', return_value='zephyr'):
+                with patch('zerver.views.registration.get_subdomain', return_value='zephyr'):
+                    result = self.client_post('/accounts/home/', {'email': email})
+                    self.assertEqual(result.status_code, 302)
+
+        from django.core.mail import outbox
+        for message in reversed(outbox):
+            if email in message.to:
+                # The main difference between the zephyr registation email
+                # and the normal one is this string
+                index = message.body.find('https://zephyr.zulipchat.com/zephyr')
+                if index >= 0:
+                    return
+        else:
+            raise AssertionError("Couldn't find the right confirmation email.")
+
+    @patch('DNS.dnslookup', return_value=[['sipbtest:*:20922:101:Fred Sipb,,,:/mit/sipbtest:/bin/athena/tcsh']])
     def test_registration_of_mirror_dummy_user(self, ignored):
         # type: (Any) -> None
         password = "test"
-        email = "sipbtest@mit.edu"
         subdomain = "sipb"
         realm_name = "MIT"
-
-        user_profile = get_user_profile_by_email(email)
+        user_profile = self.mit_user("sipbtest")
+        email = user_profile.email
         user_profile.is_mirror_dummy = True
         user_profile.is_active = False
         user_profile.save()
@@ -1448,9 +1585,8 @@ class UserSignUpTest(ZulipTestCase):
         Trying to activate an already-active mirror dummy user should just
         redirect to a login page.
         """
-        email = "sipbtest@mit.edu"
-
-        user_profile = get_user_profile_by_email(email)
+        user_profile = self.mit_user("sipbtest")
+        email = user_profile.email
         user_profile.is_mirror_dummy = True
         user_profile.is_active = True
         user_profile.save()
@@ -1481,29 +1617,29 @@ class DeactivateUserTest(ZulipTestCase):
 
     def test_deactivate_user(self):
         # type: () -> None
-        email = 'hamlet@zulip.com'
+        email = self.example_email("hamlet")
         self.login(email)
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        user = self.example_user('hamlet')
         self.assertTrue(user.is_active)
         result = self.client_delete('/json/users/me')
         self.assert_json_success(result)
-        user = get_user_profile_by_email('hamlet@zulip.com')
+        user = self.example_user('hamlet')
         self.assertFalse(user.is_active)
         self.login(email, fails=True)
 
     def test_do_not_deactivate_final_admin(self):
         # type: () -> None
-        email = 'iago@zulip.com'
+        email = self.example_email("iago")
         self.login(email)
-        user = get_user_profile_by_email('iago@zulip.com')
+        user = self.example_user('iago')
         self.assertTrue(user.is_active)
         result = self.client_delete('/json/users/me')
         self.assert_json_error(result, "Cannot deactivate the only organization administrator")
-        user = get_user_profile_by_email('iago@zulip.com')
+        user = self.example_user('iago')
         self.assertTrue(user.is_active)
         self.assertTrue(user.is_realm_admin)
-        email = 'hamlet@zulip.com'
-        user_2 = get_user_profile_by_email('hamlet@zulip.com')
+        email = self.example_email("hamlet")
+        user_2 = self.example_user('hamlet')
         do_change_is_admin(user_2, True)
         self.assertTrue(user_2.is_realm_admin)
         result = self.client_delete('/json/users/me')
@@ -1569,8 +1705,8 @@ class TestFindMyTeam(ZulipTestCase):
         result = self.client_get(url)
         content = result.content.decode('utf8')
         self.assertIn("Emails sent! You will only receive emails", content)
-        self.assertIn("iago@zulip.com", content)
-        self.assertIn("cordelia@zulip.com", content)
+        self.assertIn(self.example_email("iago"), content)
+        self.assertIn(self.example_email("cordelia"), content)
 
     def test_find_team_ignore_invalid_email(self):
         # type: () -> None
@@ -1578,7 +1714,7 @@ class TestFindMyTeam(ZulipTestCase):
         result = self.client_get(url)
         content = result.content.decode('utf8')
         self.assertIn("Emails sent! You will only receive emails", content)
-        self.assertIn("iago@zulip.com", content)
+        self.assertIn(self.example_email("iago"), content)
         self.assertNotIn("invalid_email", content)
 
     def test_find_team_zero_emails(self):
@@ -1590,7 +1726,7 @@ class TestFindMyTeam(ZulipTestCase):
 
     def test_find_team_one_email(self):
         # type: () -> None
-        data = {'emails': 'hamlet@zulip.com'}
+        data = {'emails': self.example_email("hamlet")}
         result = self.client_post('/find_my_team/', data)
         self.assertEqual(result.status_code, 302)
         self.assertEqual(result.url, '/find_my_team/?emails=hamlet%40zulip.com')
@@ -1620,3 +1756,124 @@ class ConfirmationKeyTest(ZulipTestCase):
         result = confirmation_key(request)
         self.assert_json_success(result)
         self.assert_in_response('xyzzy', result)
+
+class MobileAuthOTPTest(ZulipTestCase):
+    def test_xor_hex_strings(self):
+        # type: () -> None
+        self.assertEqual(xor_hex_strings('1237c81ab', '18989fd12'), '0aaf57cb9')
+        with self.assertRaises(AssertionError):
+            xor_hex_strings('1', '31')
+
+    def test_is_valid_otp(self):
+        # type: () -> None
+        self.assertEqual(is_valid_otp('1234'), False)
+        self.assertEqual(is_valid_otp('1234abcd' * 8), True)
+        self.assertEqual(is_valid_otp('1234abcZ' * 8), False)
+
+    def test_ascii_to_hex(self):
+        # type: () -> None
+        self.assertEqual(ascii_to_hex('ZcdR1234'), '5a63645231323334')
+        self.assertEqual(hex_to_ascii('5a63645231323334'), 'ZcdR1234')
+
+    def test_otp_encrypt_api_key(self):
+        # type: () -> None
+        hamlet = self.example_user('hamlet')
+        hamlet.api_key = '12ac' * 8
+        otp = '7be38894' * 8
+        result = otp_encrypt_api_key(hamlet, otp)
+        self.assertEqual(result, '4ad1e9f7' * 8)
+
+        decryped = otp_decrypt_api_key(result, otp)
+        self.assertEqual(decryped, hamlet.api_key)
+
+class LoginOrAskForRegistrationTestCase(ZulipTestCase):
+    def test_confirm(self):
+        # type: () -> None
+        request = POSTRequestMock({}, None)
+        email = 'new@zulip.com'
+        user_profile = None
+        full_name = 'New User'
+        invalid_subdomain = False
+        result = login_or_register_remote_user(
+            request,
+            email,
+            user_profile,
+            full_name=full_name,
+            invalid_subdomain=invalid_subdomain)
+        self.assert_in_response('You attempted to login using the email account',
+                                result)
+        self.assert_in_response('new@zulip.com, but this email address does not',
+                                result)
+
+    def test_invalid_subdomain(self):
+        # type: () -> None
+        request = POSTRequestMock({}, None)
+        email = 'new@zulip.com'
+        user_profile = None
+        full_name = 'New User'
+        invalid_subdomain = True
+        response = login_or_register_remote_user(
+            request,
+            email,
+            user_profile,
+            full_name=full_name,
+            invalid_subdomain=invalid_subdomain)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login/?subdomain=1', response.url)
+
+    def test_invalid_email(self):
+        # type: () -> None
+        request = POSTRequestMock({}, None)
+        email = None
+        user_profile = None
+        full_name = 'New User'
+        invalid_subdomain = False
+        response = login_or_register_remote_user(
+            request,
+            email,
+            user_profile,
+            full_name=full_name,
+            invalid_subdomain=invalid_subdomain)
+        self.assert_in_response('Please click the following button if '
+                                'you wish to register', response)
+
+    def test_login_under_subdomains(self):
+        # type: () -> None
+        request = POSTRequestMock({}, None)
+        setattr(request, 'session', self.client.session)
+        user_profile = self.example_user('hamlet')
+        user_profile.backend = 'zproject.backends.GitHubAuthBackend'
+        full_name = 'Hamlet'
+        invalid_subdomain = False
+        with self.settings(REALMS_HAVE_SUBDOMAINS=True):
+            response = login_or_register_remote_user(
+                request,
+                user_profile.email,
+                user_profile,
+                full_name=full_name,
+                invalid_subdomain=invalid_subdomain)
+            user_id = get_session_dict_user(getattr(request, 'session'))
+            self.assertEqual(user_id, user_profile.id)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('http://zulip.testserver', response.url)
+
+    def test_login_without_subdomains(self):
+        # type: () -> None
+        request = POSTRequestMock({}, None)
+        setattr(request, 'session', self.client.session)
+        setattr(request, 'get_host', lambda: 'localhost')
+        user_profile = self.example_user('hamlet')
+        user_profile.backend = 'zproject.backends.GitHubAuthBackend'
+        full_name = 'Hamlet'
+        invalid_subdomain = False
+        with self.settings(REALMS_HAVE_SUBDOMAINS=False):
+            response = login_or_register_remote_user(
+                request,
+                user_profile.email,
+                user_profile,
+                full_name=full_name,
+                invalid_subdomain=invalid_subdomain)
+            user_id = get_session_dict_user(getattr(request, 'session'))
+            self.assertEqual(user_id, user_profile.id)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('http://localhost', response.url)

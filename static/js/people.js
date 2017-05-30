@@ -180,6 +180,16 @@ exports.reply_to_to_user_ids_string = function (emails_string) {
     return user_ids.join(',');
 };
 
+exports.get_user_time = function (user_id) {
+    var user_timezone = people.get_person_from_user_id(user_id).timezone;
+    if (user_timezone) {
+        if (page_params.twenty_four_hour_time) {
+            return moment().tz(user_timezone).format("HH:mm");
+        }
+        return moment().tz(user_timezone).format("hh:mm A");
+    }
+};
+
 exports.emails_strings_to_user_ids_string = function (emails_string) {
     var emails = emails_string.split(',');
     return exports.email_list_to_user_ids_string(emails);
@@ -669,8 +679,8 @@ exports.is_my_user_id = function (user_id) {
     return user_id.toString() === my_user_id.toString();
 };
 
-$(function () {
-    _.each(page_params.people_list, function (person) {
+exports.initialize = function () {
+    _.each(page_params.realm_users, function (person) {
         exports.add_in_realm(person);
     });
 
@@ -683,9 +693,9 @@ $(function () {
 
     exports.initialize_current_user(page_params.user_id);
 
-    delete page_params.people_list; // We are the only consumer of this.
+    delete page_params.realm_users; // We are the only consumer of this.
     delete page_params.cross_realm_bots;
-});
+};
 
 return exports;
 

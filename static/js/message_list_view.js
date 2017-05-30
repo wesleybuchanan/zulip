@@ -71,8 +71,11 @@ function add_display_time(group, message_container, prev) {
         if (time.toDateString() !== prev_time.toDateString()) {
             // NB: show_date is HTML, inserted into the document without escaping.
             group.show_date = (timerender.render_date(time, prev_time))[0].outerHTML;
+            group.show_date_separator = true;
         }
     } else {
+        // Show the date in the recipient bar, but not a date separator bar.
+        group.show_date_separator = false;
         group.show_date = (timerender.render_date(time))[0].outerHTML;
     }
 
@@ -360,7 +363,8 @@ MessageListView.prototype = {
 
                 if (same_day(last_msg_container, first_msg_container)) {
                     // Clear the date if it is the same as the last group
-                    second_group.show_date = undefined;
+                    delete second_group.show_date;
+                    delete second_group.show_date_separator;
                 }
             }
             message_actions.append_groups = new_message_groups;
@@ -577,7 +581,7 @@ MessageListView.prototype = {
                 _.last(last_message_group.message_containers).msg.historical;
         }
 
-        var stream_name = narrow.stream();
+        var stream_name = narrow_state.stream();
         if (stream_name !== undefined) {
             // If user narrows to a stream, doesn't update
             // trailing bookend if user is subscribed.
@@ -812,7 +816,8 @@ MessageListView.prototype = {
         header.replaceWith(rendered_recipient_row);
     },
 
-    _rerender_message: function MessageListView___rerender_message(message_container) {
+    _rerender_message: function MessageListView___rerender_message(message_container,
+                                                                   message_content_edited) {
         var row = this.get_row(message_container.msg.id);
         var was_selected = this.list.selected_message() === message_container.msg;
 
@@ -821,6 +826,9 @@ MessageListView.prototype = {
         this._maybe_format_me_message(message_container);
 
         var rendered_msg = $(this._get_message_template(message_container));
+        if (message_content_edited) {
+            rendered_msg.addClass("fade-in-message");
+        }
         this._post_process_dom_messages(rendered_msg.get());
         row.replaceWith(rendered_msg);
 
@@ -829,7 +837,8 @@ MessageListView.prototype = {
         }
     },
 
-    rerender_messages: function MessageListView__rerender_messages(messages) {
+    rerender_messages: function MessageListView__rerender_messages(messages,
+                                                                   message_content_edited) {
         var self = this;
 
         // Convert messages to list messages
@@ -851,13 +860,13 @@ MessageListView.prototype = {
                 message_groups.push(current_group);
                 current_group = [];
             }
-            self._rerender_message(message_container);
+            self._rerender_message(message_container, message_content_edited);
         });
         if (current_group.length !== 0) {
             message_groups.push(current_group);
         }
         _.each(message_groups, function (messages_in_group) {
-            self._rerender_header(messages_in_group);
+            self._rerender_header(messages_in_group, message_content_edited);
         });
     },
 

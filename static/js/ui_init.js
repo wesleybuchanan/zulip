@@ -68,7 +68,7 @@ $(function () {
     });
 
     message_viewport.message_pane.mousewheel(function (e, delta) {
-        if (!ui_state.home_tab_obscured()) {
+        if (!modals.is_active()) {
             // In the message view, we use a throttled mousewheel handler.
             throttled_mousewheelhandler(e, delta);
         }
@@ -96,11 +96,6 @@ $(function () {
             || ((delta < 0) && (scroll >= max_scroll))) {
             e.preventDefault();
         }
-    });
-
-    // Override the #compose mousewheel prevention below just for the emoji box
-    $('.emoji_popover').mousewheel(function (e) {
-        e.stopPropagation();
     });
 
     // Ignore wheel events in the compose area which weren't already handled above.
@@ -145,7 +140,7 @@ $(function () {
         $(this).removeClass("active");
     });
 
-    $("#stream").on('blur', function () { compose.decorate_stream_bar(this.value); });
+    $("#stream").on('blur', function () { compose_actions.decorate_stream_bar(this.value); });
 
     $(window).on('blur', function () {
         $(document.body).addClass('window_blurred');
@@ -214,20 +209,20 @@ $(function () {
 
     $('.copy_message[data-toggle="tooltip"]').tooltip();
 
-    $("body").on("mouseover", "#message_edit_content", function () {
+    $("body").on("mouseover", ".message_edit_content", function () {
         $(this).closest(".message_row").find(".copy_message").show();
     });
 
-    $("body").on("mouseout", "#message_edit_content", function () {
+    $("body").on("mouseout", ".message_edit_content", function () {
         $(this).closest(".message_row").find(".copy_message").hide();
     });
 
-    $("body").on("mouseover", ".copy_message", function () {
+    $("body").on("mouseenter", ".copy_message", function () {
         $(this).show();
         $(this).tooltip('show');
     });
 
-    $("body").on("mouseout", ".copy_message", function () {
+    $("body").on("mouseleave", ".copy_message", function () {
         $(this).tooltip('hide');
     });
 
@@ -246,18 +241,22 @@ $(function () {
 
     // initialize other stuff
     reload.initialize();
+    people.initialize();
+    bot_data.initialize(); // Must happen after people.initialize()
+    markdown.initialize();
     composebox_typeahead.initialize();
     search.initialize();
     tutorial.initialize();
     notifications.initialize();
     gear_menu.initialize();
+    settings_sections.initialize();
     hashchange.initialize();
     pointer.initialize();
     unread_ui.initialize();
     activity.initialize();
     emoji.initialize();
     hotspots.initialize();
-    settings_sections.initialize();
+    compose_fade.initialize();
 });
 
 

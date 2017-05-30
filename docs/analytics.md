@@ -72,45 +72,8 @@ Note: In most cases, we do not store rows with value 0. See
 
 CountStats declare what analytics data should be generated and stored. The
 CountStat class definition and instances live in `analytics/lib/counts.py`.
-These declarations, along with any associated database queries, specify at a
-high level which tables should be populated by the system and with what
-data.
-
-The core of a CountStat object is a parameterized raw SQL query, along with
-the respective parameter settings. A CountStat object + an end_time combine
-to give a full SQL query that aggregates data from the production database
-tables and inserts it into a *Count table.
-
-Each CountStat object has the following fields. We'll use the
-`active_users:is_bot:day` CountStat as a running example, which is a stat
-that keeps track of the number of active humans and active bots in each
-realm.
-
-- property: A unique, human-readable description, of the form
-  "\<english_description\>:\<subgroup_name\>:\<frequency\>". Example:
-  "active_users:is_bot:day".
-- zerver_count_query: A ZerverCountQuery object, which contains a
-  - zerver_table: A table in zerver/models.py, to which filter_args are
-    applied.  E.g. UserProfile.
-  - analytics_table: The *Count table where the data is initially
-    collected. E.g. RealmCount.
-  - query: A parameterized raw SQL string. E.g. count_user_by_realm_query.
-- filter_args: Filters the zerver_table. Example: {'is_active': True}, which
-  restricts the UserProfiles under consideration to those with
-  `UserProfile.is_active = True` .
-- group_by: The (table, field) being used for the
-  subgroup. E.g. (UserProfile, is_bot).
-- frequency: How often to run the CountStat. Either 'hour' or
-  'day'. E.g. 'day'.
-- interval: Either 'hour', 'day', or 'gauge'. If 'hour' or 'day', we're
-  interested in events that happen in the hour or day preceeding the
-  end_time. If gauge, we're interested in the state of the system at
-  end_time. Example: 'gauge'. (If 'hour', our example CountStat would
-  instead be measuring the number of currently active users who joined in
-  the last hour).
-
-Note that one should be careful about making new gauge CountStats; see
-[Performance Strategy](#performance-strategy) below.
+These declarations specify at a high level which tables should be populated
+by the system and with what data.
 
 ## The FillState table
 
@@ -160,8 +123,7 @@ efficient:
 - Not storing rows when the value is 0. An hourly user stat would otherwise
   collect 24 * 365 * roughly .5MB per db row = 4GB of data per user per
   year, most of whose values are 0. A related note is to be cautious about
-  adding gauge queries, since gauge measurements are typically non-zero
-  rather than being typically zero.
+  adding queries that are typically non-0 instead of being typically 0.
 
 ## Backend Testing
 
@@ -246,3 +208,13 @@ Tips and tricks:
   bars in a bar graph) in your browser, since there is an interaction layer
   on top of it. But if you hunt around the document tree you should be able
   to find it.
+
+### /activity page
+
+- There's a somewhat less developed /activity page, for server
+  administrators, showing data on all the realms on a server.  To
+  access it, you need to have the `is_staff` bit set on your
+  UserProfile object.  You can set it using `manage.py shell` and
+  editing the UserProfile object directly.  A great future project is
+  to clean up that page's data sources, and make this a documented
+  interface.

@@ -120,7 +120,13 @@ exports.initialize = function () {
         },
     });
 
-    $("#invite-user").addClass("show");
+    modals.open_overlay({
+        name: 'invite',
+        overlay: $('#invite-user'),
+        on_close: function () {
+            hashchange.exit_modal();
+        },
+    });
 };
 
 $(function () {

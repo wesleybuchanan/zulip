@@ -1,3 +1,9 @@
+.right-sidebar {
+    -webkit-font-smoothing: antialiased;
+    color: #555;
+    font-size: 0.89rem;
+}
+
 #group-pms li:hover,
 #user_presences li:hover {
     background-color: #e2e8dd;
@@ -15,11 +21,6 @@
     overflow-y: auto;
 }
 
-#user_presences .user_sidebar_entry:hover,
-#group-pms .group-pms-sidebar-entry:hover {
-    cursor: pointer;
-}
-
 #user_presences li {
     overflow: hidden;
     white-space: nowrap;
@@ -34,6 +35,11 @@
 #user_presences li,
 #group-pms li {
     list-style-type: none;
+}
+
+#group-pm-title {
+    margin: 10px 0px 0px 0px;
+    display: inline-block;
 }
 
 .user-status-indicator,
@@ -75,7 +81,7 @@
 
 #user_presences a,
 #group-pms a {
-    color: #333;
+    color: inherit;
 }
 
 #invite-user-link i {
@@ -124,18 +130,24 @@
     width: 170px;
 }
 
+.selectable_sidebar_block {
+    cursor: pointer;
+}
+
 .user_sidebar_entry .count,
 .group-pms-sidebar-entry .count {
     position: absolute;
-    right: 20px;
+    right: 25px;
     top: 4px;
-    padding: 2px 3px 1px 3px;
+    padding: 2px 4px 1px 4px;
     background: #80837f;
     border-radius: 0px;
     color: #ffffff;
     font-size: 12px;
     font-weight: normal;
     letter-spacing: 0.6px;
+
+    border-radius: 4px;
 }
 
 .group-pms-sidebar-entry .count {
@@ -196,36 +208,4 @@
 .user-list-filter,
 .add-user-list-filter {
     width: 80%;
-}
-
-#user-list .input-append {
-    margin-bottom: 5px;
-    font-size: 90%;
-    letter-spacing: -.3em;
-}
-
-#user-list #clear_search_people_button:hover {
-    color: #000;
-}
-
-#user-list #clear_search_people_button[disabled] {
-    visibility: hidden;
-}
-
-#user-list #clear_search_people_button,
-#user-list #clear_search_people_button[disabled]:hover {
-    position: relative;
-    right: 20px;
-    background: none;
-    border: none;
-    height: 30px;
-    text-align: center;
-    padding: 4px;
-    color: #ccc;
-    font-size: 12px;
-    text-shadow: none;
-    box-shadow: none;
-    -webkit-box-shadow: none;
-    -moz-box-shadow: none;
-    z-index: 5;
 }

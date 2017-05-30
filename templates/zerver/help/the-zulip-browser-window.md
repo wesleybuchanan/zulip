@@ -25,9 +25,9 @@ that you have received will be hidden from the message table.
 
 ### Compose box
 The **Compose box** is located under the message table. By default, the compose
-box consists of two buttons: **New stream message** and **New private message**.
+box consists of two buttons: **New topic** and **New private message**.
 
-However, when either the **New stream message** or **New private message**
+However, when either the **New topic** or **New private message**
 button is clicked or when you are in the middle of composing a message, the
 compose box transforms to include:
 
@@ -62,13 +62,16 @@ you have received.
 private messages that you have received.
 * Clicking on the **Starred messages** filter narrows your view to show all
 messages that you have [starred](/help/star-a-message).
-* Clicking on the **@-mentions** filter narrows your view to show all messages
+* Clicking on the **Mentions** filter narrows your view to show all messages
 in which you were [mentioned](/help/at-mention-a-team-member).
 
 ### Streams section
 Located below the preset filters, the **Streams** section shows all the streams
 that you are subscribed to.
 
+* Public streams are represented by a hashtag (<span style="font-size: 1.3rem;
+font-weight: 800">#</span>) icon, and private streams are represented by a lock
+(<i class="icon-vector-lock"></i>) icon.
 * There are two icons located next to the **Streams** section header:
     * Clicking the magnifying glass (<i class="icon-vector-search"></i>) icon
     reveals an input that allows you to search for streams.

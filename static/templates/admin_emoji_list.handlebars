@@ -4,7 +4,7 @@
         <span class="emoji_name">{{name}}</span>
     </td>
     <td>
-        <span class="emoji_image"><a href="{{source_url}}"><img src="{{display_url}}" alt="{{name}}" /></a></span>
+        <span class="emoji_image"><a href="{{source_url}}"><img src="{{source_url}}" alt="{{name}}" /></a></span>
     </td>
     <td>
         {{#if author}}
@@ -15,8 +15,8 @@
     </td>
     {{#if is_admin}}
     <td>
-        <button class="button delete btn-danger" data-emoji-name="{{name}}">
-            {{t "Delete" }}
+        <button class="button white rounded small delete btn-danger" data-emoji-name="{{name}}">
+            <i class="icon-vector-trash" aria-hidden="true"></i>
         </button>
     </td>
     {{/if}}

@@ -1,11 +1,12 @@
 
-from django.utils import timezone
+from django.utils.timezone import now as timezone_now
 
 from zerver.lib.actions import do_create_user, do_deactivate_user, \
     do_activate_user, do_reactivate_user, do_change_password, \
-    do_change_user_email, do_change_avatar_fields, do_change_bot_owner
+    do_change_user_email, do_change_avatar_fields, do_change_bot_owner, \
+    do_regenerate_api_key
 from zerver.lib.test_classes import ZulipTestCase
-from zerver.models import RealmAuditLog, get_realm, get_user_profile_by_email
+from zerver.models import RealmAuditLog, get_realm
 
 from datetime import timedelta
 from django.contrib.auth.password_validation import validate_password
@@ -14,7 +15,7 @@ class TestRealmAuditLog(ZulipTestCase):
     def test_user_activation(self):
         # type: () -> None
         realm = get_realm('zulip')
-        now = timezone.now()
+        now = timezone_now()
         user = do_create_user('email', 'password', realm, 'full_name', 'short_name')
         do_deactivate_user(user)
         do_activate_user(user)
@@ -30,8 +31,8 @@ class TestRealmAuditLog(ZulipTestCase):
 
     def test_change_password(self):
         # type: () -> None
-        now = timezone.now()
-        user = get_user_profile_by_email("hamlet@zulip.com")
+        now = timezone_now()
+        user = self.example_user('hamlet')
         password = 'test1'
         do_change_password(user, password)
         self.assertEqual(RealmAuditLog.objects.filter(event_type='user_change_password',
@@ -40,8 +41,8 @@ class TestRealmAuditLog(ZulipTestCase):
 
     def test_change_email(self):
         # type: () -> None
-        now = timezone.now()
-        user = get_user_profile_by_email("hamlet@zulip.com")
+        now = timezone_now()
+        user = self.example_user('hamlet')
         email = 'test@example.com'
         do_change_user_email(user, email)
         self.assertEqual(RealmAuditLog.objects.filter(event_type='user_email_changed',
@@ -50,8 +51,8 @@ class TestRealmAuditLog(ZulipTestCase):
 
     def test_change_avatar_source(self):
         # type: () -> None
-        now = timezone.now()
-        user = get_user_profile_by_email("hamlet@zulip.com")
+        now = timezone_now()
+        user = self.example_user('hamlet')
         avatar_source = u'G'
         do_change_avatar_fields(user, avatar_source)
         self.assertEqual(RealmAuditLog.objects.filter(event_type='user_change_avatar_source',
@@ -60,11 +61,20 @@ class TestRealmAuditLog(ZulipTestCase):
 
     def test_change_bot_owner(self):
         # type: () -> None
-        now = timezone.now()
-        admin = get_user_profile_by_email('iago@zulip.com')
-        bot = get_user_profile_by_email("notification-bot@zulip.com")
-        bot_owner = get_user_profile_by_email("hamlet@zulip.com")
+        now = timezone_now()
+        admin = self.example_user('iago')
+        bot = self.notification_bot()
+        bot_owner = self.example_user('hamlet')
         do_change_bot_owner(bot, bot_owner, admin)
         self.assertEqual(RealmAuditLog.objects.filter(event_type='bot_owner_changed',
                                                       event_time__gte=now).count(), 1)
         self.assertEqual(bot_owner, bot.bot_owner)
+
+    def test_regenerate_api_key(self):
+        # type: () -> None
+        now = timezone_now()
+        user = self.example_user('hamlet')
+        do_regenerate_api_key(user, user)
+        self.assertEqual(RealmAuditLog.objects.filter(event_type='user_api_key_changed',
+                                                      event_time__gte=now).count(), 1)
+        self.assertTrue(user.api_key)
