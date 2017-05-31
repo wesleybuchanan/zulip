@@ -294,4 +294,67 @@ set_global('message_store', {
     reactions.add_reaction(alice_event);
 
     assert(reaction_element.hasClass('reacted'));
+    var result = reactions.get_message_reactions(message);
+    var realm_emoji_data = _.filter(result, function (v) {
+        return v.emoji_name === 'realm_emoji';
+    })[0];
+
+    assert.equal(realm_emoji_data.count, 2);
+    assert.equal(realm_emoji_data.is_realm_emoji, true);
+
+    // And then remove Alice's reaction.
+    reactions.remove_reaction(alice_event);
+    assert(!reaction_element.hasClass('reacted'));
+
+}());
+
+(function test_initialize() {
+    var my_event = {
+        old_id: 5,
+        new_id: 99,
+    };
+
+    var new_attr;
+
+    $(".message_reactions[data-message-id='5']").attr = function (sel, value) {
+        assert.equal(sel, 'data-message-id');
+        new_attr = value;
+    };
+
+    $(document).on = function (event_name, f) {
+        assert.equal(event_name, 'message_id_changed');
+        f(my_event);
+    };
+
+    reactions.initialize();
+    assert.equal(new_attr, 99);
+}());
+
+(function test_error_handling() {
+    var error_msg;
+
+    global.message_store.get = function () {
+        return;
+    };
+
+    global.blueslip.error = function (msg) {
+        error_msg = msg;
+    };
+
+    var bogus_event  = {
+        message_id: 55,
+        emoji_name: 'realm_emoji',
+        user: {
+            user_id: 99,
+        },
+    };
+    reactions.toggle_emoji_reaction(55);
+    assert.equal(error_msg, 'reactions: Bad message id: 55');
+
+    error_msg = undefined;
+    reactions.add_reaction(bogus_event);
+    assert.equal(error_msg, undefined);
+
+    reactions.remove_reaction(bogus_event);
+    assert.equal(error_msg, undefined);
 }());
