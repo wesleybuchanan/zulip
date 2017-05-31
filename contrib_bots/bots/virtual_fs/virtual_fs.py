@@ -9,119 +9,104 @@ class VirtualFsHandler(object):
 
     def handle_message(self, message, client, state_handler):
         command = message['content']
-        stream = message['display_recipient']
-        topic = message['subject']
+        if command == "":
+            command = "help"
         sender = message['sender_email']
 
         state = state_handler.get_state()
         if state is None:
             state = {}
 
-        if stream not in state:
-            state[stream] = fs_new()
-        fs = state[stream]
+        recipient = message['display_recipient']
+        if isinstance(recipient, list): # If not a stream, then hash on list of emails
+            recipient = " ".join([x['email'] for x in recipient])
+
+        if recipient not in state:
+            state[recipient] = fs_new()
+        fs = state[recipient]
         if sender not in fs['user_paths']:
             fs['user_paths'][sender] = '/'
         fs, msg = fs_command(fs, sender, command)
         prependix = '{}:\n'.format(sender)
         msg = prependix + msg
-        state[stream] = fs
+        state[recipient] = fs
         state_handler.set_state(state)
 
-        client.send_message(dict(
-            type='stream',
-            to=stream,
-            subject=topic,
-            content=msg,
-        ))
+        client.send_reply(message, msg)
 
 
 def get_help():
     return '''
-The "fs" commands implement a virtual file system for a stream.
+This bot implements a virtual file system for a stream.
 The locations of text are persisted for the lifetime of the bot
 running, and if you rename a stream, you will lose the info.
 Example commands:
 
 ```
-fs mkdir: create a directory
-fs ls: list a directory
-fs cd: change directory
-fs pwd: show current path
-fs write: write text
-fs read: read text
-fs rm: remove a file
-fs rmdir: remove a directory
+@mention-bot sample_conversation: sample conversation with the bot
+@mention-bot mkdir: create a directory
+@mention-bot ls: list a directory
+@mention-bot cd: change directory
+@mention-bot pwd: show current path
+@mention-bot write: write text
+@mention-bot read: read text
+@mention-bot rm: remove a file
+@mention-bot rmdir: remove a directory
 ```
-Use commands like `fs help write` for more details on specific
+Use commands like `@mention-bot help write` for more details on specific
 commands.
 '''
 
-def test():
-    fs = fs_new()
-    user = 'test_user'
-    fs['user_paths'][user] = '/'
-    assert is_directory(fs, '/')
-
-    for cmd, expected_response in sample_conversation():
-        fs, msg = fs_command(fs, user, cmd)
-        if msg != expected_response:
-            raise AssertionError('''
-                cmd: %s
-                expected: %s
-                but got : %s
-                ''' % (cmd, expected_response, msg))
-
 def sample_conversation():
     return [
-        ('cd /', 'Current path: /'),
-        ('cd /home', 'ERROR: invalid path'),
-        ('cd .', 'ERROR: invalid path'),
-        ('mkdir home', 'directory created'),
-        ('cd home', 'Current path: /home/'),
-        ('cd /home/', 'Current path: /home/'),
-        ('mkdir stuff/', 'ERROR: stuff/ is not a valid name'),
-        ('mkdir stuff', 'directory created'),
-        ('write stuff/file1 something', 'file written'),
-        ('read stuff/file1', 'something'),
-        ('read /home/stuff/file1', 'something'),
-        ('read home/stuff/file1', 'ERROR: file does not exist'),
-        ('pwd    ', '/home/'),
-        ('pwd bla', 'ERROR: syntax: pwd'),
-        ('ls bla foo', 'ERROR: syntax: ls <optional_path>'),
-        ('cd /', 'Current path: /'),
-        ('rm home', 'ERROR: /home/ is a directory, file required'),
-        ('rmdir home', 'removed'),
-        ('ls  ', 'WARNING: directory is empty'),
-        ('cd home', 'ERROR: invalid path'),
-        ('read /home/stuff/file1', 'ERROR: file does not exist'),
-        ('cd /', 'Current path: /'),
-        ('write /foo contents of /foo', 'file written'),
-        ('read /foo', 'contents of /foo'),
-        ('write /bar Contents: bar bar', 'file written'),
-        ('read /bar', 'Contents: bar bar'),
-        ('write /bar invalid', 'ERROR: file already exists'),
-        ('rm /bar', 'removed'),
-        ('rm /bar', 'ERROR: file does not exist'),
-        ('write /bar new bar', 'file written'),
-        ('read /bar', 'new bar'),
-        ('write /yo/invalid whatever', 'ERROR: /yo is not a directory'),
-        ('mkdir /yo', 'directory created'),
-        ('read /yo', 'ERROR: /yo/ is a directory, file required'),
-        ('ls /yo', 'WARNING: directory is empty'),
-        ('read /yo/nada', 'ERROR: file does not exist'),
-        ('write /yo whatever', 'ERROR: file already exists'),
-        ('write /yo/apple red', 'file written'),
-        ('read /yo/apple', 'red'),
-        ('mkdir /yo/apple', 'ERROR: file already exists'),
-        ('ls /invalid', 'ERROR: file does not exist'),
-        ('ls /foo', 'ERROR: /foo is not a directory'),
-        ('ls /', '* /*bar*\n* /*foo*\n* /yo/'),
-        ('invalid command', 'ERROR: unrecognized command'),
-        ('write', 'ERROR: syntax: write <path> <some_text>'),
-        ('help', get_help()),
-        ('help ls', 'syntax: ls <optional_path>'),
-        ('help invalid_command', get_help()),
+        ('cd /\nCurrent path: /\n\n'),
+        ('cd /home\nERROR: invalid path\n\n'),
+        ('cd .\nERROR: invalid path\n\n'),
+        ('mkdir home\ndirectory created\n\n'),
+        ('cd home\nCurrent path: /home/\n\n'),
+        ('cd /home/\nCurrent path: /home/\n\n'),
+        ('mkdir stuff/\nERROR: stuff/ is not a valid name\n\n'),
+        ('mkdir stuff\ndirectory created\n\n'),
+        ('write stuff/file1 something\nfile written\n\n'),
+        ('read stuff/file1\nsomething\n\n'),
+        ('read /home/stuff/file1\nsomething\n\n'),
+        ('read home/stuff/file1\nERROR: file does not exist\n\n'),
+        ('pwd    \n/home/\n\n'),
+        ('pwd bla\nERROR: syntax: pwd\n\n'),
+        ('ls bla foo\nERROR: syntax: ls <optional_path>\n\n'),
+        ('cd /\nCurrent path: /\n\n'),
+        ('rm home\nERROR: /home/ is a directory, file required\n\n'),
+        ('rmdir home\nremoved\n\n'),
+        ('ls  \nWARNING: directory is empty\n\n'),
+        ('cd home\nERROR: invalid path\n\n'),
+        ('read /home/stuff/file1\nERROR: file does not exist\n\n'),
+        ('cd /\nCurrent path: /\n\n'),
+        ('write /foo contents of /foo\nfile written\n\n'),
+        ('read /foo\ncontents of /foo\n\n'),
+        ('write /bar Contents: bar bar\nfile written\n\n'),
+        ('read /bar\nContents: bar bar\n\n'),
+        ('write /bar invalid\nERROR: file already exists\n\n'),
+        ('rm /bar\nremoved\n\n'),
+        ('rm /bar\nERROR: file does not exist\n\n'),
+        ('write /bar new bar\nfile written\n\n'),
+        ('read /bar\nnew bar\n\n'),
+        ('write /yo/invalid whatever\nERROR: /yo is not a directory\n\n'),
+        ('mkdir /yo\ndirectory created\n\n'),
+        ('read /yo\nERROR: /yo/ is a directory, file required\n\n'),
+        ('ls /yo\nWARNING: directory is empty\n\n'),
+        ('read /yo/nada\nERROR: file does not exist\n\n'),
+        ('write /yo whatever\nERROR: file already exists\n\n'),
+        ('write /yo/apple red\nfile written\n\n'),
+        ('read /yo/apple\nred\n\n'),
+        ('mkdir /yo/apple\nERROR: file already exists\n\n'),
+        ('ls /invalid\nERROR: file does not exist\n\n'),
+        ('ls /foo\nERROR: /foo is not a directory\n\n'),
+        ('ls /\n* /*bar*\n* /*foo*\n* /yo/\n\n'),
+        ('invalid command\nERROR: unrecognized command\n\n'),
+        ('write\nERROR: syntax: write <path> <some_text>\n\n'),
+        ('help' + get_help() + '\n\n'),
+        ('help ls\nsyntax: ls <optional_path>\n\n'),
+        ('help invalid_command' + get_help() + '\n\n'),
     ]
 
 REGEXES = dict(
@@ -134,6 +119,7 @@ REGEXES = dict(
 def get_commands():
     return {
         'help': (fs_help, ['command']),
+        'sample_conversation': (fs_sample_conversation, ['command']),
         'ls': (fs_ls, ['optional_path']),
         'mkdir': (fs_mkdir, ['path']),
         'read': (fs_read, ['path']),
@@ -148,6 +134,8 @@ def fs_command(fs, user, cmd):
     cmd = cmd.strip()
     if cmd == 'help':
         return fs, get_help()
+    if cmd == 'sample_conversation':
+        return fs, (''.join(sample_conversation()))
     cmd_name = cmd.split()[0]
     cmd_args = cmd[len(cmd_name):].strip()
     commands = get_commands()
@@ -184,6 +172,9 @@ def fs_new():
     return fs
 
 def fs_help(fs, user, cmd_name):
+    return fs, syntax_help(cmd_name)
+
+def fs_sample_conversation(fs, user, cmd_name):
     return fs, syntax_help(cmd_name)
 
 def fs_mkdir(fs, user, fn):
@@ -350,8 +341,3 @@ def is_directory(fs, fn):
     return fs[fn]['kind'] == 'dir'
 
 handler_class = VirtualFsHandler
-
-if __name__ == '__main__':
-    # We eventually want to test bots with a "real" testing
-    # framework.
-    test()

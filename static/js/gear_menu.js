@@ -32,13 +32,11 @@ exports.initialize = function () {
         // After we show the new tab, restore its old scroll position
         // (we apparently have to do this after setting the hash,
         // because otherwise that action may scroll us somewhere.)
-        if (scroll_positions.hasOwnProperty(target_tab)) {
-            message_viewport.scrollTop(scroll_positions[target_tab]);
-        } else {
-            if (target_tab === '#home') {
-                navigate.scroll_to_selected();
+        if (target_tab === '#home') {
+            if (scroll_positions.hasOwnProperty(target_tab)) {
+                message_viewport.scrollTop(scroll_positions[target_tab]);
             } else {
-                message_viewport.scrollTop(0);
+                navigate.scroll_to_selected();
             }
         }
     });
@@ -49,8 +47,18 @@ exports.initialize = function () {
 
 exports.open = function () {
     $("#settings-dropdown").click();
-    // there are invisible li tabs, which should not be clicked.f
+    // there are invisible li tabs, which should not be clicked.
     $("#gear-menu").find("li:not(.invisible) a").eq(0).focus();
+};
+
+exports.is_open = function () {
+    return $(".dropdown").hasClass("open");
+};
+
+exports.close = function () {
+    if (exports.is_open()) {
+        $(".dropdown").removeClass("open");
+    }
 };
 
 return exports;

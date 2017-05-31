@@ -6,7 +6,9 @@ from boto.s3.connection import S3Connection
 from django.conf import settings
 from django.db import connection
 from django.forms.models import model_to_dict
-from django.utils import timezone
+from django.utils.timezone import make_aware as timezone_make_aware
+from django.utils.timezone import utc as timezone_utc
+from django.utils.timezone import is_naive as timezone_is_naive
 from django.db.models.query import QuerySet
 import glob
 import logging
@@ -20,12 +22,13 @@ from zerver.lib.create_user import random_api_key
 from zerver.models import UserProfile, Realm, Client, Huddle, Stream, \
     UserMessage, Subscription, Message, RealmEmoji, RealmFilter, \
     RealmDomain, Recipient, DefaultStream, get_user_profile_by_id, \
-    UserPresence, UserActivity, UserActivityInterval, get_user_profile_by_email, \
-    get_display_recipient, Attachment
+    UserPresence, UserActivity, UserActivityInterval, \
+    get_user_profile_by_email, \
+    get_display_recipient, Attachment, get_system_bot
 from zerver.lib.parallel import run_parallel
 from zerver.lib.utils import mkdir_p
 from six.moves import range
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # Custom mypy types follow:
 Record = Dict[str, Any]
@@ -43,8 +46,8 @@ SourceFilter = Callable[[Record], bool]
 # with keyword arguments is not perceived as a common use case."
 # CustomFetch = Callable[[TableData, Config, Context], None]
 # PostProcessData = Callable[[TableData, Config, Context], None]
-CustomFetch = Any # TODO: make more specific, see above
-PostProcessData = Any # TODO: make more specific
+CustomFetch = Any  # TODO: make more specific, see above
+PostProcessData = Any  # TODO: make more specific
 
 # The keys of our MessageOutput variables are normally
 # List[Record], but when we write partials, we can get
@@ -55,7 +58,7 @@ MessageOutput = Dict[str, Any]
 realm_tables = [("zerver_defaultstream", DefaultStream),
                 ("zerver_realmemoji", RealmEmoji),
                 ("zerver_realmdomain", RealmDomain),
-                ("zerver_realmfilter", RealmFilter)] # List[Tuple[TableName, Any]]
+                ("zerver_realmfilter", RealmFilter)]  # List[Tuple[TableName, Any]]
 
 
 ALL_ZERVER_TABLES = [
@@ -127,7 +130,7 @@ DATE_FIELDS = {
     'zerver_useractivityinterval': ['start', 'end'],
     'zerver_userpresence': ['timestamp'],
     'zerver_userprofile': ['date_joined', 'last_login', 'last_reminder'],
-} # type: Dict[TableName, List[Field]]
+}  # type: Dict[TableName, List[Field]]
 
 def sanity_check_output(data):
     # type: (TableData) -> None
@@ -177,9 +180,9 @@ def floatify_datetime_fields(data, table):
             orig_dt = item[field]
             if orig_dt is None:
                 continue
-            if timezone.is_naive(orig_dt):
+            if timezone_is_naive(orig_dt):
                 logging.warning("Naive datetime:", item)
-                dt = timezone.make_aware(orig_dt)
+                dt = timezone_make_aware(orig_dt)
             else:
                 dt = orig_dt
             utc_naive  = dt.replace(tzinfo=None) - dt.utcoffset()
@@ -224,32 +227,36 @@ class Config(object):
         self.concat_and_destroy = concat_and_destroy
         self.id_source = id_source
         self.source_filter = source_filter
-        self.children = [] # type: List[Config]
+        self.children = []  # type: List[Config]
 
-        if normal_parent:
-            self.parent = normal_parent
+        if normal_parent is not None:
+            self.parent = normal_parent  # type: Optional[Config]
         else:
             self.parent = None
 
-        if virtual_parent and normal_parent:
-            raise Exception('''
+        if virtual_parent is not None and normal_parent is not None:
+            raise ValueError('''
                 If you specify a normal_parent, please
                 do not create a virtual_parent.
                 ''')
 
-        if normal_parent:
+        if normal_parent is not None:
             normal_parent.children.append(self)
-        elif virtual_parent:
+        elif virtual_parent is not None:
             virtual_parent.children.append(self)
-        elif not is_seeded:
-            raise Exception('''
+        elif is_seeded is None:
+            raise ValueError('''
                 You must specify a parent if you are
                 not using is_seeded.
                 ''')
 
-        if self.id_source:
+        if self.id_source is not None:
+            if self.virtual_parent is None:
+                raise ValueError('''
+                    You must specify a virtual_parent if you are
+                    using id_source.''')
             if self.id_source[0] != self.virtual_parent.table:
-                raise Exception('''
+                raise ValueError('''
                     Configuration error.  To populate %s, you
                     want data from %s, but that differs from
                     the table name of your virtual parent (%s),
@@ -274,6 +281,10 @@ def export_from_config(response, config, seed_object=None, context=None):
     if table:
         exported_tables = [table]
     else:
+        if config.custom_tables is None:
+            raise ValueError('''
+                You must specify config.custom_tables if you
+                are not specifying config.table''')
         exported_tables = config.custom_tables
 
     for t in exported_tables:
@@ -298,14 +309,16 @@ def export_from_config(response, config, seed_object=None, context=None):
         # When we concat_and_destroy, we are working with
         # temporary "tables" that are lists of records that
         # should already be ready to export.
-        data = [] # type: List[Record]
+        data = []  # type: List[Record]
         for t in config.concat_and_destroy:
             data += response[t]
             del response[t]
             logging.info('Deleted temporary %s' % (t,))
+        assert table is not None
         response[table] = data
 
     elif config.use_all:
+        assert model is not None
         query = model.objects.all()
         rows = list(query)
 
@@ -315,10 +328,14 @@ def export_from_config(response, config, seed_object=None, context=None):
         # now we just need to get all the articles
         # contained by the blogs.
         model = config.model
+        assert parent is not None
+        assert parent.table is not None
+        assert config.parent_key is not None
         parent_ids = [r['id'] for r in response[parent.table]]
-        filter_parms = {config.parent_key: parent_ids}
-        if config.filter_args:
+        filter_parms = {config.parent_key: parent_ids}  # type: Dict[str, Any]
+        if config.filter_args is not None:
             filter_parms.update(config.filter_args)
+        assert model is not None
         query = model.objects.filter(**filter_parms)
         rows = list(query)
 
@@ -327,6 +344,7 @@ def export_from_config(response, config, seed_object=None, context=None):
         # need to look at the current response to get all the
         # blog ids from the Article rows we fetched previously.
         model = config.model
+        assert model is not None
         # This will be a tuple of the form ('zerver_article', 'blog').
         (child_table, field) = config.id_source
         child_rows = response[child_table]
@@ -341,6 +359,7 @@ def export_from_config(response, config, seed_object=None, context=None):
 
     # Post-process rows (which won't apply to custom fetches/concats)
     if rows is not None:
+        assert table is not None  # Hint for mypy
         response[table] = make_raw(rows, exclude=config.exclude)
         if table in DATE_FIELDS:
             floatify_datetime_fields(response, table)
@@ -556,8 +575,8 @@ def fetch_user_profile(response, config, context):
     exclude = ['password', 'api_key']
     rows = make_raw(list(query), exclude=exclude)
 
-    normal_rows = [] # type: List[Record]
-    dummy_rows = [] # type: List[Record]
+    normal_rows = []  # type: List[Record]
+    dummy_rows = []  # type: List[Record]
 
     for row in rows:
         if exportable_user_ids is not None:
@@ -585,9 +604,9 @@ def fetch_user_profile_cross_realm(response, config, context):
         response['zerver_userprofile_crossrealm'] = []
     else:
         response['zerver_userprofile_crossrealm'] = [dict(email=x.email, id=x.id) for x in [
-            get_user_profile_by_email(settings.NOTIFICATION_BOT),
-            get_user_profile_by_email(settings.EMAIL_GATEWAY_BOT),
-            get_user_profile_by_email(settings.WELCOME_BOT),
+            get_system_bot(settings.NOTIFICATION_BOT),
+            get_system_bot(settings.EMAIL_GATEWAY_BOT),
+            get_system_bot(settings.WELCOME_BOT),
         ]]
 
 def fetch_attachment_data(response, realm_id, message_ids):
@@ -622,6 +641,8 @@ def fetch_huddle_objects(response, config, context):
     # type: (TableData, Config, Context) -> None
 
     realm = context['realm']
+    assert config.parent is not None
+    assert config.parent.table is not None
     user_profile_ids = set(r['id'] for r in response[config.parent.table])
 
     # First we get all huddles involving someone in the realm.
@@ -752,7 +773,7 @@ def export_partial_message_files(realm, response, chunk_size=1000, output_dir=No
         messages_we_sent_to_them
     ]
 
-    all_message_ids = set() # type: Set[int]
+    all_message_ids = set()  # type: Set[int]
     dump_file_id = 1
 
     for message_query in message_queries:
@@ -791,14 +812,14 @@ def write_message_partial_for_query(realm, message_query, dump_file_id,
         logging.info("Fetched Messages for %s" % (message_filename,))
 
         # Clean up our messages.
-        table_data = {} # type: TableData
+        table_data = {}  # type: TableData
         table_data['zerver_message'] = message_chunk
         floatify_datetime_fields(table_data, 'zerver_message')
 
         # Build up our output for the .partial file, which needs
         # a list of user_profile_ids to search for (as well as
         # the realm id).
-        output = {} # type: MessageOutput
+        output = {}  # type: MessageOutput
         output['zerver_message'] = table_data['zerver_message']
         output['zerver_userprofile_ids'] = list(user_profile_ids)
         output['realm_id'] = realm.id
@@ -858,7 +879,7 @@ def export_files_from_s3(realm, bucket_name, output_dir, processing_avatars=Fals
         bucket_list = bucket.list(prefix="%s/" % (realm.id,))
 
     if settings.EMAIL_GATEWAY_BOT is not None:
-        email_gateway_bot = get_user_profile_by_email(settings.EMAIL_GATEWAY_BOT)
+        email_gateway_bot = get_system_bot(settings.EMAIL_GATEWAY_BOT)
     else:
         email_gateway_bot = None
 
@@ -954,9 +975,9 @@ def export_avatars_from_local(realm, local_dir, output_dir):
 
     users = list(UserProfile.objects.filter(realm=realm))
     users += [
-        get_user_profile_by_email(settings.NOTIFICATION_BOT),
-        get_user_profile_by_email(settings.EMAIL_GATEWAY_BOT),
-        get_user_profile_by_email(settings.WELCOME_BOT),
+        get_system_bot(settings.NOTIFICATION_BOT),
+        get_system_bot(settings.EMAIL_GATEWAY_BOT),
+        get_system_bot(settings.WELCOME_BOT),
     ]
     for user in users:
         if user.avatar_source == UserProfile.AVATAR_FROM_GRAVATAR:
@@ -1021,7 +1042,7 @@ def do_write_stats_file_for_realm_export(output_dir):
 
 def do_export_realm(realm, output_dir, threads, exportable_user_ids=None):
     # type: (Realm, Path, int, Set[int]) -> None
-    response = {} # type: TableData
+    response = {}  # type: TableData
 
     # We need at least one thread running to export
     # UserMessage rows.  The management command should
@@ -1072,7 +1093,7 @@ def do_export_realm(realm, output_dir, threads, exportable_user_ids=None):
 
 def export_attachment_table(realm, output_dir, message_ids):
     # type: (Realm, Path, Set[int]) -> None
-    response = {} # type: TableData
+    response = {}  # type: TableData
     fetch_attachment_data(response=response, realm_id=realm.id, message_ids=message_ids)
     output_file = os.path.join(output_dir, "attachment.json")
     logging.info('Writing attachment table data to %s' % (output_file,))
@@ -1112,13 +1133,13 @@ def launch_user_message_subprocesses(threads, output_dir):
 
 def do_export_user(user_profile, output_dir):
     # type: (UserProfile, Path) -> None
-    response = {} # type: TableData
+    response = {}  # type: TableData
 
     export_single_user(user_profile, response)
     export_file = os.path.join(output_dir, "user.json")
     write_data_to_file(output_file=export_file, data=response)
     logging.info("Exporting messages")
-    export_messages_single_user(user_profile, output_dir=output_dir)
+    export_messages_single_user(user_profile, output_dir)
 
 def export_single_user(user_profile, response):
     # type: (UserProfile, TableData) -> None
@@ -1168,8 +1189,8 @@ def get_single_user_config():
 
     return user_profile_config
 
-def export_messages_single_user(user_profile, chunk_size=1000, output_dir=None):
-    # type: (UserProfile, int, Path) -> None
+def export_messages_single_user(user_profile, output_dir, chunk_size=1000):
+    # type: (UserProfile, Path, int) -> None
     user_message_query = UserMessage.objects.filter(user_profile=user_profile).order_by("id")
     min_id = -1
     dump_file_id = 1
@@ -1215,7 +1236,7 @@ def export_messages_single_user(user_profile, chunk_size=1000, output_dir=None):
 id_maps = {
     'client': {},
     'user_profile': {},
-} # type: Dict[str, Dict[int, int]]
+}  # type: Dict[str, Dict[int, int]]
 
 def update_id_map(table, old_id, new_id):
     # type: (TableName, int, int) -> None
@@ -1232,7 +1253,7 @@ def fix_datetime_fields(data, table):
     for item in data[table]:
         for field_name in DATE_FIELDS[table]:
             if item[field_name] is not None:
-                item[field_name] = datetime.datetime.fromtimestamp(item[field_name], tz=timezone.utc)
+                item[field_name] = datetime.datetime.fromtimestamp(item[field_name], tz=timezone_utc)
 
 def convert_to_id_fields(data, table, field_name):
     # type: (TableData, TableName, Field) -> None
@@ -1412,7 +1433,7 @@ def do_import_realm(import_dir):
     fix_datetime_fields(data, 'zerver_realm')
     realm = Realm(**data['zerver_realm'][0])
     if realm.notifications_stream_id is not None:
-        notifications_stream_id = int(realm.notifications_stream_id)
+        notifications_stream_id = int(realm.notifications_stream_id)  # type: Optional[int]
     else:
         notifications_stream_id = None
     realm.notifications_stream_id = None
@@ -1557,16 +1578,16 @@ def import_attachments(data):
     # We do this in a slightly convoluted way to anticipate
     # a future where we may need to call re_map_foreign_keys.
 
-    m2m_rows = [] # type: List[Record]
+    m2m_rows = []  # type: List[Record]
     for parent_row in data[parent_db_table_name]:
         for fk_id in parent_row[child_plural]:
-            m2m_row = {} # type: Record
+            m2m_row = {}  # type: Record
             m2m_row[parent_singular] = parent_row['id']
             m2m_row[child_singular] = fk_id
             m2m_rows.append(m2m_row)
 
     # Create our table data for insert.
-    m2m_data = {m2m_table_name: m2m_rows} # type: TableData
+    m2m_data = {m2m_table_name: m2m_rows}  # type: TableData
     convert_to_id_fields(m2m_data, m2m_table_name, parent_singular)
     convert_to_id_fields(m2m_data, m2m_table_name, child_singular)
     m2m_rows = m2m_data[m2m_table_name]

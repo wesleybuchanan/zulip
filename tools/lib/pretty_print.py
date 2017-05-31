@@ -9,7 +9,7 @@ from .template_parser import (
     is_django_block_tag,
 )
 from six.moves import range
-import os
+import subprocess
 
 def pretty_print_html(html, num_spaces=4):
     # type: (str, int) -> str
@@ -30,7 +30,7 @@ def pretty_print_html(html, num_spaces=4):
         line=-1,
         token_kind='html_start',
         tag='html',
-        extra_indent=0)
+        extra_indent=0) # type: Dict[str, Any]
     stack.append(info)
 
     # Our main job is to figure out offsets that we use to nudge lines
@@ -181,6 +181,6 @@ def validate_indent_html(fn):
         temp_file.write(phtml)
         temp_file.close()
         print('Invalid Indentation detected in file: %s\nDiff for the file against expected indented file:' % (fn))
-        os.system('diff %s %s' % (fn, '/var/tmp/pretty_html.txt'))
+        subprocess.call(['diff', fn, '/var/tmp/pretty_html.txt'], stderr=subprocess.STDOUT)
         return 0
     return 1

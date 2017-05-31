@@ -135,7 +135,7 @@ function do_hashchange(from_reload) {
             change_hash:    false,  // already set
             trigger: 'hash change',
         };
-        if (from_reload !== undefined && page_params.initial_narrow_pointer !== undefined) {
+        if (from_reload && page_params.initial_narrow_pointer !== undefined) {
             narrow_opts.from_reload = true;
             narrow_opts.first_unread_from_server = true;
         }
@@ -169,7 +169,7 @@ function do_hashchange(from_reload) {
 // return `true` for the current state -- we want to ignore hash changes from
 // within the settings page. The previous hash however should return `false` as it
 // was outside of the scope of settings.
-// there is then an `exit_modal` function that allows the hash to change exactly
+// there is then an `exit_overlay` function that allows the hash to change exactly
 // once without triggering any events. This allows the hash to reset back from
 // a settings page to the previous view available before the settings page
 // (eg. narrow/is/private). This saves the state, scroll position, and makes the
@@ -243,7 +243,7 @@ function hashchanged(from_reload, e) {
 
         if (!should_ignore(old_hash || "#") || ignore.group !== get_hash_group(base)) {
             if (ignore.group !== get_hash_group(base)) {
-                exports.close_modals();
+                overlays.close_for_hash_change();
             }
 
             // now only if the previous one should not have been ignored.
@@ -267,7 +267,7 @@ function hashchanged(from_reload, e) {
             subs.change_state(get_hash_components());
         }
     } else if (!should_ignore(window.location.hash) && !ignore.flag) {
-        exports.close_modals();
+        overlays.close_for_hash_change();
         changing_hash = true;
         var ret = do_hashchange(from_reload);
         changing_hash = false;
@@ -290,11 +290,7 @@ exports.initialize = function () {
     hashchanged(true);
 };
 
-exports.close_modals = function () {
-    $(".overlay.show").removeClass("show");
-};
-
-exports.exit_modal = function (callback) {
+exports.exit_overlay = function (callback) {
     if (should_ignore(window.location.hash)) {
         ui_util.blur_active_element();
         ignore.flag = true;

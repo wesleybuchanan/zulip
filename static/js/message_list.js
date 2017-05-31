@@ -362,7 +362,7 @@ exports.MessageList.prototype = {
         if (!this.narrowed) {
             return;
         }
-        var stream = narrow.stream();
+        var stream = narrow_state.stream();
         if (stream === undefined) {
             return;
         }
@@ -474,13 +474,13 @@ exports.MessageList.prototype = {
 
     show_edit_message: function MessageList_show_edit_message(row, edit_obj) {
         row.find(".message_edit_form").empty().append(edit_obj.form);
-        row.find(".message_content").hide();
+        row.find(".message_content, .status-message").hide();
         row.find(".message_edit").show();
         row.find(".message_edit_content").autosize();
     },
 
     hide_edit_message: function MessageList_hide_edit_message(row) {
-        row.find(".message_content").show();
+        row.find(".message_content, .status-message").show();
         row.find(".message_edit").hide();
     },
 

@@ -3,12 +3,12 @@ from __future__ import division
 from __future__ import print_function
 
 from django.core.management.base import BaseCommand, CommandParser
-from django.utils import timezone
+from django.utils.timezone import now as timezone_now
 
 from zerver.models import Message, UserProfile, Stream, Recipient, UserPresence, \
     Subscription, get_huddle, Realm, UserMessage, RealmDomain, \
     clear_database, get_client, get_user_profile_by_id, \
-    email_to_username
+    email_to_username, Service, get_user_profile_by_email
 from zerver.lib.actions import STREAM_ASSIGNMENT_COLORS, do_send_messages, \
     do_change_is_admin
 from django.conf import settings
@@ -124,6 +124,7 @@ class Command(BaseCommand):
             # welcome-bot (needed for do_create_realm) hasn't been created yet
             zulip_realm = Realm.objects.create(
                 string_id="zulip", name="Zulip Dev", restricted_to_domain=True,
+                description="The Zulip development environment default organization.  It's great for testing!",
                 invite_required=False, org_type=Realm.CORPORATE)
             RealmDomain.objects.create(realm=zulip_realm, domain="zulip.com")
             if options["test_suite"]:
@@ -193,7 +194,7 @@ class Command(BaseCommand):
             # Populate users with some bar data
             for user in user_profiles:
                 status = UserPresence.ACTIVE # type: int
-                date = timezone.now()
+                date = timezone_now()
                 client = get_client("website")
                 if user.full_name[0] <= 'H':
                     client = get_client("ZulipAndroid")
@@ -254,7 +255,20 @@ class Command(BaseCommand):
             zulip_webhook_bots = [
                 ("Zulip Webhook Bot", "webhook-bot@zulip.com"),
             ]
-            create_users(zulip_realm, zulip_webhook_bots, bot_type=UserProfile.INCOMING_WEBHOOK_BOT)
+            create_users(zulip_realm, zulip_webhook_bots,
+                         bot_type=UserProfile.INCOMING_WEBHOOK_BOT)
+            zulip_outgoing_bots = [
+                ("Outgoing Webhook", "outgoing-webhook@zulip.com")
+            ]
+            create_users(zulip_realm, zulip_outgoing_bots,
+                         bot_type=UserProfile.OUTGOING_WEBHOOK_BOT)
+            # TODO: Clean up this initial bot creation code
+            Service.objects.create(
+                name="test",
+                user_profile=get_user_profile_by_email("outgoing-webhook@zulip.com"),
+                base_url="http://127.0.0.1:5002/bots/followup",
+                token="abcd1234",
+                interface=1)
 
             create_simple_community_realm()
 
@@ -405,7 +419,7 @@ def send_messages(data):
             message.subject = stream.name + Text(random.randint(1, 3))
             saved_data['subject'] = message.subject
 
-        message.pub_date = timezone.now()
+        message.pub_date = timezone_now()
         do_send_messages([{'message': message}])
 
         recipients[num_messages] = (message_type, message.recipient.id, saved_data)
@@ -432,7 +446,7 @@ def create_user_presences(user_profiles):
     # type: (Iterable[UserProfile]) -> None
     for user in user_profiles:
         status = 1 # type: int
-        date = timezone.now()
+        date = timezone_now()
         client = get_client("website")
         UserPresence.objects.get_or_create(
             user_profile=user,

@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from typing import Any, Mapping, Text
+from typing import Any, Mapping, Text, Optional
 
 from django.http import HttpRequest, HttpResponse
 
@@ -15,12 +15,13 @@ from zerver.lib.webhooks.git import get_push_commits_event_message, SUBJECT_WITH
 @authenticated_rest_api_view(is_webhook=True)
 @has_request_variables
 def api_bitbucket_webhook(request, user_profile, payload=REQ(validator=check_dict([])),
-                          stream=REQ(default='commits')):
-    # type: (HttpRequest, UserProfile, Mapping[Text, Any], Text) -> HttpResponse
+                          stream=REQ(default='commits'), branches=REQ(default=None)):
+    # type: (HttpRequest, UserProfile, Mapping[Text, Any], Text, Optional[Text]) -> HttpResponse
     repository = payload['repository']
 
     commits = [
         {
+            'name': payload.get('user'),
             'sha': commit.get('raw_node'),
             'message': commit.get('message'),
             'url': u'{}{}commits/{}'.format(
@@ -28,7 +29,7 @@ def api_bitbucket_webhook(request, user_profile, payload=REQ(validator=check_dic
                 repository.get('absolute_url'),
                 commit.get('raw_node'))
         }
-        for commit in payload.get('commits')
+        for commit in payload['commits']
     ]
 
     if len(commits) == 0:
@@ -40,7 +41,9 @@ def api_bitbucket_webhook(request, user_profile, payload=REQ(validator=check_dic
                       payload['canon_url'] + repository['absolute_url']))
     else:
         branch = payload['commits'][-1]['branch']
-        content = get_push_commits_event_message(payload.get('user'), None, branch, commits)
+        if branches is not None and branches.find(branch) == -1:
+            return json_success()
+        content = get_push_commits_event_message(payload['user'], None, branch, commits)
         subject = SUBJECT_WITH_BRANCH_TEMPLATE.format(repo=repository['name'], branch=branch)
 
     check_send_message(user_profile, get_client("ZulipBitBucketWebhook"), "stream",

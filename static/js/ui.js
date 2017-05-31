@@ -98,6 +98,18 @@ exports.show_message_failed = function (message_id, failed_msg) {
     });
 };
 
+exports.remove_message = function (message_id) {
+    _.each([message_list.all, home_msg_list, message_list.narrowed], function (list) {
+        if (list === undefined) {
+            return;
+        }
+        var row = list.get_row(message_id);
+        if (row !== undefined) {
+            list.remove_and_rerender([{id: message_id}]);
+        }
+    });
+};
+
 exports.show_failed_message_success = function (message_id) {
     // Previously failed message succeeded
     update_message_in_all_views(message_id, function update_row(row) {
@@ -106,6 +118,7 @@ exports.show_failed_message_success = function (message_id) {
 };
 
 $(document).ready(function () {
+
     var info_overlay_toggle = components.toggle({
         name: "info-overlay-toggle",
         selected: 0,
@@ -117,6 +130,7 @@ $(document).ready(function () {
         callback: function (name, key) {
             $(".overlay-modal").hide();
             $("#" + key).show();
+            $("#" + key).find(".modal-body").focus();
         },
     }).get();
 
@@ -125,12 +139,14 @@ $(document).ready(function () {
 });
 
 exports.show_info_overlay = function (target) {
-    var el = {
-        overlay: $(".informational-overlays"),
-    };
+    var overlay = $(".informational-overlays");
 
-    if (!el.overlay.hasClass("show")) {
-        $(el.overlay).addClass("show");
+    if (!overlay.hasClass("show")) {
+        overlays.open_overlay({
+            name:  'informationalOverlays',
+            overlay: overlay,
+            on_close: function () {},
+        });
     }
 
     if (target) {
@@ -214,6 +230,12 @@ $(function () {
 
     $('#new_message_content').blur(function () {
         saved_compose_cursor = $(this).caret();
+    });
+
+    // on the end of the modified-message fade in, remove the fade-in-message class.
+    var animationEnd = "webkitAnimationEnd oanimationend msAnimationEnd animationend";
+    $("body").on(animationEnd, ".fade-in-message", function () {
+        $(this).removeClass("fade-in-message");
     });
 });
 

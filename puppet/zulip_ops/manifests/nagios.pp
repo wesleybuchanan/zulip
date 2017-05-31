@@ -63,6 +63,7 @@ class zulip_ops::nagios {
     owner      => "root",
     group      => "root",
     source => '/root/zulip/api/integrations/nagios/zulip_nagios.cfg',
+    notify => Service["nagios3"],
   }
 
   $hosts = $zulip_ops::base::hosts
@@ -72,13 +73,7 @@ class zulip_ops::nagios {
     owner      => "root",
     group      => "root",
     content => template('zulip_ops/nagios_autossh.template.erb'),
-  }
-  file { '/etc/nagios3/zuliprc':
-    ensure     => file,
-    mode       => 644,
-    owner      => "root",
-    group      => "root",
-    source => '/root/zulip/bots/zuliprc.nagios',
+    notify => Service["nagios3"],
   }
 
   exec { "fix_nagios_permissions":

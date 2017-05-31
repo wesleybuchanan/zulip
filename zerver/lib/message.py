@@ -7,10 +7,7 @@ import zlib
 from django.utils.translation import ugettext as _
 from six import binary_type
 
-from typing import Set, Text
-
-from zerver.lib.avatar import get_avatar_url
-from zerver.lib.avatar_hash import gravatar_hash
+from zerver.lib.avatar import avatar_url_from_dict
 import zerver.lib.bugdown as bugdown
 from zerver.lib.cache import cache_with_key, to_dict_cache_key
 from zerver.lib.request import JsonableError
@@ -29,7 +26,7 @@ from zerver.models import (
     Reaction
 )
 
-from typing import Any, Dict, List, Optional, Tuple, Text
+from typing import Any, Dict, List, Optional, Set, Tuple, Text
 
 RealmAlertWords = Dict[int, List[Text]]
 
@@ -151,11 +148,12 @@ class MessageDict(object):
     ):
         # type: (bool, Optional[Message], int, Optional[datetime.datetime], Optional[Text], Text, Text, datetime.datetime, Optional[Text], Optional[int], int, Text, int, Text, Text, Text, Text, int, bool, Text, int, int, int, List[Dict[str, Any]]) -> Dict[str, Any]
 
-        avatar_url = get_avatar_url(
-            sender_avatar_source,
-            sender_email,
-            sender_avatar_version
-        )
+        avatar_url = avatar_url_from_dict(dict(
+            avatar_source=sender_avatar_source,
+            avatar_version=sender_avatar_version,
+            email=sender_email,
+            id=sender_id,
+            realm_id=sender_realm_id))
 
         display_recipient = get_display_recipient_by_id(
             recipient_id,
@@ -193,7 +191,6 @@ class MessageDict(object):
             recipient_id      = recipient_id,
             subject           = subject,
             timestamp         = datetime_to_timestamp(pub_date),
-            gravatar_hash     = gravatar_hash(sender_email), # Deprecated June 2013
             avatar_url        = avatar_url,
             client            = sending_client_name)
 
@@ -204,6 +201,7 @@ class MessageDict(object):
 
         if last_edit_time is not None:
             obj['last_edit_timestamp'] = datetime_to_timestamp(last_edit_time)
+            assert edit_history is not None
             obj['edit_history'] = ujson.loads(edit_history)
 
         if apply_markdown:
@@ -221,6 +219,7 @@ class MessageDict(object):
                     # TODO: see #1379 to eliminate bugdown dependencies
                     message = Message.objects.select_related().get(id=message_id)
 
+                assert message is not None  # Hint for mypy.
                 # It's unfortunate that we need to have side effects on the message
                 # in some cases.
                 rendered_content = render_markdown(message, content, realm=message.get_realm())
@@ -301,7 +300,7 @@ def render_markdown(message, content, realm=None, realm_alert_words=None, messag
     """
 
     if message_users is None:
-        message_user_ids = set() # type: Set[int]
+        message_user_ids = set()  # type: Set[int]
     else:
         message_user_ids = {u.id for u in message_users}
 
@@ -315,7 +314,7 @@ def render_markdown(message, content, realm=None, realm_alert_words=None, messag
         if realm is None:
             realm = message.get_realm()
 
-    possible_words = set() # type: Set[Text]
+    possible_words = set()  # type: Set[Text]
     if realm_alert_words is not None:
         for user_id, words in realm_alert_words.items():
             if user_id in message_user_ids:

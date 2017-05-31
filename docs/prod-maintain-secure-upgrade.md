@@ -209,12 +209,15 @@ To restore from backups, the process is basically the reverse of the above:
   to run the `initialize-database` second stage which puts default
   data into the database.
 
-* Unpack to `/etc/zulip` the `settings.py` and `secrets.conf` files
+* Unpack to `/etc/zulip` the `settings.py` and `zulip-secrets.conf` files
   from your backups.
 
 * Restore your database from the backup using `wal-e`; if you ran
   `initialize-database` anyway above, you'll want to first
   `scripts/setup/postgres-init-db` to drop the initial database first.
+
+* Reconfigure rabbitmq to use the password from `secrets.conf`
+  by running, as root, `scripts/setup/configure-rabbitmq`.
 
 * If you're using local file uploads, restore those files to the path
   specified by `settings.LOCAL_UPLOADS_DIR` and (if appropriate) any
@@ -367,7 +370,7 @@ To use them, you will want to be logged in as the `zulip` user and for
 the purposes of this documentation, we assume the current working
 directory is `/home/zulip/deployments/current`.
 
-Below, we should several useful examples, but there are more than 100
+Below, we show several useful examples, but there are more than 100
 in total.  We recommend skimming the usage docs (or if there are none,
 the code) of a management command before using it, since they are
 generally less polished and more designed for expert use than the rest
@@ -403,8 +406,8 @@ the `knight` management command:
 If you need to manage the IRC, Jabber, or Zephyr mirrors, you will
 need to create API super users.  To do this, use `./manage.py knight`
 with the `--permission=api_super_user` argument.  See
-`bots/irc-mirror.py` and `bots/jabber_mirror.py` for further detail on
-these.
+`api/integrations/irc-mirror.py` and
+`api/integrations/jabber_mirror.py` for further detail on these.
 
 #### Exporting users and realms with manage.py export
 

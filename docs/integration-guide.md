@@ -99,7 +99,7 @@ Here's how we recommend doing it:
 * First, use <http://requestb.in/> or a similar site to capture an
   example webhook payload from the service you're integrating.  You
   can use these captured payloads to create a set of test fixtures for
-  your integration under `zerver/fixtures`.
+  your integration under `zerver/webhooks/mywebhook/fixtures/`.
 
 * Then write a draft webhook handler under `zerver/webhooks/`;
   there are a lot of examples in that directory.  We recommend
@@ -153,7 +153,7 @@ for a webhook named 'MyWebHook'.
   integration for use in the user interface. You can add as many images as needed
   to effectively document your webhook integration. See [Documenting your
   integration](#documenting-your-integration) for details.
-* `zerver/fixtures/mywebhook/mywebhook_messagetype.json`: Sample json payload data
+* `zerver/webhooks/mywebhook/fixtures/messagetype.json`: Sample json payload data
   used by tests. Add one fixture file per type of message supported by your
   integration. See [Testing and writing tests](testing.html) for details.
 * `zerver/webhooks/mywebhook/__init__.py`: Empty file that is obligatory
@@ -221,10 +221,17 @@ Usually, this involves a few steps:
 
 * Make sure you've added your integration to
   `zerver/lib/integrations.py`; this results in your integration
-  appearing on the `/integrations` page.  You'll need to add a logo
-  image for your integration under the
-  `static/images/integrations/logos/<name>.png`, where `<name>` is the
-  name of the integration, all in lower case.
+  appearing on the `/integrations` page.
+
+* You'll need to add a SVG graphic
+  of your integration's logo under the
+  `static/images/integrations/logos/<name>.svg`, where `<name>` is the
+  name of the integration, all in lower case; you can usually find them in the
+  product branding or press page. Make sure to optimize the SVG graphic by
+  running `svgo -f path-to-file`.
+
+  If you cannot find a SVG graphic of the logo, please find and include a PNG
+  image of the logo instead.
 
 * Finally, generate a message sent by the integration and take a
   screenshot of the message to provide an example message in the
@@ -234,7 +241,7 @@ Usually, this involves a few steps:
 
   ```
   ./manage.py send_webhook_fixture_message \
-       --fixture=zerver/fixtures/pingdom/pingdom_imap_down_to_up.json \
+       --fixture=zerver/webhooks/pingdom/fixtures/imap_down_to_up.json \
        '--url=/api/v1/external/pingdom?stream=stream_name&api_key=api_key'
   ```
 

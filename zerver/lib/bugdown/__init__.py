@@ -22,14 +22,13 @@ from six.moves import urllib
 import xml.etree.cElementTree as etree
 from xml.etree.cElementTree import Element, SubElement
 
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import requests
 
 from django.core import mail
 from django.conf import settings
 
-from zerver.lib.avatar_hash import gravatar_hash
 from markdown.extensions import codehilite
 from zerver.lib.bugdown import fenced_code
 from zerver.lib.bugdown.fenced_code import FENCE_RE
@@ -38,7 +37,7 @@ from zerver.lib.timeout import timeout, TimeoutExpired
 from zerver.lib.cache import (
     cache_with_key, cache_get_many, cache_set_many, NotFoundInCache)
 from zerver.lib.url_preview import preview as link_preview
-from zerver.models import Message, Realm, UserProfile, get_user_profile_by_email
+from zerver.models import Message, Realm, UserProfile
 import zerver.lib.alert_words as alert_words
 import zerver.lib.mention as mention
 from zerver.lib.str_utils import force_str, force_text
@@ -66,9 +65,9 @@ class BugdownRenderingException(Exception):
     pass
 
 def url_embed_preview_enabled_for_realm(message):
-    # type: (Message) -> bool
+    # type: (Optional[Message]) -> bool
     if message is not None:
-        realm = message.get_realm()
+        realm = message.get_realm() # type: Optional[Realm]
     else:
         realm = None
 
@@ -82,7 +81,7 @@ def image_preview_enabled_for_realm():
     # type: () -> bool
     global current_message
     if current_message is not None:
-        realm = current_message.get_realm()
+        realm = current_message.get_realm() # type: Optional[Realm]
     else:
         realm = None
     if not settings.INLINE_IMAGE_PREVIEW:
@@ -113,13 +112,13 @@ def list_of_tlds():
 def walk_tree(root, processor, stop_after_first=False):
     # type: (Element, Callable[[Element], Optional[_T]], bool) -> List[_T]
     results = []
-    stack = [root]
+    queue = deque([root])
 
-    while stack:
-        currElement = stack.pop()
+    while queue:
+        currElement = queue.popleft()
         for child in currElement.getchildren():
             if child.getchildren():
-                stack.append(child)
+                queue.append(child)
 
             result = processor(child)
             if result is not None:
@@ -163,6 +162,12 @@ def add_embed(root, link, extracted_data):
 
     img_link = extracted_data.get('image')
     if img_link:
+        parsed_img_link = urllib.parse.urlparse(img_link)
+        # Append domain where relative img_link url is given
+        if not parsed_img_link.netloc:
+            parsed_url = urllib.parse.urlparse(link)
+            domain = '{url.scheme}://{url.netloc}/'.format(url=parsed_url)
+            img_link = urllib.parse.urljoin(domain, img_link)
         img = markdown.util.etree.SubElement(container, "a")
         img.set("style", "background-image: url(" + img_link + ")")
         img.set("href", link)
@@ -352,6 +357,21 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
         # Passing in bugdown for access to config to check if realm is zulip.com
         self.bugdown = bugdown
         markdown.treeprocessors.Treeprocessor.__init__(self, md)
+
+    def get_actual_image_url(self, url):
+        # type: (Text) -> Text
+        # Add specific per-site cases to convert image-preview urls to image urls.
+        # See https://github.com/zulip/zulip/issues/4658 for more information
+        parsed_url = urllib.parse.urlparse(url)
+        if (parsed_url.netloc == 'github.com' or parsed_url.netloc.endswith('.github.com')):
+            # https://github.com/zulip/zulip/blob/master/static/images/logo/zulip-icon-128x128.png ->
+            # https://raw.githubusercontent.com/zulip/zulip/master/static/images/logo/zulip-icon-128x128.png
+            split_path = parsed_url.path.split('/')
+            if len(split_path) > 3 and split_path[3] == "blob":
+                return urllib.parse.urljoin('https://raw.githubusercontent.com',
+                                            '/'.join(split_path[0:3] + split_path[4:]))
+
+        return url
 
     def is_image(self, url):
         # type: (Text) -> bool
@@ -622,7 +642,7 @@ class InlineInterestingLinkProcessor(markdown.treeprocessors.Treeprocessor):
                       class_attr=class_attr)
                 continue
             if self.is_image(url):
-                add_a(root, url, url, title=text)
+                add_a(root, self.get_actual_image_url(url), url, title=text)
                 continue
             if get_tweet_id(url) is not None:
                 if rendered_tweet_count >= self.TWITTER_MAX_TO_PREVIEW:
@@ -678,17 +698,13 @@ class Avatar(markdown.inlinepatterns.Pattern):
         img.set('alt', email)
         return img
 
-emoji_tree = os.path.join(settings.STATIC_ROOT, "generated", "emoji", "images", "emoji")
-path_to_emoji = os.path.join(emoji_tree, '*.png')
-path_to_unicode_emoji = os.path.join(emoji_tree, 'unicode', '*.png')
 path_to_name_to_codepoint = os.path.join(settings.STATIC_ROOT, "generated", "emoji", "name_to_codepoint.json")
-
-unicode_emoji_list = [os.path.splitext(os.path.basename(fn))[0] for fn in glob.glob(path_to_unicode_emoji)]
 name_to_codepoint = ujson.load(open(path_to_name_to_codepoint))
+unicode_emoji_list = set([name_to_codepoint[name] for name in name_to_codepoint])
 
-
-def make_emoji(emoji_name, src, display_string):
-    # type: (Text, Text, Text) -> Element
+def make_emoji(codepoint, display_string):
+    # type: (Text, Text) -> Element
+    src = '/static/generated/emoji/images/emoji/unicode/%s.png' % (codepoint,)
     elt = markdown.util.etree.Element('img')
     elt.set('src', src)
     elt.set('class', 'emoji')
@@ -696,14 +712,31 @@ def make_emoji(emoji_name, src, display_string):
     elt.set("title", display_string)
     return elt
 
+def make_realm_emoji(src, display_string):
+    # type: (Text, Text) -> Element
+    elt = markdown.util.etree.Element('img')
+    elt.set('src', src)
+    elt.set('class', 'emoji')
+    elt.set("alt", display_string)
+    elt.set("title", display_string)
+    return elt
+
+def unicode_emoji_to_codepoint(unicode_emoji):
+    # type: (Text) -> Text
+    codepoint = hex(ord(unicode_emoji))[2:]
+    # Unicode codepoints are minimum of length 4, padded
+    # with zeroes if the length is less than zero.
+    while len(codepoint) < 4:
+        codepoint = '0' + codepoint
+    return codepoint
+
 class UnicodeEmoji(markdown.inlinepatterns.Pattern):
     def handleMatch(self, match):
         # type: (Match[Text]) -> Optional[Element]
         orig_syntax = match.group('syntax')
-        name = hex(ord(orig_syntax))[2:]
-        if name in unicode_emoji_list:
-            src = '/static/generated/emoji/images/emoji/unicode/%s.png' % (name,)
-            return make_emoji(name, src, orig_syntax)
+        codepoint = unicode_emoji_to_codepoint(orig_syntax)
+        if codepoint in unicode_emoji_list:
+            return make_emoji(codepoint, orig_syntax)
         else:
             return None
 
@@ -718,10 +751,11 @@ class Emoji(markdown.inlinepatterns.Pattern):
             realm_emoji = db_data['emoji']
 
         if current_message and name in realm_emoji:
-            return make_emoji(name, realm_emoji[name]['display_url'], orig_syntax)
+            return make_realm_emoji(realm_emoji[name]['source_url'], orig_syntax)
+        elif name == 'zulip':
+            return make_realm_emoji('/static/generated/emoji/images/emoji/unicode/zulip.png', orig_syntax)
         elif name in name_to_codepoint:
-            src = '/static/generated/emoji/images/emoji/unicode/%s.png' % (name_to_codepoint[name],)
-            return make_emoji(name, src, orig_syntax)
+            return make_emoji(name_to_codepoint[name], orig_syntax)
         else:
             return None
 
@@ -1189,15 +1223,52 @@ class Bugdown(markdown.Extension):
         md.inlinePatterns.add('stream', StreamPattern(stream_group), '>backtick')
         md.inlinePatterns.add('tex', Tex(r'\B\$\$(?P<body>[^ _$](\\\$|[^$])*)(?! )\$\$\B'), '>backtick')
         md.inlinePatterns.add('emoji', Emoji(r'(?P<syntax>:[\w\-\+]+:)'), '_end')
-        md.inlinePatterns.add('unicodeemoji', UnicodeEmoji(
-            u'(?P<syntax>[\U0001F300-\U0001F64F\U0001F680-\U0001F6FF\u2600-\u26FF\u2700-\u27BF])'),
-            '_end')
-        # The equalent JS regex is \ud83c[\udf00-\udfff]|\ud83d[\udc00-\ude4f]|\ud83d[\ude80-\udeff]|
-        # [\u2600-\u26FF]|[\u2700-\u27BF]. See below comments for explanation. The JS regex is used
-        # by marked.js for frontend unicode emoji processing.
-        # The JS regex \ud83c[\udf00-\udfff]|\ud83d[\udc00-\ude4f] represents U0001F300-\U0001F64F
-        # The JS regex \ud83d[\ude80-\udeff] represents \U0001F680-\U0001F6FF
-        # Similiarly [\u2600-\u26FF]|[\u2700-\u27BF] represents \u2600-\u26FF\u2700-\u27BF
+
+        # All of our emojis(non ZWJ sequences) belong to one of these unicode blocks:
+        # \U0001f100-\U0001f1ff - Enclosed Alphanumeric Supplement
+        # \U0001f200-\U0001f2ff - Enclosed Ideographic Supplement
+        # \U0001f300-\U0001f5ff - Miscellaneous Symbols and Pictographs
+        # \U0001f600-\U0001f64f - Emoticons (Emoji)
+        # \U0001f680-\U0001f6ff - Transport and Map Symbols
+        # \U0001f900-\U0001f9ff - Supplemental Symbols and Pictographs
+        # \u2000-\u206f         - General Punctuation
+        # \u2300-\u23ff         - Miscellaneous Technical
+        # \u2400-\u243f         - Control Pictures
+        # \u2440-\u245f         - Optical Character Recognition
+        # \u2460-\u24ff         - Enclosed Alphanumerics
+        # \u2500-\u257f         - Box Drawing
+        # \u2580-\u259f         - Block Elements
+        # \u25a0-\u25ff         - Geometric Shapes
+        # \u2600-\u26ff         - Miscellaneous Symbols
+        # \u2700-\u27bf         - Dingbats
+        # \u2900-\u297f         - Supplemental Arrows-B
+        # \u2b00-\u2bff         - Miscellaneous Symbols and Arrows
+        # \u3000-\u303f         - CJK Symbols and Punctuation
+        # \u3200-\u32ff         - Enclosed CJK Letters and Months
+        unicode_emoji_regex = u'(?P<syntax>['\
+            u'\U0001F100-\U0001F64F'    \
+            u'\U0001F680-\U0001F6FF'    \
+            u'\U0001F900-\U0001F9FF'    \
+            u'\u2000-\u206F'            \
+            u'\u2300-\u27BF'            \
+            u'\u2900-\u297F'            \
+            u'\u2B00-\u2BFF'            \
+            u'\u3000-\u303F'            \
+            u'\u3200-\u32FF'            \
+            u'])'
+        md.inlinePatterns.add('unicodeemoji', UnicodeEmoji(unicode_emoji_regex), '_end')
+        # The equivalent JS regex is \ud83c[\udd00-\udfff]|\ud83d[\udc00-\ude4f]|\ud83d[\ude80-\udeff]|
+        # \ud83e[\udd00-\uddff]|[\u2000-\u206f]|[\u2300-\u27bf]|[\u2b00-\u2bff]|[\u3000-\u303f]|
+        # [\u3200-\u32ff]. See below comments for explanation. The JS regex is used by marked.js for
+        # frontend unicode emoji processing.
+        # The JS regex \ud83c[\udd00-\udfff]|\ud83d[\udc00-\ude4f] represents U0001f100-\U0001f64f
+        # The JS regex \ud83d[\ude80-\udeff] represents \U0001f680-\U0001f6ff
+        # The JS regex \ud83e[\udd00-\uddff] represents \U0001f900-\U0001f9ff
+        # The JS regex [\u2000-\u206f] represents \u2000-\u206f
+        # The JS regex [\u2300-\u27bf] represents \u2300-\u27bf
+        # Similarly other JS regexes can be mapped to the respective unicode blocks.
+        # For more information, please refer to the following article:
+        # http://crocodillon.com/blog/parsing-emoji-unicode-in-javascript
 
         md.inlinePatterns.add('link', AtomicLinkPattern(markdown.inlinepatterns.LINK_RE, md), '>avatar')
 
@@ -1386,7 +1457,7 @@ def do_convert(content, message=None, message_realm=None, possible_words=None, s
     # * Nothing is passed in other than content -> just run default options (e.g. for docs)
     # * message is passed, but no realm is -> look up realm from message
     # * message_realm is passed -> use that realm for bugdown purposes
-    if message:
+    if message is not None:
         if message_realm is None:
             message_realm = message.get_realm()
     if message_realm is None:
@@ -1417,7 +1488,8 @@ def do_convert(content, message=None, message_realm=None, possible_words=None, s
 
     # Pre-fetch data from the DB that is used in the bugdown thread
     global db_data
-    if message:
+    if message is not None:
+        assert message_realm is not None # ensured above if message is not None
         realm_users = get_active_user_dicts_in_realm(message_realm)
         realm_streams = get_active_streams(message_realm).values('id', 'name')
 
@@ -1439,7 +1511,7 @@ def do_convert(content, message=None, message_realm=None, possible_words=None, s
         return timeout(5, _md_engine.convert, content)
     except Exception:
         from zerver.lib.actions import internal_send_message
-        from zerver.models import get_user_profile_by_email
+        from zerver.models import get_system_bot
 
         cleaned = _sanitize_for_log(content)
 
@@ -1448,7 +1520,7 @@ def do_convert(content, message=None, message_realm=None, possible_words=None, s
                           % (traceback.format_exc(), cleaned))
         subject = "Markdown parser failure on %s" % (platform.node(),)
         if settings.ERROR_BOT is not None:
-            error_bot_realm = get_user_profile_by_email(settings.ERROR_BOT).realm
+            error_bot_realm = get_system_bot(settings.ERROR_BOT).realm
             internal_send_message(error_bot_realm, settings.ERROR_BOT, "stream",
                                   "errors", subject, "Markdown parser failed, email sent with details.")
         mail.mail_admins(

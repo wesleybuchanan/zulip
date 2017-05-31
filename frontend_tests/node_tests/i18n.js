@@ -44,15 +44,15 @@ i18n.init({
 (function test_tr_tag() {
     var args = {
         page_params: {
-            fullname: "John Doe",
+            full_name: "John Doe",
             password_auth_enabled: false,
             avatar_url: "http://example.com",
             left_side_userlist: false,
             twenty_four_hour_time: false,
-            stream_desktop_notifications_enabled: false,
-            stream_sounds_enabled: false,
-            desktop_notifications_enabled: false,
-            sounds_enabled: false,
+            enable_stream_desktop_notifications: false,
+            enable_stream_sounds: false,
+            enable_desktop_notifications: false,
+            enable_sounds: false,
             enable_offline_email_notifications: false,
             enable_offline_push_notifications: false,
             enable_online_push_notifications: false,

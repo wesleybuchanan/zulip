@@ -137,7 +137,7 @@ def api_github_v2(user_profile, event, payload, branches, default_stream,
     target_stream = commit_stream if commit_stream else default_stream
     issue_stream = issue_stream if issue_stream else default_stream
     repository = payload['repository']
-    topic_focus = topic_focus if topic_focus else repository['name']
+    updated_topic_focus = topic_focus if topic_focus else repository['name']
 
     # Event Handlers
     if event == 'pull_request':
@@ -166,17 +166,18 @@ def api_github_v2(user_profile, event, payload, branches, default_stream,
         content = github_object_commented_content(payload, type)
 
     elif event == 'push':
-        subject, content = build_message_from_gitlog(user_profile, topic_focus,
+        subject, content = build_message_from_gitlog(user_profile, updated_topic_focus,
                                                      payload['ref'], payload['commits'],
                                                      payload['before'], payload['after'],
                                                      payload['compare'],
                                                      payload['pusher']['name'],
                                                      forced=payload['forced'],
-                                                     created=payload['created'])
+                                                     created=payload['created'],
+                                                     deleted=payload['deleted'])
     elif event == 'commit_comment':
-        subject = topic_focus
+        subject = updated_topic_focus
 
-        comment = payload.get('comment')
+        comment = payload['comment']
         action = u'[commented]({})'.format(comment['html_url'])
         content = get_commits_comment_action_message(
             comment['user']['login'],
@@ -279,8 +280,8 @@ def api_github_landing(request, user_profile, event=REQ(),
                                 forged=False, subject_name=subject,
                                 message_content=content)
 
-def build_message_from_gitlog(user_profile, name, ref, commits, before, after, url, pusher, forced=None, created=None):
-    # type: (UserProfile, Text, Text, List[Dict[str, str]], Text, Text, Text, Text, Optional[Text], Optional[Text]) -> Tuple[Text, Text]
+def build_message_from_gitlog(user_profile, name, ref, commits, before, after, url, pusher, forced=None, created=None, deleted=False):
+    # type: (UserProfile, Text, Text, List[Dict[str, str]], Text, Text, Text, Text, Optional[Text], Optional[Text], Optional[bool]) -> Tuple[Text, Text]
     short_ref = re.sub(r'^refs/heads/', '', ref)
     subject = SUBJECT_WITH_BRANCH_TEMPLATE.format(repo=name, branch=short_ref)
 
@@ -291,15 +292,16 @@ def build_message_from_gitlog(user_profile, name, ref, commits, before, after, u
         content = get_force_push_commits_event_message(pusher, url, short_ref, after[:7])
     else:
         commits = _transform_commits_list_to_common_format(commits)
-        content = get_push_commits_event_message(pusher, url, short_ref, commits)
+        content = get_push_commits_event_message(pusher, url, short_ref, commits, deleted=deleted)
 
     return subject, content
 
 def _transform_commits_list_to_common_format(commits):
-    # type: (List[Dict[str, str]]) -> List[Dict[str, str]]
+    # type: (List[Dict[str, Any]]) -> List[Dict[str, str]]
     new_commits_list = []
     for commit in commits:
         new_commits_list.append({
+            'name': commit['author'].get('username'),
             'sha': commit.get('id'),
             'url': commit.get('url'),
             'message': commit.get('message'),

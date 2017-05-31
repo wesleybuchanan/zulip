@@ -8,8 +8,10 @@ set_global('emoji', {emojis: emoji_list});
 set_global('stream_data', {subscribed_subs: function () {
     return stream_list;
 }});
+set_global('pygments_data', {langs:
+    {python: 0, javscript: 1, html: 2, css: 3},
+});
 
-global.stub_out_jquery();
 add_dependencies({
     people: 'js/people.js',
 });
@@ -46,7 +48,7 @@ global.people.add({
     ct.split_at_cursor = function (word) { return [word, '']; };
 
     var begin_typehead_this = {options: {completions: {
-        emoji: true, mention: true, stream: true}}};
+        emoji: true, mention: true, stream: true, syntax: true}}};
 
     function assert_typeahead_equals(input, reference) {
         var returned = ct.compose_content_begins_typeahead.call(begin_typehead_this, input);
@@ -59,6 +61,8 @@ global.people.add({
     assert_typeahead_equals("test @", false);
     assert_typeahead_equals("test no@o", false);
     assert_typeahead_equals("test :-P", false);
+    assert_typeahead_equals("test # a", false);
+    assert_typeahead_equals("test #", false);
 
     var all_items = [
         {
@@ -88,6 +92,17 @@ global.people.add({
     assert_typeahead_equals("test #", false);
     assert_typeahead_equals("test #D", stream_list);
     assert_typeahead_equals("#s", stream_list);
+
+    var lang_list = Object.keys(pygments_data.langs);
+    assert_typeahead_equals("``` ", false);
+    assert_typeahead_equals("test ``` py", false);
+    assert_typeahead_equals("test ```a", false);
+    assert_typeahead_equals("```b", lang_list);
+    assert_typeahead_equals("``c", false);
+    assert_typeahead_equals("``` d", lang_list);
+    assert_typeahead_equals("~~~e", lang_list);
+    assert_typeahead_equals("~~~ f", lang_list);
+    assert_typeahead_equals("test ~~~", false);
 }());
 
 (function test_tokenizing() {
@@ -100,6 +115,9 @@ global.people.add({
     assert.equal(ct.tokenize_compose_str("foo bar :smil"), ":smil");
     assert.equal(ct.tokenize_compose_str(":smil"), ":smil");
     assert.equal(ct.tokenize_compose_str("foo @alice sm"), "@alice sm");
+    assert.equal(ct.tokenize_compose_str("foo ```p"), "");
+    assert.equal(ct.tokenize_compose_str("``` py"), "``` py");
+    assert.equal(ct.tokenize_compose_str("foo``bar ~~~ py"), "");
 
     // The following cases are kinda judgment calls...
     assert.equal(ct.tokenize_compose_str(

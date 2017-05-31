@@ -1,5 +1,5 @@
-from typing import Optional, Any, Dict, List, Text
-
+from typing import Optional, Any, Dict, List, Text, Tuple
+from collections import defaultdict
 SUBJECT_WITH_BRANCH_TEMPLATE = u'{repo} / {branch}'
 SUBJECT_WITH_PR_OR_ISSUE_INFO_TEMPLATE = u'{repo} / {type} #{id} {title}'
 
@@ -8,13 +8,22 @@ EMPTY_SHA = '0000000000000000000000000000000000000000'
 COMMITS_LIMIT = 20
 COMMIT_ROW_TEMPLATE = u'* {commit_msg} ([{commit_short_sha}]({commit_url}))\n'
 COMMITS_MORE_THAN_LIMIT_TEMPLATE = u"[and {commits_number} more commit(s)]"
+COMMIT_OR_COMMITS = u"commit{}"
 
-PUSH_PUSHED_TEXT_WITH_URL = u"[pushed]({compare_url})"
-PUSH_PUSHED_TEXT_WITHOUT_URL = u"pushed"
-PUSH_COMMITS_MESSAGE_TEMPLATE = u"""{user_name} {pushed_text} to branch {branch_name}
+PUSH_PUSHED_TEXT_WITH_URL = u"[pushed]({compare_url}) {number_of_commits} {commit_or_commits}"
+PUSH_PUSHED_TEXT_WITHOUT_URL = u"pushed {number_of_commits} {commit_or_commits}"
+PUSH_COMMITS_MESSAGE_TEMPLATE_WITH_COMMITTERS = u"""{user_name} {pushed_text} to branch {branch_name}. {committers_details}.
 
 {commits_data}
 """
+PUSH_COMMITS_MESSAGE_TEMPLATE_WITHOUT_COMMITTERS = u"""{user_name} {pushed_text} to branch {branch_name}.
+
+{commits_data}
+"""
+PUSH_DELETE_BRANCH_MESSAGE_TEMPLATE = u"{user_name} [deleted]({compare_url}) the branch {branch_name}."
+PUSH_LOCAL_BRANCH_WITHOUT_COMMITS_MESSAGE_TEMPLATE = u"{user_name} [pushed]({compare_url}) the branch {branch_name}."
+PUSH_COMMITS_MESSAGE_EXTENSION = u"Commits by {}"
+PUSH_COMMITTERS_LIMIT_INFO = 3
 
 FORCE_PUSH_COMMITS_MESSAGE_TEMPLATE = u"{user_name} [force pushed]({url}) to branch {branch_name}. Head is now {head}"
 CREATE_BRANCH_MESSAGE_TEMPLATE = u"{user_name} created [{branch_name}]({url}) branch"
@@ -35,19 +44,54 @@ PUSH_TAGS_MESSAGE_TEMPLATE = u"""{user_name} {action} tag {tag}"""
 TAG_WITH_URL_TEMPLATE = u"[{tag_name}]({tag_url})"
 TAG_WITHOUT_URL_TEMPLATE = u"{tag_name}"
 
-def get_push_commits_event_message(user_name, compare_url, branch_name, commits_data, is_truncated=False):
-    # type: (Text, Optional[Text], Text, List[Dict[str, Any]], Optional[bool]) -> Text
-    if compare_url:
-        pushed_text_message = PUSH_PUSHED_TEXT_WITH_URL.format(compare_url=compare_url)
-    else:
-        pushed_text_message = PUSH_PUSHED_TEXT_WITHOUT_URL
 
-    return PUSH_COMMITS_MESSAGE_TEMPLATE.format(
-        user_name=user_name,
-        pushed_text=pushed_text_message,
-        branch_name=branch_name,
-        commits_data=get_commits_content(commits_data, is_truncated),
-    ).rstrip()
+def get_push_commits_event_message(user_name, compare_url, branch_name, commits_data, is_truncated=False, deleted=False):
+    # type: (Text, Optional[Text], Text, List[Dict[str, Any]], Optional[bool], Optional[bool]) -> Text
+    if not commits_data and deleted:
+        return PUSH_DELETE_BRANCH_MESSAGE_TEMPLATE.format(
+            user_name=user_name,
+            compare_url=compare_url,
+            branch_name=branch_name
+        )
+
+    if not commits_data and not deleted:
+        return PUSH_LOCAL_BRANCH_WITHOUT_COMMITS_MESSAGE_TEMPLATE.format(
+            user_name=user_name,
+            compare_url=compare_url,
+            branch_name=branch_name
+        )
+
+    pushed_message_template = PUSH_PUSHED_TEXT_WITH_URL if compare_url else PUSH_PUSHED_TEXT_WITHOUT_URL
+
+    pushed_text_message = pushed_message_template.format(
+        compare_url=compare_url,
+        number_of_commits=len(commits_data),
+        commit_or_commits=COMMIT_OR_COMMITS.format(u's' if len(commits_data) > 1 else u''))
+
+    committers_items = get_all_committers(commits_data)  # type: List[Tuple[str, int]]
+    if len(committers_items) == 1 and user_name == committers_items[0][0]:
+        return PUSH_COMMITS_MESSAGE_TEMPLATE_WITHOUT_COMMITTERS.format(
+            user_name=user_name,
+            pushed_text=pushed_text_message,
+            branch_name=branch_name,
+            commits_data=get_commits_content(commits_data, is_truncated),
+        ).rstrip()
+    else:
+        committers_details = "{} ({})".format(*committers_items[0])
+
+        for name, number_of_commits in committers_items[1:-1]:
+            committers_details = "{}, {} ({})".format(committers_details, name, number_of_commits)
+
+        if len(committers_items) > 1:
+            committers_details = "{} and {} ({})".format(committers_details, *committers_items[-1])
+
+        return PUSH_COMMITS_MESSAGE_TEMPLATE_WITH_COMMITTERS.format(
+            user_name=user_name,
+            pushed_text=pushed_text_message,
+            branch_name=branch_name,
+            committers_details=PUSH_COMMITS_MESSAGE_EXTENSION.format(committers_details),
+            commits_data=get_commits_content(commits_data, is_truncated),
+        ).rstrip()
 
 def get_force_push_commits_event_message(user_name, url, branch_name, head):
     # type: (Text, Text, Text, Text) -> Text
@@ -148,9 +192,9 @@ def get_commits_content(commits_data, is_truncated=False):
     commits_content = u''
     for commit in commits_data[:COMMITS_LIMIT]:
         commits_content += COMMIT_ROW_TEMPLATE.format(
-            commit_short_sha=get_short_sha(commit.get('sha')),
+            commit_short_sha=get_short_sha(commit['sha']),
             commit_url=commit.get('url'),
-            commit_msg=commit.get('message').partition('\n')[0]
+            commit_msg=commit['message'].partition('\n')[0]
         )
 
     if len(commits_data) > COMMITS_LIMIT:
@@ -166,3 +210,22 @@ def get_commits_content(commits_data, is_truncated=False):
 def get_short_sha(sha):
     # type: (Text) -> Text
     return sha[:7]
+
+def get_all_committers(commits_data):
+    # type: (List[Dict[str, Any]]) -> List[Tuple[str, int]]
+    committers = defaultdict(int)  # type: Dict[str, int]
+
+    for commit in commits_data:
+        committers[commit['name']] += 1
+
+    # Sort by commit count, breaking ties alphabetically.
+    committers_items = sorted(list(committers.items()),
+                              key=lambda item: (-item[1], item[0]))  # type: List[Tuple[str, int]]
+    committers_values = [c_i[1] for c_i in committers_items]  # type: List[int]
+
+    if len(committers) > PUSH_COMMITTERS_LIMIT_INFO:
+        others_number_of_commits = sum(committers_values[PUSH_COMMITTERS_LIMIT_INFO:])
+        committers_items = committers_items[:PUSH_COMMITTERS_LIMIT_INFO]
+        committers_items.append(('others', others_number_of_commits))
+
+    return committers_items

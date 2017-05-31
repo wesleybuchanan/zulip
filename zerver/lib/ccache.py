@@ -66,7 +66,7 @@ def der_encode_integer_value(val):
     # Special-case to avoid an empty encoding.
     if val == 0:
         return b"\x00"
-    sign = 0 # What you would get if you sign-extended the current high bit.
+    sign = 0  # What you would get if you sign-extended the current high bit.
     out = b""
     # We can stop once sign-extension matches the remaining value.
     while val != sign:
@@ -103,11 +103,11 @@ def der_encode_octet_string(val):
     return der_encode_tlv(0x04, val)
 
 def der_encode_sequence(tlvs, tagged=True):
-    # type: (List[bytes], Optional[bool]) -> bytes
+    # type: (List[Optional[bytes]], Optional[bool]) -> bytes
     body = []
     for i, tlv in enumerate(tlvs):
         # Missing optional elements represented as None.
-        if not tlv:
+        if tlv is None:
             continue
         if tagged:
             # Assume kerberos-style explicit tagging of components.
@@ -118,16 +118,16 @@ def der_encode_sequence(tlvs, tagged=True):
 def der_encode_ticket(tkt):
     # type: (Dict[str, Any]) -> bytes
     return der_encode_tlv(
-        0x61, # Ticket
+        0x61,  # Ticket
         der_encode_sequence(
-            [der_encode_integer(5), # tktVno
+            [der_encode_integer(5),  # tktVno
              der_encode_string(tkt["realm"]),
-             der_encode_sequence( # PrincipalName
+             der_encode_sequence(  # PrincipalName
                  [der_encode_int32(tkt["sname"]["nameType"]),
                   der_encode_sequence([der_encode_string(c)
                                        for c in tkt["sname"]["nameString"]],
                                       tagged=False)]),
-             der_encode_sequence( # EncryptedData
+             der_encode_sequence(  # EncryptedData
                  [der_encode_int32(tkt["encPart"]["etype"]),
                   (der_encode_uint32(tkt["encPart"]["kvno"])
                    if "kvno" in tkt["encPart"]
@@ -188,11 +188,11 @@ def make_ccache(cred):
     # Do we need a DeltaTime header? The ccache I get just puts zero
     # in there, so do the same.
     out = struct.pack("!HHHHII",
-                      0x0504, # file_format_version
-                      12, # headerlen
-                      1, # tag (DeltaTime)
-                      8, # taglen (two uint32_ts)
-                      0, 0, # time_offset / usec_offset
+                      0x0504,  # file_format_version
+                      12,  # headerlen
+                      1,  # tag (DeltaTime)
+                      8,  # taglen (two uint32_ts)
+                      0, 0,  # time_offset / usec_offset
                       )
     out += ccache_principal(cred["cname"], cred["crealm"])
     out += ccache_credential(cred)

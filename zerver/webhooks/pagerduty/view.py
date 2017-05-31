@@ -28,7 +28,7 @@ def build_pagerduty_formatdict(message):
     # Normalize the message dict, after this all keys will exist. I would
     # rather some strange looking messages than dropping pages.
 
-    format_dict = {} # type: Dict[str, Any]
+    format_dict = {}  # type: Dict[str, Any]
     format_dict['action'] = PAGER_DUTY_EVENT_NAMES[message['type']]
 
     format_dict['incident_id'] = message['data']['incident']['id']
@@ -70,7 +70,7 @@ def build_pagerduty_formatdict(message):
 
 
 def send_raw_pagerduty_json(user_profile, client, stream, message, topic):
-    # type: (UserProfile, Client, Text, Dict[str, Any], Text) -> None
+    # type: (UserProfile, Client, Text, Dict[str, Any], Optional[Text]) -> None
     subject = topic or 'pagerduty'
     body = (
         u'Unknown pagerduty message\n'
@@ -82,7 +82,7 @@ def send_raw_pagerduty_json(user_profile, client, stream, message, topic):
 
 
 def send_formated_pagerduty(user_profile, client, stream, message_type, format_dict, topic):
-    # type: (UserProfile, Client, Text, Text, Dict[str, Any], Text) -> None
+    # type: (UserProfile, Client, Text, Text, Dict[str, Any], Optional[Text]) -> None
     if message_type in ('incident.trigger', 'incident.unacknowledge'):
         template = (u':imp: Incident '
                     u'[{incident_num}]({incident_url}) {action} by '
@@ -109,20 +109,20 @@ def send_formated_pagerduty(user_profile, client, stream, message_type, format_d
 
 @api_key_only_webhook_view('PagerDuty')
 @has_request_variables
-def api_pagerduty_webhook(request, user_profile, client, payload=REQ(argument_type='body'),
+def api_pagerduty_webhook(request, user_profile, payload=REQ(argument_type='body'),
                           stream=REQ(default='pagerduty'), topic=REQ(default=None)):
-    # type: (HttpRequest, UserProfile, Client, Dict[str, Iterable[Dict[str, Any]]], Text, Optional[Text]) -> HttpResponse
+    # type: (HttpRequest, UserProfile, Dict[str, Iterable[Dict[str, Any]]], Text, Optional[Text]) -> HttpResponse
     for message in payload['messages']:
         message_type = message['type']
 
         if message_type not in PAGER_DUTY_EVENT_NAMES:
-            send_raw_pagerduty_json(user_profile, client, stream, message, topic)
+            send_raw_pagerduty_json(user_profile, request.client, stream, message, topic)
 
         try:
             format_dict = build_pagerduty_formatdict(message)
         except Exception:
-            send_raw_pagerduty_json(user_profile, client, stream, message, topic)
+            send_raw_pagerduty_json(user_profile, request.client, stream, message, topic)
         else:
-            send_formated_pagerduty(user_profile, client, stream, message_type, format_dict, topic)
+            send_formated_pagerduty(user_profile, request.client, stream, message_type, format_dict, topic)
 
     return json_success()

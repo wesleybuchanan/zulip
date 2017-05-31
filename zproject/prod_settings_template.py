@@ -1,3 +1,5 @@
+from typing import Optional
+
 # Zulip Settings intended to be set by a system administrator.
 #
 # See http://zulip.readthedocs.io/en/latest/settings.html for
@@ -12,6 +14,9 @@
 # zulip.example.com.  This should match what users will put in their
 # web browser.  If you want to allow multiple hostnames, add the rest
 # to ALLOWED_HOSTS.
+#
+# If you need to access the server on a specific port, you should set
+# EXTERNAL_HOST to e.g. zulip.example.com:1234 here.
 EXTERNAL_HOST = 'zulip.example.com'
 
 # A comma-separated list of strings representing the host/domain names
@@ -25,8 +30,10 @@ EXTERNAL_HOST = 'zulip.example.com'
 #
 # The default should work unless you are using multiple hostnames or
 # connecting directly to your server's IP address.  If this is set
-# wrong, all requests will get a "Bad Request" error.
-ALLOWED_HOSTS = [EXTERNAL_HOST]
+# wrong, all requests will get a 400 "Bad Request" error.
+#
+# Note that these should just be hostnames, without port numbers.
+ALLOWED_HOSTS = [EXTERNAL_HOST.split(":")[0]]
 
 # The email address for the person or team who maintain the Zulip
 # Voyager installation. Will also get support emails. (e.g. zulip-admin@example.com)
@@ -68,7 +75,7 @@ EMAIL_USE_TLS = True
 DEFAULT_FROM_EMAIL = "Zulip <zulip@example.com>"
 # The noreply address to be used as Reply-To for certain generated emails.
 # Messages sent to this address should not be delivered anywhere.
-NOREPLY_EMAIL_ADDRESS = "noreply@example.com"
+NOREPLY_EMAIL_ADDRESS = "Zulip <noreply@example.com>"
 
 
 ### AUTHENTICATION SETTINGS
@@ -123,10 +130,17 @@ AUTHENTICATION_BACKENDS = (
 # set this to your domain (e.g. if REMOTE_USER is "username" and the
 # corresponding email address is "username@example.com", set
 # SSO_APPEND_DOMAIN = "example.com")
-SSO_APPEND_DOMAIN = None # type: str
+SSO_APPEND_DOMAIN = None # type: Optional[str]
 
 
 ### OPTIONAL SETTINGS
+
+# Support for mobile push notifications.  Setting controls whether
+# push notifications will be forwarded through a Zulip push
+# notification bouncer server to the mobile apps.  See
+# https://zulip.readthedocs.io/en/latest/prod-mobile-push-notifications.html
+# for information on how to sign up for and configure this.
+#PUSH_NOTIFICATION_BOUNCER_URL = https://push.zulipchat.com
 
 # Controls whether session cookies expire when the browser closes
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
@@ -346,7 +360,7 @@ AUTH_LDAP_USER_SEARCH = LDAPSearch("ou=users,dc=example,dc=com",
 
 # If the value of a user's "uid" (or similar) property is not their email
 # address, specify the domain to append here.
-LDAP_APPEND_DOMAIN = None # type: str
+LDAP_APPEND_DOMAIN = None # type: Optional[str]
 
 # This map defines how to populate attributes of a Zulip user from LDAP.
 AUTH_LDAP_USER_ATTR_MAP = {

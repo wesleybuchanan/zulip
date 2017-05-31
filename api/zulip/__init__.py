@@ -40,7 +40,7 @@ import logging
 import six
 from typing import Any, Callable, Dict, Iterable, IO, List, Mapping, Optional, Text, Tuple, Union
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def _default_client():
 
 def generate_option_group(parser, prefix=''):
     # type: (optparse.OptionParser, str) ->  optparse.OptionGroup
-    group = optparse.OptionGroup(parser, 'Zulip API configuration')
+    group = optparse.OptionGroup(parser, 'Zulip API configuration') # type: ignore # https://github.com/python/typeshed/pull/1248
     group.add_option('--%ssite' % (prefix,),
                      dest="zulip_site",
                      help="Zulip server URI",
@@ -168,7 +168,10 @@ def init_from_options(options, client=None):
                   client_cert_key=options.client_cert_key)
 
 def get_default_config_filename():
-    # type: () -> str
+    # type: () -> Optional[str]
+    if os.environ.get("HOME") is None:
+        return None
+
     config_file = os.path.join(os.environ["HOME"], ".zuliprc")
     if (not os.path.exists(config_file) and
             os.path.exists(os.path.join(os.environ["HOME"], ".humbugrc"))):
@@ -205,7 +208,7 @@ class Client(object):
         if config_file is None:
             config_file = get_default_config_filename()
 
-        if os.path.exists(config_file):
+        if config_file is not None and os.path.exists(config_file):
             config = SafeConfigParser()
             with open(config_file, 'r') as f:
                 config.readfp(f, config_file)
@@ -257,7 +260,7 @@ class Client(object):
         self.client_name = client
 
         if insecure:
-            self.tls_verification = False # type: Union[bool, str]
+            self.tls_verification = False  # type: Union[bool, str]
         elif cert_bundle is not None:
             if not os.path.isfile(cert_bundle):
                 raise RuntimeError("tls bundle '%s' does not exist"
@@ -271,7 +274,7 @@ class Client(object):
             if client_cert_key is not None:
                 raise RuntimeError("client cert key '%s' specified, but no client cert public part provided"
                                    % (client_cert_key,))
-        else: # we have a client cert
+        else:  # we have a client cert
             if not os.path.isfile(client_cert):
                 raise RuntimeError("client cert '%s' does not exist"
                                    % (client_cert,))
@@ -328,7 +331,7 @@ class Client(object):
             'had_error_retry': False,
             'request': request,
             'failures': 0,
-        } # type: Dict[str, Any]
+        }  # type: Dict[str, Any]
 
         def error_retry(error_string):
             # type: (str) -> bool
@@ -369,7 +372,7 @@ class Client(object):
 
                 # Build a client cert object for requests
                 if self.client_cert_key is not None:
-                    client_cert = (self.client_cert, self.client_cert_key) # type: Union[str, Tuple[str, str]]
+                    client_cert = (self.client_cert, self.client_cert_key)  # type: Union[str, Tuple[str, str]]
                 else:
                     client_cert = self.client_cert
 

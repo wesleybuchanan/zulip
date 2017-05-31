@@ -13,7 +13,10 @@ from itertools import permutations, chain
 import ujson
 
 from six.moves import range, zip
-from typing import Dict, List, Text
+from typing import Any, Dict, List, Text
+
+# Emojisets that we currently support.
+EMOJISETS = ['apple', 'emojione', 'google', 'twitter']
 
 # the corresponding code point will be set to exactly these names as a
 # final pass, overriding any other rules.  This is useful for cases
@@ -223,3 +226,33 @@ def emoji_names_for_picker(emoji_map):
         codepoint_to_names[codepoint] = names
 
     return sorted(list(chain.from_iterable(codepoint_to_names.values())))
+
+# Returns a dict from categories to list of codepoints. The list of
+# codepoints are sorted according to the `sort_order` as defined in
+# `emoji_data`.
+def generate_emoji_catalog(emoji_data):
+    # type: (List[Dict[Text, Any]]) -> Dict[str, List[str]]
+    sort_order = {} # type: Dict[str, int]
+    emoji_catalog = {} # type: Dict[str, List[str]]
+    for emoji in emoji_data:
+        if not emoji_is_universal(emoji):
+            continue
+        category = str(emoji["category"])
+        codepoint = str(emoji["unified"]).lower()
+        sort_order[codepoint] = emoji["sort_order"]
+        if category in emoji_catalog:
+            emoji_catalog[category].append(codepoint)
+        else:
+            emoji_catalog[category] = [codepoint, ]
+    for category in emoji_catalog:
+        emoji_catalog[category].sort(key=lambda codepoint: sort_order[codepoint])
+    return emoji_catalog
+
+# Use only those names for which images are present in all
+# the emoji sets so that we can switch emoji sets seemlessly.
+def emoji_is_universal(emoji_dict):
+    # type: (Dict[Text, Any]) -> bool
+    for emoji_set in EMOJISETS:
+        if not emoji_dict['has_img_' + emoji_set]:
+            return False
+    return True

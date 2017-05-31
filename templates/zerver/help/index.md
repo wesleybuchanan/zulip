@@ -37,23 +37,22 @@ as an **organization**.
 * [Send a private message](/help/send-a-private-message)
 * [Format your message using Markdown](/help/format-your-message-using-markdown)
 * [Preview your message before sending](/help/preview-your-message-before-sending)
+* [View and edit your message drafts](/help/view-and-edit-your-message-drafts)
 * [Add emoji](/help/add-emoji)
 * [Upload and share files](/help/upload-and-share-files)
 * [Manage your uploaded files](/help/manage-your-uploaded-files)
-* [Restore the last unsent message](/help/restore-the-last-unsent-message)
 <!-- Automatically link to an external issue tracker (improve wording) -->
 <!-- Add a link preview -->
 * [Enable or disable Press Enter to send](/help/enable-or-disable-pressing-enter-to-send)
 * [Verify that your message has been successfully sent](/help/verify-that-your-message-has-been-successfully-sent)
 <!-- What to do if the server returns an error -->
-* [Send a status message](/help/send-a-status-message)
+* [Send a status message](/help/format-your-message-using-markdown#status-messages)
 * [@-mention a team member](/help/at-mention-a-team-member)
 * [Make an announcement](/help/make-an-announcement)
 * [Send a message in a different language](/help/send-a-message-in-a-different-language)
 * [Reply to a message](/help/reply-to-a-message)
 ### Reading
 * [View the Markdown source of a message](/help/view-the-markdown-source-of-a-message)
-* [View information about a message](/help/view-information-about-a-message)
 * [View the exact time a message was sent](/help/view-the-exact-time-a-message-was-sent)
 * [View an image at full size](/help/view-an-image-at-full-size)
 * [Collapse a message](/help/collapse-a-message)
@@ -81,7 +80,6 @@ as an **organization**.
 * [View messages from a topic](/help/view-messages-from-a-topic)
 * [View messages from a user](/help/view-messages-from-a-user)
 * [View messages containing files or links](/help/view-messages-containing-files-or-links)
-* [The #announce stream](/help/the-announce-stream)
 * [Add or invite someone to a stream](/help/add-or-invite-someone-to-a-stream)
 * [Change the stream description](/help/change-the-stream-description)
 * [Rename a stream](/help/rename-a-stream)
@@ -106,6 +104,7 @@ as an **organization**.
 ## Tools & Customization
 * [Keyboard shortcuts](/help/keyboard-shortcuts)
 * [Add a bot or integration](/help/add-a-bot-or-integration)
+* [Import users and channels from Slack](/help/import-users-and-channels-from-slack)
 
 ## Misc
 * [Tips for Zulip on Windows](/help/zulip-on-windows)
@@ -120,7 +119,10 @@ as an **organization**.
 
 # Administering a Zulip organization
 
+* [Getting your organization started with Zulip](/help/getting-your-organization-started-with-zulip)
+
 ## Organization Settings
+
 * [Change your organization settings](/help/change-your-organization-settings)
 * [Change your organization's name](/help/change-your-organizations-name)
 * [Restrict user email addresses to certain domains](/help/restrict-user-email-addresses-to-certain-domains)

@@ -56,6 +56,27 @@ exports.lower_bound = function (array, arg1, arg2, arg3, arg4) {
     return first;
 };
 
+// Produces an easy-to-read preview on an HTML element.  Currently
+// only used for including in error report emails; be sure to discuss
+// with other developers before using it in a user-facing context
+// because it is not XSS-safe.
+exports.preview_node = function (node) {
+    if (node.constructor === jQuery) {
+        node = node[0];
+    }
+
+    var tag = node.tagName.toLowerCase();
+    var className = node.className.length ? node.className : false;
+    var id = node.id.length ? node.id : false;
+
+    var node_preview = "<" + tag +
+       (id ? " id='" + id + "'" : "") +
+       (className ? " class='" + className + "'" : "") +
+       "></" + tag + ">";
+
+      return node_preview;
+};
+
 exports.same_stream_and_topic = function util_same_stream_and_topic(a, b) {
     // Streams and topics are case-insensitive.
     return ((a.stream_id === b.stream_id) &&
@@ -234,7 +255,36 @@ exports.is_mobile = function () {
     return new RegExp(regex, "i").test(window.navigator.userAgent);
 };
 
+exports.prefix_sort = function (query, objs, get_item) {
+    // Based on Bootstrap typeahead's default sorter, but taking into
+    // account case sensitivity on "begins with"
+    var beginswithCaseSensitive = [];
+    var beginswithCaseInsensitive = [];
+    var noMatch = [];
+
+    var obj = objs.shift();
+    while (obj) {
+        var item;
+        if (get_item) {
+            item = get_item(obj);
+        } else {
+            item = obj;
+        }
+        if (item.indexOf(query) === 0) {
+            beginswithCaseSensitive.push(obj);
+        } else if (item.toLowerCase().indexOf(query.toLowerCase()) === 0) {
+            beginswithCaseInsensitive.push(obj);
+        } else {
+            noMatch.push(obj);
+        }
+        obj = objs.shift();
+    }
+    return { matches: beginswithCaseSensitive.concat(beginswithCaseInsensitive),
+             rest:    noMatch };
+};
+
 return exports;
+
 }());
 if (typeof module !== 'undefined') {
     module.exports = util;

@@ -92,7 +92,7 @@ if options.interface is None:
         options.interface = None
     else:
         # Otherwise, only listen to requests on localhost for security.
-        options.interface = "192.168.33.128"
+        options.interface = "127.0.0.1"
 elif options.interface == "":
     options.interface = None
 
@@ -223,7 +223,7 @@ class BaseWebsocketHandler(WebSocketHandler):
         self.client = None # type: Any
 
     def get(self, *args, **kwargs):
-        # type: (*Any, **Any) -> Callable
+        # type: (*Any, **Any) -> Optional[Callable]
         # use get method from WebsocketHandler
         return super(BaseWebsocketHandler, self).get(*args, **kwargs)
 

@@ -118,12 +118,14 @@ exports.page_down = function () {
 exports.cycle_stream = function (direction) {
     var currentStream;
     var nextStream;
-    if (narrow.stream() !== undefined) {
-        currentStream = stream_list.get_stream_li(narrow.stream());
+    var stream_name = narrow_state.stream();
+    if (stream_name !== undefined) {
+        var stream_id = stream_data.get_stream_id(stream_name);
+        currentStream = stream_list.get_stream_li(stream_id);
     }
     switch (direction) {
         case 'forward':
-            if (narrow.stream() === undefined) {
+            if (narrow_state.stream() === undefined) {
                 nextStream = $("#stream_filters").children('.narrow-filter').first();
             } else {
                 nextStream = currentStream.next('.narrow-filter');
@@ -133,7 +135,7 @@ exports.cycle_stream = function (direction) {
             }
             break;
         case 'backward':
-            if (narrow.stream() === undefined) {
+            if (narrow_state.stream() === undefined) {
                 nextStream = $("#stream_filters").children('.narrow-filter').last();
             } else {
                 nextStream = currentStream.prev('.narrow-filter');

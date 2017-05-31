@@ -12,13 +12,14 @@ from django.conf import settings
 from zerver.lib.actions import decode_email_address, get_email_gateway_message_string_from_address, \
     internal_send_message
 from zerver.lib.notifications import convert_html_to_markdown
+from zerver.lib.queue import queue_json_publish
 from zerver.lib.redis_utils import get_redis_client
 from zerver.lib.upload import upload_message_image
 from zerver.lib.utils import generate_random_token
 from zerver.lib.str_utils import force_text
-from zerver.models import Stream, Recipient, get_user_profile_by_email, \
+from zerver.models import Stream, Recipient, \
     get_user_profile_by_id, get_display_recipient, get_recipient, \
-    Message, Realm, UserProfile
+    Message, Realm, UserProfile, get_system_bot
 from six import binary_type
 import six
 import talon
@@ -41,7 +42,7 @@ def report_to_zulip(error_message):
     # type: (Text) -> None
     if settings.ERROR_BOT is None:
         return
-    error_bot = get_user_profile_by_email(settings.ERROR_BOT)
+    error_bot = get_system_bot(settings.ERROR_BOT)
     error_stream = Stream.objects.get(name="errors", realm=error_bot.realm)
     send_zulip(settings.ERROR_BOT, error_stream, u"email mirror error",
                u"""~~~\n%s\n~~~""" % (error_message,))
@@ -79,12 +80,12 @@ def is_missed_message_address(address):
     return is_mm_32_format(msg_string)
 
 def is_mm_32_format(msg_string):
-    # type: (Text) -> bool
+    # type: (Optional[Text]) -> bool
     '''
     Missed message strings are formatted with a little "mm" prefix
     followed by a randomly generated 32-character string.
     '''
-    return msg_string.startswith('mm') and len(msg_string) == 34
+    return msg_string is not None and msg_string.startswith('mm') and len(msg_string) == 34
 
 def get_missed_message_token_from_address(address):
     # type: (Text) -> Text
@@ -228,8 +229,7 @@ def extract_body(message):
     # If we only have an HTML version, try to make that look nice.
     html_content = get_message_part_by_type(message, "text/html")
     if html_content:
-        html_content = quotations.extract_from_html(html_content)
-        return convert_html_to_markdown(html_content)
+        return convert_html_to_markdown(quotations.extract_from_html(html_content))
 
     raise ZulipEmailForwardError("Unable to find plaintext or HTML message body")
 
@@ -246,7 +246,7 @@ def filter_footer(text):
 
 def extract_and_upload_attachments(message, realm):
     # type: (message.Message, Realm) -> Text
-    user_profile = get_user_profile_by_email(settings.EMAIL_GATEWAY_BOT)
+    user_profile = get_system_bot(settings.EMAIL_GATEWAY_BOT)
     attachment_links = []
 
     payload = message.get_payload()
@@ -274,10 +274,10 @@ def extract_and_upload_attachments(message, realm):
 
 def extract_and_validate(email):
     # type: (Text) -> Stream
-    try:
-        stream_name, token = decode_email_address(email)
-    except (TypeError, ValueError):
+    temp = decode_email_address(email)
+    if temp is None:
         raise ZulipEmailForwardError("Malformed email recipient " + email)
+    stream_name, token = temp
 
     if not valid_stream(stream_name, token):
         raise ZulipEmailForwardError("Bad stream token from email recipient " + email)
@@ -290,7 +290,7 @@ def find_emailgateway_recipient(message):
     # it is more accurate, so try to find the most-accurate
     # recipient list in descending priority order
     recipient_headers = ["X-Gm-Original-To", "Delivered-To", "To"]
-    recipients = [] # type: List[Text]
+    recipients = []  # type: List[Text]
     for recipient_header in recipient_headers:
         r = message.get_all(recipient_header, None)
         if r:
@@ -326,7 +326,7 @@ def process_message(message, rcpt_to=None, pre_checked=False):
     subject_header = message.get("Subject", "(no subject)")
     encoded_subject, encoding = decode_header(subject_header)[0]
     if encoding is None:
-        subject = force_text(encoded_subject) # encoded_subject has type str when encoding is None
+        subject = force_text(encoded_subject)  # encoded_subject has type str when encoding is None
     else:
         try:
             subject = encoded_subject.decode(encoding)
@@ -349,3 +349,35 @@ def process_message(message, rcpt_to=None, pre_checked=False):
     except ZulipEmailForwardError as e:
         # TODO: notify sender of error, retry if appropriate.
         log_and_report(message, str(e), debug_info)
+
+
+def mirror_email_message(data):
+    # type: (Dict[Text, Text]) -> Dict[str, str]
+    rcpt_to = data['recipient']
+    if is_missed_message_address(rcpt_to):
+        try:
+            mark_missed_message_address_as_used(rcpt_to)
+        except ZulipEmailForwardError:
+            return {
+                "status": "error",
+                "msg": "5.1.1 Bad destination mailbox address: "
+                       "Bad or expired missed message address."
+            }
+    else:
+        try:
+            extract_and_validate(rcpt_to)
+        except ZulipEmailForwardError:
+            return {
+                "status": "error",
+                "msg": "5.1.1 Bad destination mailbox address: "
+                       "Please use the address specified in your Streams page."
+            }
+    queue_json_publish(
+        "email_mirror",
+        {
+            "message": data['msg_text'],
+            "rcpt_to": rcpt_to
+        },
+        lambda x: None
+    )
+    return {"status": "success"}

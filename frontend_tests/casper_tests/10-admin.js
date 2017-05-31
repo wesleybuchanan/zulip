@@ -19,10 +19,19 @@ casper.waitForSelector('#settings_overlay_container.show', function () {
     casper.test.assertUrlMatch(/^http:\/\/[^/]+\/#organization/, 'URL suggests we are on organization page');
 });
 
+// Test permissions setting
+casper.then(function () {
+    casper.click("li[data-section='organization-permissions']");
+});
+
+function submit_permissions_change() {
+    casper.click('form.org-permissions-form button.button');
+}
+
 // Test setting limiting stream creation to administrators
-casper.waitForSelector('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]', function () {
-    casper.click('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]');
-    casper.click('form.admin-realm-form input.button');
+casper.then(function () {
+    casper.click('#id_realm_create_stream_by_admins_only + span');
+    submit_permissions_change();
 });
 
 casper.then(function () {
@@ -44,15 +53,16 @@ casper.then(function () {
     casper.click('a[href^="#organization"]');
 });
 
-casper.waitUntilVisible('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]', function () {
+casper.waitUntilVisible('#id_realm_create_stream_by_admins_only + span', function () {
     // Test Setting was saved
     casper.test.assertEval(function () {
-        return document.querySelector('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]').checked;
+        return document.querySelector('#id_realm_create_stream_by_admins_only').checked;
     }, 'Only admins may create streams Setting saved');
 
     // Deactivate setting
-    casper.click('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]');
-    casper.click('form.admin-realm-form input.button');
+
+    casper.click('#id_realm_create_stream_by_admins_only + span');
+    submit_permissions_change();
 });
 
 casper.then(function () {
@@ -70,8 +80,8 @@ casper.then(function () {
     casper.click("li[data-section='emoji-settings']");
     casper.waitUntilVisible('.admin-emoji-form', function () {
         casper.fill('form.admin-emoji-form', {
-            name: 'MouseFace',
-            url: 'http://zulipdev.com:9991/static/images/integrations/logos/jenkins.png',
+            name: 'mouseface',
+            emoji_file_input: 'static/images/logo/zulip-icon-128x128.png',
         }, true);
     });
 });
@@ -84,8 +94,8 @@ casper.then(function () {
 
 casper.then(function () {
     casper.waitUntilVisible('.emoji_row', function () {
-        casper.test.assertSelectorHasText('.emoji_row .emoji_name', 'MouseFace');
-        casper.test.assertExists('.emoji_row img[src="http://zulipdev.com:9991/static/images/integrations/logos/jenkins.png"]');
+        casper.test.assertSelectorHasText('.emoji_row .emoji_name', 'mouseface');
+        casper.test.assertExists('.emoji_row img[src="/user_avatars/1/emoji/mouseface.png"]');
         casper.click('.emoji_row button.delete');
     });
 });
@@ -104,7 +114,7 @@ casper.then(function () {
             pattern: '#(?P<id>[0-9]+)',
             url_format_string: 'https://trac.example.com/ticket/%(id)s',
         });
-        casper.click('form.admin-filter-form input.btn');
+        casper.click('form.admin-filter-form button.button');
     });
 });
 
@@ -134,7 +144,7 @@ casper.then(function () {
             pattern: 'a$',
             url_format_string: 'https://trac.example.com/ticket/%(id)s',
         });
-        casper.click('form.admin-filter-form input.btn');
+        casper.click('form.admin-filter-form button.button');
     });
 });
 
@@ -230,6 +240,10 @@ casper.then(function () {
     });
 });
 
+function submit_org_settings_change() {
+    casper.click('form.org-settings-form button.button');
+}
+
 casper.then(function () {
     casper.click("li[data-section='organization-settings']");
     casper.waitUntilVisible('#id_realm_default_language', function () {
@@ -237,7 +251,7 @@ casper.then(function () {
         casper.evaluate(function () {
             $('#id_realm_default_language').val('de').change();
         });
-        casper.click('form.admin-realm-form input.button');
+        submit_org_settings_change();
     });
 });
 
@@ -248,12 +262,16 @@ casper.then(function () {
     });
 });
 
+function submit_org_authentication_change() {
+    casper.click('form.org-authentications-form button.button');
+}
+
 // Test authentication methods setting
 casper.then(function () {
     casper.click("li[data-section='auth-methods']");
-    casper.waitUntilVisible(".method_row[data-method='Email'] input[type='checkbox']", function () {
-        casper.click(".method_row[data-method='Email'] input[type='checkbox']");
-        casper.click('form.admin-realm-form input.button');
+    casper.waitUntilVisible(".method_row[data-method='Email'] input[type='checkbox'] + span", function () {
+        casper.click(".method_row[data-method='Email'] input[type='checkbox'] + span");
+        submit_org_authentication_change();
     });
 });
 
@@ -277,7 +295,7 @@ casper.then(function () {
     casper.click('#settings-dropdown');
     casper.click('a[href^="#organization"]');
 
-    casper.waitUntilVisible(".method_row[data-method='Email'] input[type='checkbox']", function () {
+    casper.waitUntilVisible(".method_row[data-method='Email'] input[type='checkbox'] + span", function () {
         // Test Setting was saved
         casper.test.assertEval(function () {
             return !(document.querySelector(".method_row[data-method='Email'] input[type='checkbox']").checked);
@@ -287,8 +305,8 @@ casper.then(function () {
 
 // Deactivate setting--default is checked
 casper.then(function () {
-    casper.click(".method_row[data-method='Email'] input[type='checkbox']");
-    casper.click('form.admin-realm-form input.button');
+    casper.click(".method_row[data-method='Email'] input[type='checkbox'] + span");
+    submit_org_authentication_change();
     casper.waitUntilVisible('#admin-realm-authentication-methods-status', function () {
         casper.test.assertSelectorHasText('#admin-realm-authentication-methods-status', 'Authentication methods saved!');
         casper.test.assertEval(function () {

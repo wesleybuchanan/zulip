@@ -11,12 +11,11 @@
 {% endblock %}
 
 {% block hello_page_container %} hello-main{% endblock %}
-{% block hello_page_footer %} hello-footer{% endblock %}
 
 {% block os_announcement %}
   {% if show_oss_announcement %}
   <div class="os-headline-container">
-    <img src="/static/images/logo/zballoon.png" class="os-illustration" alt="Zulip balloon" />
+    <img src="/static/images/logo/zballoon.png" class="os-illustration" alt="{{ _('Zulip balloon') }}" />
     <div class="main-headline-text">
       <span class="tagline os-tagline">
          {{ _('Zulip has been released as open source software!') }}
@@ -103,23 +102,17 @@
 <div id="integration-instructions-group">
     {% for integration in integrations_dict.values() %}
         {% if integration.is_enabled() %}
-            {% if integration.help_content %}
-                <div id={{ integration.name }} class="integration-instructions">
-                    {{ integration.help_content }}
-                    <p style="font-size:11px; font-style:italic;">
-                        Logos are trademarks of their respective owners.
-                        None of the integrations on this page are created by,
-                        affiliated with, or supported by the companies
-                        represented by the logos.
-                    </p>
-                </div>
-            {% endif %}
+            <div id={{ integration.name }} class="integration-instructions">
+                {{ integration.help_content }}
+                <p style="font-size:11px; font-style:italic;">
+                    Logos are trademarks of their respective owners.
+                    None of the integrations on this page are created by,
+                    affiliated with, or supported by the companies
+                    represented by the logos.
+                </p>
+            </div>
         {% endif %}
     {% endfor %}
-
-    {% if email_integration_enabled %}
-        {% include 'zerver/integrations/email.html' %}
-    {% endif %}
 </div>
             </div> <!-- .inner-content -->
         </div> <!-- .padded-content -->

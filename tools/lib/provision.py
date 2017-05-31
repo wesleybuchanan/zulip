@@ -119,7 +119,7 @@ UBUNTU_COMMON_APT_DEPENDENCIES = [
     "yui-compressor",
     "wget",
     "ca-certificates",      # Explicit dependency in case e.g. wget is already installed
-    "puppet",               # Used by lint-all
+    "puppet",               # Used by lint
     "gettext",              # Used by makemessages i18n
     "curl",                 # Used for fetching PhantomJS as wget occasionally fails on redirects
     "netcat",               # Used for flushing memcached
@@ -154,16 +154,21 @@ user_id = os.getuid()
 
 def setup_shell_profile(shell_profile):
     # type: (str) -> None
-    source_activate_command = "source %s\n" % (os.path.join(VENV_PATH, "bin", "activate"),)
     shell_profile_path = os.path.expanduser(shell_profile)
 
-    if os.path.exists(shell_profile_path):
-        with open(shell_profile_path, 'a+') as shell_profile_file:
-            if source_activate_command not in shell_profile_file.read():
-                shell_profile_file.writelines(source_activate_command)
-    else:
-        with open(shell_profile_path, 'w') as shell_profile_file:
-            shell_profile_file.writelines(source_activate_command)
+    def write_command(command):
+        # type: (str) -> None
+        if os.path.exists(shell_profile_path):
+            with open(shell_profile_path, 'a+') as shell_profile_file:
+                if command not in shell_profile_file.read():
+                    shell_profile_file.writelines(command + '\n')
+        else:
+            with open(shell_profile_path, 'w') as shell_profile_file:
+                shell_profile_file.writelines(command + '\n')
+
+    source_activate_command = "source " + os.path.join(VENV_PATH, "bin", "activate")
+    write_command(source_activate_command)
+    write_command('cd /srv/zulip')
 
 def main(options):
     # type: (Any) -> int
@@ -217,7 +222,9 @@ def main(options):
     if not os.path.isdir(EMOJI_CACHE_PATH):
         run(["sudo", "mkdir", EMOJI_CACHE_PATH])
     run(["sudo", "chown", "%s:%s" % (user_id, user_id), EMOJI_CACHE_PATH])
+    run(["tools/setup/emoji/download-emoji-data"])
     run(["tools/setup/emoji/build_emoji"])
+    run(["tools/setup/build_pygments_data.py"])
     run(["scripts/setup/generate_secrets.py", "--development"])
     run(["tools/update-authors-json", "--use-fixture"])
     if options.is_travis and not options.is_production_travis:

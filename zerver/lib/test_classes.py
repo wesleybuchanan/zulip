@@ -18,6 +18,7 @@ from django.db.utils import IntegrityError
 from zerver.lib.initial_password import initial_password
 from zerver.lib.db import TimeTrackingCursor
 from zerver.lib.str_utils import force_text
+from zerver.lib.utils import is_remote_server
 from zerver.lib import cache
 from zerver.tornado.handlers import allocate_handler_id
 from zerver.worker import queue_processors
@@ -33,6 +34,7 @@ from zerver.lib.test_helpers import (
 
 from zerver.models import (
     get_stream,
+    get_user,
     get_user_profile_by_email,
     get_realm_by_email_domain,
     Client,
@@ -46,6 +48,7 @@ from zerver.models import (
 )
 
 from zerver.lib.request import JsonableError
+from zilencer.models import get_remote_server_by_uuid
 
 
 import base64
@@ -62,7 +65,7 @@ from zerver.lib.str_utils import NonBinaryStr
 from contextlib import contextmanager
 import six
 
-API_KEYS = {} # type: Dict[Text, Text]
+API_KEYS = {}  # type: Dict[Text, Text]
 
 def flush_caches_for_testing():
     # type: () -> None
@@ -90,7 +93,7 @@ class UploadSerializeMixin(SerializeMixin):
 
 class ZulipTestCase(TestCase):
     # Ensure that the test system just shows us diffs
-    maxDiff = None  # type: int
+    maxDiff = None  # type: Optional[int]
 
     '''
     WRAPPER_COMMENT:
@@ -121,7 +124,7 @@ class ZulipTestCase(TestCase):
         We need to urlencode, since Django's function won't do it for us.
         """
         encoded = urllib.parse.urlencode(info)
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.patch(url, encoded, **kwargs)
 
     @instrument_url
@@ -136,7 +139,7 @@ class ZulipTestCase(TestCase):
         automatically, but not patch.)
         """
         encoded = encode_multipart(BOUNDARY, info)
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.patch(
             url,
             encoded,
@@ -147,7 +150,7 @@ class ZulipTestCase(TestCase):
     def client_put(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         encoded = urllib.parse.urlencode(info)
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.put(url, encoded, **kwargs)
 
     @instrument_url
@@ -162,27 +165,27 @@ class ZulipTestCase(TestCase):
         automatically, but not put.)
         """
         encoded = encode_multipart(BOUNDARY, info)
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.put(url, encoded, content_type=MULTIPART_CONTENT, **kwargs)
 
     @instrument_url
     def client_delete(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         encoded = urllib.parse.urlencode(info)
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.delete(url, encoded, **kwargs)
 
     @instrument_url
     def client_options(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         encoded = urllib.parse.urlencode(info)
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.options(url, encoded, **kwargs)
 
     @instrument_url
     def client_post(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.post(url, info, **kwargs)
 
     @instrument_url
@@ -203,8 +206,68 @@ class ZulipTestCase(TestCase):
     @instrument_url
     def client_get(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
-        django_client = self.client # see WRAPPER_COMMENT
+        django_client = self.client  # see WRAPPER_COMMENT
         return django_client.get(url, info, **kwargs)
+
+    example_user_map = dict(
+        hamlet=u'hamlet@zulip.com',
+        cordelia=u'cordelia@zulip.com',
+        iago=u'iago@zulip.com',
+        prospero=u'prospero@zulip.com',
+        othello=u'othello@zulip.com',
+        AARON=u'AARON@zulip.com',
+        aaron=u'aaron@zulip.com',
+        ZOE=u'ZOE@zulip.com',
+    )
+
+    mit_user_map = dict(
+        sipbtest=u"sipbtest@mit.edu",
+        starnine=u"starnine@mit.edu",
+        espuser=u"espuser@mit.edu",
+    )
+
+    # Non-registered test users
+    nonreg_user_map = dict(
+        test=u'test@zulip.com',
+        test1=u'test1@zulip.com',
+        alice=u'alice@zulip.com',
+        newuser=u'newuser@zulip.com',
+        bob=u'bob@zulip.com',
+        cordelia=u'cordelia@zulip.com',
+        newguy=u'newguy@zulip.com',
+        me=u'me@zulip.com',
+    )
+
+    def nonreg_user(self, name):
+        # type: (str) -> UserProfile
+        email = self.nonreg_user_map[name]
+        return get_user(email, get_realm_by_email_domain(email))
+
+    def example_user(self, name):
+        # type: (str) -> UserProfile
+        email = self.example_user_map[name]
+        return get_user_profile_by_email(email)
+
+    def mit_user(self, name):
+        # type: (str) -> UserProfile
+        email = self.mit_user_map[name]
+        return get_user_profile_by_email(email)
+
+    def nonreg_email(self, name):
+        # type: (str) -> Text
+        return self.nonreg_user_map[name]
+
+    def example_email(self, name):
+        # type: (str) -> Text
+        return self.example_user_map[name]
+
+    def mit_email(self, name):
+        # type: (str) -> Text
+        return self.mit_user_map[name]
+
+    def notification_bot(self):
+        # type: () -> UserProfile
+        return get_user_profile_by_email('notification-bot@zulip.com')
 
     def login_with_return(self, email, password=None):
         # type: (Text, Optional[Text]) -> HttpResponse
@@ -222,6 +285,10 @@ class ZulipTestCase(TestCase):
         else:
             self.assertFalse(self.client.login(username=email, password=password))
 
+    def logout(self):
+        # type: () -> None
+        self.client.logout()
+
     def register(self, email, password):
         # type: (Text, Text) -> HttpResponse
         self.client_post('/accounts/home/', {'email': email})
@@ -229,8 +296,8 @@ class ZulipTestCase(TestCase):
 
     def submit_reg_form_for_user(self, email, password, realm_name="Zulip Test",
                                  realm_subdomain="zuliptest", realm_org_type=Realm.COMMUNITY,
-                                 from_confirmation='', full_name=None, **kwargs):
-        # type: (Text, Text, Optional[Text], Optional[Text], int, Optional[Text], Optional[Text], **Any) -> HttpResponse
+                                 from_confirmation='', full_name=None, timezone=u'', **kwargs):
+        # type: (Text, Text, Optional[Text], Optional[Text], int, Optional[Text], Optional[Text], Optional[Text], **Any) -> HttpResponse
         """
         Stage two of the two-step registration process.
 
@@ -248,6 +315,7 @@ class ZulipTestCase(TestCase):
                                  'realm_subdomain': realm_subdomain,
                                  'key': find_key_by_email(email),
                                  'realm_org_type': realm_org_type,
+                                 'timezone': timezone,
                                  'terms': True,
                                  'from_confirmation': from_confirmation},
                                 **kwargs)
@@ -268,9 +336,24 @@ class ZulipTestCase(TestCase):
             API_KEYS[email] = get_user_profile_by_email(email).api_key
         return API_KEYS[email]
 
-    def api_auth(self, email):
+    def get_server_api_key(self, server_uuid):
+        # type: (Text) -> Text
+        if server_uuid not in API_KEYS:
+            API_KEYS[server_uuid] = get_remote_server_by_uuid(server_uuid).api_key
+
+        return API_KEYS[server_uuid]
+
+    def api_auth(self, identifier):
         # type: (Text) -> Dict[str, Text]
-        credentials = u"%s:%s" % (email, self.get_api_key(email))
+        """
+        identifier: Can be an email or a remote server uuid.
+        """
+        if is_remote_server(identifier):
+            api_key = self.get_server_api_key(identifier)
+        else:
+            api_key = self.get_api_key(identifier)
+
+        credentials = u"%s:%s" % (identifier, api_key)
         return {
             'HTTP_AUTHORIZATION': u'Basic ' + base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
         }
@@ -306,10 +389,12 @@ class ZulipTestCase(TestCase):
             content, forged=False, forged_timestamp=None,
             forwarder_user_profile=sender, realm=sender.realm, **kwargs)
 
-    def get_messages(self, anchor=1, num_before=100, num_after=100):
-        # type: (int, int, int) -> List[Dict[str, Any]]
+    def get_messages(self, anchor=1, num_before=100, num_after=100,
+                     use_first_unread_anchor=False):
+        # type: (int, int, int, bool) -> List[Dict[str, Any]]
         post_params = {"anchor": anchor, "num_before": num_before,
-                       "num_after": num_after}
+                       "num_after": num_after,
+                       "use_first_unread_anchor": ujson.dumps(use_first_unread_anchor)}
         result = self.client_get("/json/messages", dict(post_params))
         data = ujson.loads(result.content)
         return data['messages']
@@ -388,7 +473,7 @@ class ZulipTestCase(TestCase):
     def fixture_data(self, type, action, file_type='json'):
         # type: (Text, Text, Text) -> Text
         return force_text(open(os.path.join(os.path.dirname(__file__),
-                                            "../fixtures/%s/%s_%s.%s" % (type, type, action, file_type))).read())
+                                            "../webhooks/%s/fixtures/%s.%s" % (type, action, file_type))).read())
 
     def make_stream(self, stream_name, realm=None, invite_only=False):
         # type: (Text, Optional[Realm], Optional[bool]) -> Stream
@@ -486,10 +571,10 @@ class WebhookTestCase(ZulipTestCase):
     If you create your url in uncommon way you can override build_webhook_url method
     In case that you need modify body or create it without using fixture you can also override get_body method
     """
-    STREAM_NAME = None # type: Optional[Text]
+    STREAM_NAME = None  # type: Optional[Text]
     TEST_USER_EMAIL = 'webhook-bot@zulip.com'
-    URL_TEMPLATE = None # type: Optional[Text]
-    FIXTURE_DIR_NAME = None # type: Optional[Text]
+    URL_TEMPLATE = None  # type: Optional[Text]
+    FIXTURE_DIR_NAME = None  # type: Optional[Text]
 
     def setUp(self):
         # type: () -> None
@@ -521,10 +606,29 @@ class WebhookTestCase(ZulipTestCase):
 
         return msg
 
-    def build_webhook_url(self):
-        # type: () -> Text
-        api_key = self.get_api_key(self.TEST_USER_EMAIL)
-        return self.URL_TEMPLATE.format(stream=self.STREAM_NAME, api_key=api_key)
+    def build_webhook_url(self, *args, **kwargs):
+        # type: (*Any, **Any) -> Text
+        url = self.URL_TEMPLATE
+        if url.find("api_key") >= 0:
+            api_key = self.get_api_key(self.TEST_USER_EMAIL)
+            url = self.URL_TEMPLATE.format(api_key=api_key,
+                                           stream=self.STREAM_NAME)
+        else:
+            url = self.URL_TEMPLATE.format(stream=self.STREAM_NAME)
+
+        has_arguments = kwargs or args
+        if has_arguments and url.find('?') == -1:
+            url = "{}?".format(url)
+        else:
+            url = "{}&".format(url)
+
+        for key, value in kwargs.items():
+            url = "{}{}={}&".format(url, key, value)
+
+        for arg in args:
+            url = "{}{}&".format(url, arg)
+
+        return url[:-1] if has_arguments else url
 
     def get_body(self, fixture_name):
         # type: (Text) -> Union[Text, Dict[str, Text]]

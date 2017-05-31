@@ -20,9 +20,9 @@ from boto.s3.connection import S3Connection
 from mimetypes import guess_type, guess_extension
 
 from zerver.lib.str_utils import force_bytes, force_str
-from zerver.models import get_user_profile_by_email, get_user_profile_by_id
+from zerver.models import get_user_profile_by_id, RealmEmoji
 from zerver.models import Attachment
-from zerver.models import Realm, UserProfile, Message
+from zerver.models import Realm, RealmEmoji, UserProfile, Message
 
 from six.moves import urllib
 import base64
@@ -36,6 +36,7 @@ import logging
 
 DEFAULT_AVATAR_SIZE = 100
 MEDIUM_AVATAR_SIZE = 500
+DEFAULT_EMOJI_SIZE = 64
 
 # Performance Note:
 #
@@ -99,6 +100,26 @@ def resize_avatar(image_data, size=DEFAULT_AVATAR_SIZE):
     im.save(out, format='png')
     return out.getvalue()
 
+
+def resize_emoji(image_data, size=DEFAULT_EMOJI_SIZE):
+    # type: (binary_type, int) -> binary_type
+    try:
+        im = Image.open(io.BytesIO(image_data))
+        image_format = im.format
+        if image_format == 'GIF' and im.is_animated:
+            if im.size[0] > size or im.size[1] > size:
+                raise JsonableError(
+                    _("Animated emoji can't be larger than 64px in width or height."))
+            else:
+                return image_data
+        im = ImageOps.fit(im, (size, size), Image.ANTIALIAS)
+    except IOError:
+        raise BadImageError("Could not decode image; did you upload an image file?")
+    out = io.BytesIO()
+    im.save(out, format=image_format)
+    return out.getvalue()
+
+
 ### Common
 
 class ZulipUploadBackend(object):
@@ -119,8 +140,8 @@ class ZulipUploadBackend(object):
         # type: (Text, bool) -> Text
         raise NotImplementedError()
 
-    def ensure_medium_avatar_image(self, email):
-        # type: (Text) -> None
+    def ensure_medium_avatar_image(self, user_profile):
+        # type: (UserProfile) -> None
         raise NotImplementedError()
 
     def upload_realm_icon_image(self, icon_file, user_profile):
@@ -129,6 +150,14 @@ class ZulipUploadBackend(object):
 
     def get_realm_icon_url(self, realm_id, version):
         # type: (int, int) -> Text
+        raise NotImplementedError()
+
+    def upload_emoji_image(self, emoji_file, emoji_file_name, user_profile):
+        # type: (File, Text, UserProfile) -> None
+        raise NotImplementedError()
+
+    def get_emoji_url(self, emoji_file_name, realm_id):
+        # type: (Text, int) -> Text
         raise NotImplementedError()
 
 
@@ -199,7 +228,9 @@ def get_file_info(request, user_file):
         if guessed_type is not None:
             content_type = force_text(guessed_type)
     else:
-        uploaded_file_name = uploaded_file_name + guess_extension(content_type)
+        extension = guess_extension(content_type)
+        if extension is not None:
+            uploaded_file_name = uploaded_file_name + extension
 
     uploaded_file_name = urllib.parse.unquote(uploaded_file_name)
     uploaded_file_size = user_file.size
@@ -221,7 +252,9 @@ def get_realm_for_filename(path):
         return None
     return get_user_profile_by_id(key.metadata["user_profile_id"]).realm_id
 
+
 class S3UploadBackend(ZulipUploadBackend):
+
     def upload_message_image(self, uploaded_file_name, uploaded_file_size,
                              content_type, file_data, user_profile, target_realm=None):
         # type: (Text, int, Optional[Text], binary_type, UserProfile, Optional[Realm]) -> Text
@@ -336,9 +369,8 @@ class S3UploadBackend(ZulipUploadBackend):
         # ?x=x allows templates to append additional parameters with &s
         return u"https://%s.s3.amazonaws.com/%s/realm/icon.png?version=%s" % (bucket, realm_id, version)
 
-    def ensure_medium_avatar_image(self, email):
-        # type: (Text) -> None
-        user_profile = get_user_profile_by_email(email)
+    def ensure_medium_avatar_image(self, user_profile):
+        # type: (UserProfile) -> None
         file_path = user_avatar_path(user_profile)
         s3_file_name = file_path
 
@@ -356,6 +388,40 @@ class S3UploadBackend(ZulipUploadBackend):
             user_profile,
             resized_medium
         )
+
+    def upload_emoji_image(self, emoji_file, emoji_file_name, user_profile):
+        # type: (File, Text, UserProfile) -> None
+        content_type = guess_type(emoji_file.name)[0]
+        bucket_name = settings.S3_AVATAR_BUCKET
+        emoji_path = RealmEmoji.PATH_ID_TEMPLATE.format(
+            realm_id=user_profile.realm_id,
+            emoji_file_name=emoji_file_name
+        )
+
+        image_data = emoji_file.read()
+        resized_image_data = resize_emoji(image_data)
+        upload_image_to_s3(
+            bucket_name,
+            ".".join((emoji_path, "original")),
+            content_type,
+            user_profile,
+            image_data,
+        )
+        upload_image_to_s3(
+            bucket_name,
+            emoji_path,
+            content_type,
+            user_profile,
+            resized_image_data,
+        )
+
+    def get_emoji_url(self, emoji_file_name, realm_id):
+        # type: (Text, int) -> Text
+        bucket = settings.S3_AVATAR_BUCKET
+        emoji_path = RealmEmoji.PATH_ID_TEMPLATE.format(realm_id=realm_id,
+                                                        emoji_file_name=emoji_file_name)
+        return u"https://%s.s3.amazonaws.com/%s" % (bucket, emoji_path)
+
 
 ### Local
 
@@ -445,9 +511,8 @@ class LocalUploadBackend(ZulipUploadBackend):
         # ?x=x allows templates to append additional parameters with &s
         return u"/user_avatars/%s/realm/icon.png?version=%s" % (realm_id, version)
 
-    def ensure_medium_avatar_image(self, email):
-        # type: (Text) -> None
-        user_profile = get_user_profile_by_email(email)
+    def ensure_medium_avatar_image(self, user_profile):
+        # type: (UserProfile) -> None
         file_path = user_avatar_path(user_profile)
 
         output_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars", file_path + "-medium.png")
@@ -459,9 +524,33 @@ class LocalUploadBackend(ZulipUploadBackend):
         resized_medium = resize_avatar(image_data, MEDIUM_AVATAR_SIZE)
         write_local_file('avatars', file_path + '-medium.png', resized_medium)
 
+    def upload_emoji_image(self, emoji_file, emoji_file_name, user_profile):
+        # type: (File, Text, UserProfile) -> None
+        emoji_path = RealmEmoji.PATH_ID_TEMPLATE.format(
+            realm_id= user_profile.realm_id,
+            emoji_file_name=emoji_file_name
+        )
+
+        image_data = emoji_file.read()
+        resized_image_data = resize_emoji(image_data)
+        write_local_file(
+            'avatars',
+            ".".join((emoji_path, "original")),
+            image_data)
+        write_local_file(
+            'avatars',
+            emoji_path,
+            resized_image_data)
+
+    def get_emoji_url(self, emoji_file_name, realm_id):
+        # type: (Text, int) -> Text
+        return os.path.join(
+            u"/user_avatars",
+            RealmEmoji.PATH_ID_TEMPLATE.format(realm_id=realm_id, emoji_file_name=emoji_file_name))
+
 # Common and wrappers
 if settings.LOCAL_UPLOADS_DIR is not None:
-    upload_backend = LocalUploadBackend() # type: ZulipUploadBackend
+    upload_backend = LocalUploadBackend()  # type: ZulipUploadBackend
 else:
     upload_backend = S3UploadBackend()
 
@@ -477,6 +566,10 @@ def upload_icon_image(user_file, user_profile):
     # type: (File, UserProfile) -> None
     upload_backend.upload_realm_icon_image(user_file, user_profile)
 
+def upload_emoji_image(emoji_file, emoji_file_name, user_profile):
+    # type: (File, Text, UserProfile) -> None
+    upload_backend.upload_emoji_image(emoji_file, emoji_file_name, user_profile)
+
 def upload_message_image(uploaded_file_name, uploaded_file_size,
                          content_type, file_data, user_profile, target_realm=None):
     # type: (Text, int, Optional[Text], binary_type, UserProfile, Optional[Realm]) -> Text
@@ -484,20 +577,11 @@ def upload_message_image(uploaded_file_name, uploaded_file_size,
                                                content_type, file_data, user_profile, target_realm=target_realm)
 
 def claim_attachment(user_profile, path_id, message, is_message_realm_public):
-    # type: (UserProfile, Text, Message, bool) -> bool
-    try:
-        attachment = Attachment.objects.get(path_id=path_id)
-        attachment.messages.add(message)
-        # Only the owner of the file has the right to elevate the permissions of a file.
-        # This makes sure that a private file is not accidently made public by another user
-        # by sending a message to a public stream that refers the private file.
-        if attachment.owner == user_profile:
-            attachment.is_realm_public = attachment.is_realm_public or is_message_realm_public
-        attachment.save()
-        return True
-    except Attachment.DoesNotExist:
-        raise JsonableError(_("The upload was not successful. Please reupload the file again in a new message."))
-    return False
+    # type: (UserProfile, Text, Message, bool) -> None
+    attachment = Attachment.objects.get(path_id=path_id)
+    attachment.messages.add(message)
+    attachment.is_realm_public = attachment.is_realm_public or is_message_realm_public
+    attachment.save()
 
 def create_attachment(file_name, path_id, user_profile, file_size):
     # type: (Text, Text, UserProfile, int) -> bool

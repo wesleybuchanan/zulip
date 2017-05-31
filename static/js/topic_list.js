@@ -39,18 +39,20 @@ function update_unread_count(unread_count_elem, count) {
     }
 }
 
-exports.set_count = function (stream_name, topic, count) {
-    if (active_widget && active_widget.is_for_stream(stream_name)) {
+exports.set_count = function (stream_id, topic, count) {
+    if (active_widget && active_widget.is_for_stream(stream_id)) {
         active_widget.set_count(topic, count);
     }
 };
 
-exports.build_widget = function (parent_elem, stream, active_topic, max_topics) {
+exports.build_widget = function (parent_elem, my_stream_id, active_topic, max_topics) {
     var self = {};
     self.topic_items = new Dict({fold_case: true});
 
-    function build_list(stream, active_topic, max_topics) {
-        var topics = stream_data.get_recent_topics(stream) || [];
+    var my_stream_name = stream_data.get_sub_by_id(my_stream_id).name;
+
+    function build_list(active_topic, max_topics) {
+        var topics = stream_data.get_recent_topics_for_id(my_stream_id) || [];
 
         if (active_topic) {
             active_topic = active_topic.toLowerCase();
@@ -59,12 +61,12 @@ exports.build_widget = function (parent_elem, stream, active_topic, max_topics) 
         var hiding_topics = false;
 
         var ul = $('<ul class="topic-list">');
-        ul.attr('data-stream', stream);
+        ul.attr('data-stream', my_stream_name);
 
         _.each(topics, function (subject_obj, idx) {
             var show_topic;
             var topic_name = subject_obj.subject;
-            var num_unread = unread.num_unread_for_subject(stream, subject_obj.canon_subject);
+            var num_unread = unread.num_unread_for_subject(my_stream_id, subject_obj.canon_subject);
 
             if (zoomed) {
                 show_topic = true;
@@ -83,8 +85,8 @@ exports.build_widget = function (parent_elem, stream, active_topic, max_topics) 
                 topic_name: topic_name,
                 unread: num_unread,
                 is_zero: num_unread === 0,
-                is_muted: muting.is_topic_muted(stream, topic_name),
-                url: narrow.by_stream_subject_uri(stream, topic_name),
+                is_muted: muting.is_topic_muted(my_stream_name, topic_name),
+                url: narrow.by_stream_subject_uri(my_stream_name, topic_name),
             };
             var li = $(templates.render('topic_list_item', topic_info));
             self.topic_items.set(topic_name, li);
@@ -93,7 +95,7 @@ exports.build_widget = function (parent_elem, stream, active_topic, max_topics) 
 
         if (hiding_topics) {
             var show_more = $('<li class="show-more-topics">');
-            show_more.attr('data-stream', stream);
+            show_more.attr('data-stream', my_stream_name);
             var link = $('<a href="#">');
             link.html(i18n.t('more topics'));
             show_more.html(link);
@@ -107,12 +109,12 @@ exports.build_widget = function (parent_elem, stream, active_topic, max_topics) 
         return parent_elem;
     };
 
-    self.is_for_stream = function (stream_name) {
-        return stream.toLowerCase() === stream_name.toLowerCase();
+    self.is_for_stream = function (stream_id) {
+        return stream_id === my_stream_id;
     };
 
-    self.get_stream_name = function () {
-        return stream;
+    self.get_stream_id = function () {
+        return my_stream_id;
     };
 
     self.get_dom = function () {
@@ -142,7 +144,7 @@ exports.build_widget = function (parent_elem, stream, active_topic, max_topics) 
         }
     };
 
-    self.dom = build_list(stream, active_topic, max_topics);
+    self.dom = build_list(active_topic, max_topics);
 
     parent_elem.append(self.dom);
 
@@ -154,12 +156,12 @@ exports.build_widget = function (parent_elem, stream, active_topic, max_topics) 
     return self;
 };
 
-exports.rebuild = function (stream_li, stream) {
+exports.rebuild = function (stream_li, stream_id) {
     var max_topics = 5;
 
-    var active_topic = narrow.topic();
+    var active_topic = narrow_state.topic();
     exports.remove_expanded_topics();
-    active_widget = exports.build_widget(stream_li, stream, active_topic, max_topics);
+    active_widget = exports.build_widget(stream_li, stream_id, active_topic, max_topics);
 };
 
 // For zooming, we only do topic-list stuff here...let stream_list
@@ -172,7 +174,7 @@ exports.zoom_in = function () {
         return;
     }
 
-    exports.rebuild(active_widget.get_parent(), active_widget.get_stream_name());
+    exports.rebuild(active_widget.get_parent(), active_widget.get_stream_id());
     $('#stream-filters-container').scrollTop(0);
     $('#stream-filters-container').perfectScrollbar('update');
 };
@@ -182,7 +184,7 @@ exports.zoom_out = function (options) {
     if (options && options.clear_topics) {
         exports.remove_expanded_topics();
     } else {
-        exports.rebuild(active_widget.get_parent(), active_widget.get_stream_name());
+        exports.rebuild(active_widget.get_parent(), active_widget.get_stream_id());
     }
 };
 
@@ -212,7 +214,7 @@ exports.set_click_handlers = function (callbacks) {
 
         // In a more componentized world, we would delegate some
         // of this stuff back up to our parents.
-        if (ui_state.home_tab_obscured()) {
+        if (overlays.is_active()) {
             ui_util.change_tab_to('#home');
         }
 

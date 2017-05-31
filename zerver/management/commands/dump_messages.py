@@ -5,7 +5,7 @@ from typing import Any
 
 from optparse import make_option
 from django.core.management.base import BaseCommand, CommandParser
-from django.utils import timezone
+from django.utils.timezone import utc as timezone_utc
 from zerver.models import get_realm, Message, Realm, Stream, Recipient
 
 import datetime
@@ -14,7 +14,7 @@ import time
 class Command(BaseCommand):
     def add_arguments(self, parser):
         # type: (CommandParser) -> None
-        default_cutoff = time.time() - 60 * 60 * 24 * 30 # 30 days.
+        default_cutoff = time.time() - 60 * 60 * 24 * 30  # 30 days.
         parser.add_argument('--realm',
                             dest='string_id',
                             type=str,
@@ -32,7 +32,7 @@ class Command(BaseCommand):
         streams = Stream.objects.filter(realm=realm, invite_only=False)
         recipients = Recipient.objects.filter(
             type=Recipient.STREAM, type_id__in=[stream.id for stream in streams])
-        cutoff = datetime.datetime.fromtimestamp(options["since"], tz=timezone.utc)
+        cutoff = datetime.datetime.fromtimestamp(options["since"], tz=timezone_utc)
         messages = Message.objects.filter(pub_date__gt=cutoff, recipient__in=recipients)
 
         for message in messages:

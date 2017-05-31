@@ -19,6 +19,9 @@ if os.getenv("EXTERNAL_HOST") is None:
     os.environ["EXTERNAL_HOST"] = "testserver"
 from .settings import *
 
+# Used to clone DBs in backend tests.
+BACKEND_DATABASE_TEMPLATE = 'zulip_test_template'
+
 DATABASES["default"] = {
     "NAME": "zulip_test",
     "USER": "zulip_test",
@@ -38,11 +41,6 @@ if USING_PGROONGA:
     pg_options = '-c search_path=%(SCHEMA)s,zulip,public,pgroonga,pg_catalog' % \
         DATABASES['default']
     DATABASES['default']['OPTIONS']['options'] = pg_options
-
-# In theory this should just go in zproject/settings.py inside the `if
-# PIPELINE_ENABLED` statement, but because zproject/settings.py is processed
-# first, we have to add it here as a hack.
-JS_SPECS['app']['source_filenames'].append('js/bundle.js')
 
 if "TORNADO_SERVER" in os.environ:
     # This covers the Casper test suite case
@@ -96,6 +94,12 @@ CACHES['database'] = {
     }
 }
 
+# Use production config from Webpack in tests
+if CASPER_TESTS:
+    WEBPACK_FILE = 'webpack-stats-production.json'
+else:
+    WEBPACK_FILE = 'webpack-stats-test.json'
+WEBPACK_LOADER['DEFAULT']['STATS_FILE'] = os.path.join(STATIC_ROOT, 'webpack-bundles', WEBPACK_FILE)
 
 if CASPER_TESTS:
     # Don't auto-restart Tornado server during casper tests

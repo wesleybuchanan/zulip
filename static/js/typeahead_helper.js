@@ -12,7 +12,6 @@ exports.get_cleaned_pm_recipients = function (query_string) {
     return recipients;
 };
 
-
 // Loosely based on Bootstrap's default highlighter, but with escaping added.
 exports.highlight_with_escaping = function (query, item) {
     // query: The text currently in the searchbox
@@ -92,35 +91,6 @@ exports.render_stream = function (token, stream) {
     return name + '&nbsp;&nbsp;<small class = "autocomplete_secondary">' + desc + '</small>';
 };
 
-function prefix_sort(query, objs, get_item) {
-    // Based on Bootstrap typeahead's default sorter, but taking into
-    // account case sensitivity on "begins with"
-    var beginswithCaseSensitive = [];
-    var beginswithCaseInsensitive = [];
-    var noMatch = [];
-
-    var obj = objs.shift();
-    while (obj) {
-        var item;
-        if (get_item) {
-            item = get_item(obj);
-        } else {
-            item = obj;
-        }
-        if (item.indexOf(query) === 0) {
-            beginswithCaseSensitive.push(obj);
-        } else if (item.toLowerCase().indexOf(query.toLowerCase()) === 0) {
-            beginswithCaseInsensitive.push(obj);
-        } else {
-            noMatch.push(obj);
-        }
-        obj = objs.shift();
-    }
-    return { matches: beginswithCaseSensitive.concat(beginswithCaseInsensitive),
-             rest:    noMatch };
-
-}
-
 function split_by_subscribers(people, current_stream) {
     var subscribers = [];
     var non_subscribers = [];
@@ -144,7 +114,7 @@ function split_by_subscribers(people, current_stream) {
 }
 
 exports.sorter = function (query, objs, get_item) {
-   var results = prefix_sort(query, objs, get_item);
+   var results = util.prefix_sort(query, objs, get_item);
    return results.matches.concat(results.rest);
 };
 
@@ -182,9 +152,28 @@ exports.sort_for_at_mentioning = function (objs, current_stream) {
     return subs_sorted.concat(non_subs_sorted);
 };
 
+exports.compare_by_popularity = function (lang_a, lang_b) {
+    var diff = pygments_data.langs[lang_b] - pygments_data.langs[lang_a];
+    if (diff !== 0) {
+        return diff;
+    }
+    return util.strcmp(lang_a, lang_b);
+};
+
+exports.sort_languages = function (matches, query) {
+    var results = util.prefix_sort(query, matches, function (x) { return x; });
+
+    // Languages that start with the query
+    results.matches = results.matches.sort(exports.compare_by_popularity);
+    // Languages that have the query somewhere in their name
+    results.rest = results.rest.sort(exports.compare_by_popularity);
+    return results.matches.concat(results.rest);
+};
+
 exports.sort_recipients = function (matches, query, current_stream) {
-    var name_results =  prefix_sort(query, matches, function (x) { return x.full_name; });
-    var email_results = prefix_sort(query, name_results.rest, function (x) { return x.email; });
+    var name_results =  util.prefix_sort(query, matches, function (x) { return x.full_name; });
+    var email_results = util.prefix_sort(query, name_results.rest,
+        function (x) { return x.email; });
 
     var matches_sorted = exports.sort_for_at_mentioning(
         name_results.matches.concat(email_results.matches),
@@ -199,25 +188,48 @@ exports.sort_recipients = function (matches, query, current_stream) {
 
 exports.sort_emojis = function (matches, query) {
     // TODO: sort by category in v2
-    var results = prefix_sort(query, matches, function (x) { return x.emoji_name; });
+    var results = util.prefix_sort(query, matches, function (x) { return x.emoji_name; });
     return results.matches.concat(results.rest);
 };
 
-exports.compare_by_sub_count = function (stream_a, stream_b) {
-    return stream_a.subscribers.num_items() < stream_b.subscribers.num_items();
+// Gives stream a score from 0 to 3 based on its activity
+function activity_score(sub) {
+    var stream_score = 0;
+    if (sub.pin_to_top) {
+        stream_score += 2;
+    }
+    // Note: A pinned stream may accumulate a 3rd point if it is active
+    if (stream_data.is_active(sub)) {
+        stream_score += 1;
+    }
+    return stream_score;
+}
+
+// Sort streams by ranking them by activity. If activity is equal,
+// as defined bv activity_score, decide based on subscriber count.
+exports.compare_by_activity = function (stream_a, stream_b) {
+    var diff = activity_score(stream_b) - activity_score(stream_a);
+    if (diff !== 0) {
+        return diff;
+    }
+    diff = stream_b.subscribers.num_items() - stream_a.subscribers.num_items();
+    if (diff !== 0) {
+        return diff;
+    }
+    return util.strcmp(stream_a.name, stream_b.name);
 };
 
 exports.sort_streams = function (matches, query) {
-    var name_results = prefix_sort(query, matches, function (x) { return x.name; });
+    var name_results = util.prefix_sort(query, matches, function (x) { return x.name; });
     var desc_results
-        = prefix_sort(query, name_results.rest, function (x) { return x.description; });
+        = util.prefix_sort(query, name_results.rest, function (x) { return x.description; });
 
     // Streams that start with the query.
-    name_results.matches = name_results.matches.sort(exports.compare_by_sub_count);
+    name_results.matches = name_results.matches.sort(exports.compare_by_activity);
     // Streams with descriptions that start with the query.
-    desc_results.matches = desc_results.matches.sort(exports.compare_by_sub_count);
+    desc_results.matches = desc_results.matches.sort(exports.compare_by_activity);
     // Streams with names and descriptions that don't start with the query.
-    desc_results.rest = desc_results.rest.sort(exports.compare_by_sub_count);
+    desc_results.rest = desc_results.rest.sort(exports.compare_by_activity);
 
     return name_results.matches.concat(desc_results.matches.concat(desc_results.rest));
 };

@@ -29,49 +29,56 @@ exports.has_focus = document.hasFocus && document.hasFocus();
 // as user activity.
 exports.new_user_input = true;
 
-$("html").on("mousemove", function () {
-    exports.new_user_input = true;
-});
-
 var huddle_timestamps = new Dict();
 
-function update_count_in_dom(count_span, value_span, count) {
+function update_pm_count_in_dom(count_span, value_span, count) {
+    var li = count_span.parent();
+
     if (count === 0) {
         count_span.hide();
-        if (count_span.parent().hasClass("user_sidebar_entry")) {
-            count_span.parent(".user_sidebar_entry").removeClass("user-with-count");
-        } else if (count_span.parent().hasClass("group-pms-sidebar-entry")) {
-            count_span.parent(".group-pms-sidebar-entry").removeClass("group-with-count");
-        }
+        li.removeClass("user-with-count");
         value_span.text('');
         return;
     }
 
     count_span.show();
-
-    if (count_span.parent().hasClass("user_sidebar_entry")) {
-        count_span.parent(".user_sidebar_entry").addClass("user-with-count");
-    } else if (count_span.parent().hasClass("group-pms-sidebar-entry")) {
-        count_span.parent(".group-pms-sidebar-entry").addClass("group-with-count");
-    }
+    li.addClass("user-with-count");
     value_span.text(count);
 }
 
-function get_user_list_item(user_id) {
+function update_group_count_in_dom(count_span, value_span, count) {
+    var li = count_span.parent();
+
+    if (count === 0) {
+        count_span.hide();
+        li.removeClass("group-with-count");
+        value_span.text('');
+        return;
+    }
+
+    count_span.show();
+    li.addClass("group-with-count");
+    value_span.text(count);
+}
+
+function get_pm_list_item(user_id) {
     return $("li.user_sidebar_entry[data-user-id='" + user_id + "']");
 }
 
-function get_filter_li(user_ids_string) {
-    if (name.indexOf(",") < 0) {
-        return  get_user_list_item(user_ids_string);
-    }
+function get_group_list_item(user_ids_string) {
     return $("li.group-pms-sidebar-entry[data-user-ids='" + user_ids_string + "']");
 }
 
-function set_count(user_ids_string, count) {
-    var count_span = get_filter_li(user_ids_string).find('.count');
+function set_pm_count(user_ids_string, count) {
+    var count_span = get_pm_list_item(user_ids_string).find('.count');
     var value_span = count_span.find('.value');
-    update_count_in_dom(count_span, value_span, count);
+    update_pm_count_in_dom(count_span, value_span, count);
+}
+
+function set_group_count(user_ids_string, count) {
+    var count_span = get_group_list_item(user_ids_string).find('.count');
+    var value_span = count_span.find('.value');
+    update_group_count_in_dom(count_span, value_span, count);
 }
 
 exports.update_dom_with_unread_counts = function (counts) {
@@ -80,7 +87,12 @@ exports.update_dom_with_unread_counts = function (counts) {
 
     counts.pm_count.each(function (count, user_ids_string) {
         // TODO: just use user_ids_string in our markup
-        set_count(user_ids_string, count);
+        var is_pm = user_ids_string.indexOf(',') < 0;
+        if (is_pm) {
+            set_pm_count(user_ids_string, count);
+        } else {
+            set_group_count(user_ids_string, count);
+        }
     });
 };
 
@@ -304,7 +316,7 @@ exports.insert_user_into_list = function (user_id) {
 
     insert();
 
-    var elt = get_user_list_item(user_id);
+    var elt = get_pm_list_item(user_id);
     compose_fade.update_one_user_row(elt);
 };
 
@@ -369,7 +381,7 @@ exports.update_huddles = function () {
 
     _.each(huddles, function (user_ids_string) {
         var count = unread.num_unread_for_person(user_ids_string);
-        set_count(user_ids_string, count);
+        set_group_count(user_ids_string, count);
     });
 
     show_huddles();
@@ -387,12 +399,25 @@ function focus_ping(want_redraw) {
 
             // Update Zephyr mirror activity warning
             if (data.zephyr_mirror_active === false) {
-                $('#zephyr-mirror-error').show();
+                $('#zephyr-mirror-error').addClass("show");
             } else {
-                $('#zephyr-mirror-error').hide();
+                $('#zephyr-mirror-error').removeClass("show");
             }
 
             exports.new_user_input = false;
+
+            // Zulip has 2 data feeds coming from the server to the
+            // client: The server_events data, and this presence feed.
+            // Everything in server_events is nicely serialized, but
+            // if we've been offline and not running for a while
+            // (e.g. due to suspend), we can end up throwing
+            // exceptions due to users appearing in presence that we
+            // haven't learned about yet.  We handle this in 2 stages.
+            // First, here, we make sure that we've confirmed whether
+            // we are indeed in the unsuspend case.  Then, in
+            // `presence.set_info`, we only complain about unknown
+            // users if server_events does not suspect we're offline.
+            server_events.check_for_unsuspend();
 
             if (want_redraw) {
                 presence.set_info(data.presences, data.server_timestamp);
@@ -411,14 +436,20 @@ function focus_gained() {
 }
 
 exports.initialize = function () {
+    $("html").on("mousemove", function () {
+        exports.new_user_input = true;
+    });
+
     $(window).focus(focus_gained);
     $(window).idle({idle: DEFAULT_IDLE_TIMEOUT_MS,
                 onIdle: focus_lost,
                 onActive: focus_gained,
                 keepTracking: true});
 
-    presence.set_info(page_params.initial_presences,
-                               page_params.initial_servertime);
+    presence.set_info(page_params.presences,
+                      page_params.initial_servertime);
+    delete page_params.presences;
+
     exports.build_user_sidebar();
     exports.update_huddles();
 
@@ -503,6 +534,7 @@ function maybe_select_person(e) {
 
         // Prevent a newline from being entered into the soon-to-be-opened composebox
         e.preventDefault();
+        e.stopPropagation();
 
         var topPerson = $('#user_presences li.user_sidebar_entry').first().attr('data-user-id');
         var user_list = $(".user-list-filter");

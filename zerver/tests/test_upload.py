@@ -4,7 +4,7 @@ from django.conf import settings
 from django.test import TestCase, override_settings
 from unittest import skip
 
-from zerver.lib.avatar import avatar_url
+from zerver.lib.avatar import avatar_url, get_avatar_url
 from zerver.lib.bugdown import url_filename
 from zerver.lib.realm_icon import realm_icon_url
 from zerver.lib.test_classes import ZulipTestCase, UploadSerializeMixin
@@ -18,7 +18,7 @@ from zerver.lib.upload import sanitize_name, S3UploadBackend, \
     upload_message_image, delete_message_image, LocalUploadBackend, \
     ZulipUploadBackend
 import zerver.lib.upload
-from zerver.models import Attachment, Recipient, get_user_profile_by_email, \
+from zerver.models import Attachment, Recipient, get_user, \
     get_old_unclaimed_attachments, Message, UserProfile, Stream, Realm, \
     RealmDomain, get_realm
 from zerver.lib.actions import do_delete_old_unclaimed_attachments
@@ -42,7 +42,7 @@ import datetime
 import requests
 import base64
 from datetime import timedelta
-from django.utils import timezone
+from django.utils.timezone import now as timezone_now
 
 from moto import mock_s3
 
@@ -68,7 +68,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         fp.name = "zulip.txt"
 
         # Upload file via API
-        auth_headers = self.api_auth('hamlet@zulip.com')
+        auth_headers = self.api_auth(self.example_email("hamlet"))
         result = self.client_post('/api/v1/user_uploads', {'file': fp}, **auth_headers)
         json = ujson.loads(result.content)
         self.assertIn("uri", json)
@@ -77,13 +77,13 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         self.assertEqual(base, uri[:len(base)])
 
         # Download file via API
-        self.client_post('/accounts/logout/')
+        self.logout()
         response = self.client_get(uri, **auth_headers)
         data = b"".join(response.streaming_content)
         self.assertEqual(b"zulip!", data)
 
         # Files uploaded through the API should be accesible via the web client
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         self.assert_url_serves_contents_of_file(uri, b"zulip!")
 
     def test_filename_encoding(self):
@@ -96,7 +96,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         and does so in a way that preserves 100% test coverage for Python 3.
         """
 
-        user_profile = get_user_profile_by_email('hamlet@zulip.com')
+        user_profile = self.example_user('hamlet')
 
         mock_file = mock.Mock()
         mock_file._get_size = mock.Mock(return_value=1024)
@@ -129,7 +129,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         """
         Attempting to upload big files should fail.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("bah!")
         fp.name = "a.txt"
 
@@ -144,7 +144,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         """
         Attempting to upload two files should fail.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("bah!")
         fp.name = "a.txt"
         fp2 = StringIO("pshaw!")
@@ -158,14 +158,14 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         """
         Calling this endpoint with no files should fail.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
 
         result = self.client_post("/json/upload_file")
         self.assert_json_error(result, "You must specify a file to upload")
 
     def test_download_non_existent_file(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         response = self.client_get('/user_uploads/unk/nonexistent_file')
         self.assertEqual(response.status_code, 404)
         self.assertIn('File not found', str(response.content))
@@ -179,7 +179,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         entry in the database. This entry will be marked unclaimed till a message
         refers it.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
 
@@ -199,21 +199,21 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         entry = Attachment.objects.get(file_name='zulip.txt')
         self.assertEqual(entry.is_claimed(), False)
 
-        self.subscribe_to_stream("hamlet@zulip.com", "Denmark")
+        self.subscribe_to_stream(self.example_email("hamlet"), "Denmark")
         body = "First message ...[zulip.txt](http://localhost:9991" + uri + ")"
-        self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM, body, "test")
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
         self.assertIn('title="zulip.txt"', self.get_last_message().rendered_content)
 
     def test_file_download_unauthed(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
         result = self.client_post("/json/upload_file", {'file': fp})
         json = ujson.loads(result.content)
         uri = json["uri"]
 
-        self.client_post('/accounts/logout/')
+        self.logout()
         response = self.client_get(uri)
         self.assert_json_error(response, "Not logged in: API authentication or user session required",
                                status_code=401)
@@ -223,7 +223,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         '''
         Trying to download deleted files should return 404 error
         '''
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
         result = self.client_post("/json/upload_file", {'file': fp})
@@ -240,7 +240,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         '''
         Trying to download a file that was never uploaded will return a json_error
         '''
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         response = self.client_get("http://localhost:9991/user_uploads/1/ff/gg/abc.py")
         self.assertEqual(response.status_code, 404)
         self.assert_in_response('File not found.', response)
@@ -248,7 +248,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
     def test_delete_old_unclaimed_attachments(self):
         # type: () -> None
         # Upload some files and make them older than a weeek
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         d1 = StringIO("zulip!")
         d1.name = "dummy_1.txt"
         result = self.client_post("/json/upload_file", {'file': d1})
@@ -263,7 +263,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         uri = json["uri"]
         d2_path_id = re.sub('/user_uploads/', '', uri)
 
-        two_week_ago = timezone.now() - datetime.timedelta(weeks=2)
+        two_week_ago = timezone_now() - datetime.timedelta(weeks=2)
         d1_attachment = Attachment.objects.get(path_id = d1_path_id)
         d1_attachment.create_time = two_week_ago
         d1_attachment.save()
@@ -273,14 +273,21 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         d2_attachment.save()
 
         # Send message refering only dummy_1
-        self.subscribe_to_stream("hamlet@zulip.com", "Denmark")
+        self.subscribe_to_stream(self.example_email("hamlet"), "Denmark")
         body = "Some files here ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
-        self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM, body, "test")
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
 
         # dummy_2 should not exist in database or the uploads folder
         do_delete_old_unclaimed_attachments(2)
         self.assertTrue(not Attachment.objects.filter(path_id = d2_path_id).exists())
         self.assertTrue(not delete_message_image(d2_path_id))
+
+    def test_attachment_url_without_upload(self):
+        # type: () -> None
+        self.login(self.example_email("hamlet"))
+        body = "Test message ...[zulip.txt](http://localhost:9991/user_uploads/1/64/fake_path_id.txt)"
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
+        self.assertFalse(Attachment.objects.filter(path_id = "1/64/fake_path_id.txt").exists())
 
     def test_multiple_claim_attachments(self):
         # type: () -> None
@@ -288,7 +295,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         This test tries to claim the same attachment twice. The messages field in
         the Attachment model should have both the messages in its entry.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         d1 = StringIO("zulip!")
         d1.name = "dummy_1.txt"
         result = self.client_post("/json/upload_file", {'file': d1})
@@ -296,13 +303,52 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         uri = json["uri"]
         d1_path_id = re.sub('/user_uploads/', '', uri)
 
-        self.subscribe_to_stream("hamlet@zulip.com", "Denmark")
+        self.subscribe_to_stream(self.example_email("hamlet"), "Denmark")
         body = "First message ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
-        self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM, body, "test")
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
         body = "Second message ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
-        self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM, body, "test")
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
 
         self.assertEqual(Attachment.objects.get(path_id=d1_path_id).messages.count(), 2)
+
+    def test_multiple_claim_attachments_different_owners(self):
+        # type: () -> None
+        """This test tries to claim the same attachment more than once, first
+        with a private stream and then with differnet recipients."""
+        self.login(self.example_email("hamlet"))
+        d1 = StringIO("zulip!")
+        d1.name = "dummy_1.txt"
+        result = self.client_post("/json/upload_file", {'file': d1})
+        json = ujson.loads(result.content)
+        uri = json["uri"]
+        d1_path_id = re.sub('/user_uploads/', '', uri)
+
+        self.make_stream("private_stream", invite_only=True)
+        self.subscribe_to_stream(self.example_email("hamlet"), "private_stream")
+
+        # First, send the mesasge to the new private stream.
+        body = "First message ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
+        self.send_message(self.example_email("hamlet"), "private_stream", Recipient.STREAM, body, "test")
+        self.assertFalse(Attachment.objects.get(path_id=d1_path_id).is_realm_public)
+        self.assertEqual(Attachment.objects.get(path_id=d1_path_id).messages.count(), 1)
+
+        # Then, try having a user who didn't receive the message try to publish it, and fail
+        body = "Illegal message ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
+        self.send_message(self.example_email("cordelia"), "Denmark", Recipient.STREAM, body, "test")
+        self.assertEqual(Attachment.objects.get(path_id=d1_path_id).messages.count(), 1)
+        self.assertFalse(Attachment.objects.get(path_id=d1_path_id).is_realm_public)
+
+        # Then, have the owner PM it to another user, giving that other user access.
+        body = "Second message ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
+        self.send_message(self.example_email("hamlet"), self.example_email("othello"), Recipient.PERSONAL, body, "test")
+        self.assertEqual(Attachment.objects.get(path_id=d1_path_id).messages.count(), 2)
+        self.assertFalse(Attachment.objects.get(path_id=d1_path_id).is_realm_public)
+
+        # Then, have that new recipient user publish it.
+        body = "Third message ...[zulip.txt](http://localhost:9991/user_uploads/" + d1_path_id + ")"
+        self.send_message(self.example_email("othello"), "Denmark", Recipient.STREAM, body, "test")
+        self.assertEqual(Attachment.objects.get(path_id=d1_path_id).messages.count(), 3)
+        self.assertTrue(Attachment.objects.get(path_id=d1_path_id).is_realm_public)
 
     def test_check_attachment_reference_update(self):
         # type: () -> None
@@ -313,7 +359,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         f3 = StringIO("file3")
         f3.name = "file3.txt"
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         result = self.client_post("/json/upload_file", {'file': f1})
         json = ujson.loads(result.content)
         uri = json["uri"]
@@ -324,10 +370,10 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         uri = json["uri"]
         f2_path_id = re.sub('/user_uploads/', '', uri)
 
-        self.subscribe_to_stream("hamlet@zulip.com", "test")
+        self.subscribe_to_stream(self.example_email("hamlet"), "test")
         body = ("[f1.txt](http://localhost:9991/user_uploads/" + f1_path_id + ")"
                 "[f2.txt](http://localhost:9991/user_uploads/" + f2_path_id + ")")
-        msg_id = self.send_message("hamlet@zulip.com", "test", Recipient.STREAM, body, "test")
+        msg_id = self.send_message(self.example_email("hamlet"), "test", Recipient.STREAM, body, "test")
 
         result = self.client_post("/json/upload_file", {'file': f3})
         json = ujson.loads(result.content)
@@ -372,7 +418,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         """
         Unicode filenames should be processed correctly.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         for expected in ["Здравейте.txt", "test"]:
             fp = StringIO("bah!")
             fp.name = urllib.parse.quote(expected)
@@ -386,7 +432,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         """
         User quote for uploading should not be exceeded
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
 
         d1 = StringIO("zulip!")
         d1.name = "dummy_1.txt"
@@ -416,17 +462,15 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
     def test_cross_realm_file_access(self):
         # type: () -> None
 
-        def create_user(email):
-            # type: (Text) -> None
+        def create_user(email, realm_id):
+            # type: (Text) -> UserProfile
             self.register(email, 'test')
-            return get_user_profile_by_email(email)
+            return get_user(email, get_realm(realm_id))
 
         user1_email = 'user1@uploadtest.example.com'
         user2_email = 'test-og-bot@zulip.com'
         user3_email = 'other-user@uploadtest.example.com'
 
-        settings.CROSS_REALM_BOT_EMAILS.add(user2_email)
-        settings.CROSS_REALM_BOT_EMAILS.add(user3_email)
         dep = Deployment()
         dep.base_api_url = "https://zulip.com/api/"
         dep.base_site_url = "https://zulip.com/"
@@ -441,9 +485,9 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         deployment = Deployment.objects.filter()[0]
         deployment.realms.add(r1)
 
-        create_user(user1_email)
-        create_user(user2_email)
-        create_user(user3_email)
+        create_user(user1_email, 'uploadtest.example.com')
+        create_user(user2_email, 'zulip')
+        create_user(user3_email, 'uploadtest.example.com')
 
         # Send a message from @zulip.com -> @uploadtest.example.com
         self.login(user2_email, 'test')
@@ -454,14 +498,15 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         uri = json["uri"]
         fp_path_id = re.sub('/user_uploads/', '', uri)
         body = "First message ...[zulip.txt](http://localhost:9991/user_uploads/" + fp_path_id + ")"
-        self.send_message(user2_email, user1_email, Recipient.PERSONAL, body)
+        with self.settings(CROSS_REALM_BOT_EMAILS = set((user2_email, user3_email))):
+            self.send_message(user2_email, user1_email, Recipient.PERSONAL, body)
 
         self.login(user1_email, 'test')
         response = self.client_get(uri)
         self.assertEqual(response.status_code, 200)
         data = b"".join(response.streaming_content)
         self.assertEqual(b"zulip!", data)
-        self.client_post('/accounts/logout/')
+        self.logout()
 
         # Confirm other cross-realm users can't read it.
         self.login(user3_email, 'test')
@@ -471,8 +516,8 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_file_download_authorization_invite_only(self):
         # type: () -> None
-        subscribed_users = ["hamlet@zulip.com", "iago@zulip.com"]
-        unsubscribed_users = ["othello@zulip.com", "prospero@zulip.com"]
+        subscribed_users = [self.example_email("hamlet"), self.example_email("iago")]
+        unsubscribed_users = [self.example_email("othello"), self.example_email("prospero")]
         for user in subscribed_users:
             self.subscribe_to_stream(user, "test-subscribe")
 
@@ -481,7 +526,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         stream.invite_only = True
         stream.save()
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
         result = self.client_post("/json/upload_file", {'file': fp})
@@ -489,8 +534,8 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         uri = json["uri"]
         fp_path_id = re.sub('/user_uploads/', '', uri)
         body = "First message ...[zulip.txt](http://localhost:9991/user_uploads/" + fp_path_id + ")"
-        self.send_message("hamlet@zulip.com", "test-subscribe", Recipient.STREAM, body, "test")
-        self.client_post('/accounts/logout/')
+        self.send_message(self.example_email("hamlet"), "test-subscribe", Recipient.STREAM, body, "test")
+        self.logout()
 
         # Subscribed user should be able to view file
         for user in subscribed_users:
@@ -499,7 +544,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
             self.assertEqual(response.status_code, 200)
             data = b"".join(response.streaming_content)
             self.assertEqual(b"zulip!", data)
-            self.client_post('/accounts/logout/')
+            self.logout()
 
         # Unsubscribed user should not be able to view file
         for user in unsubscribed_users:
@@ -507,16 +552,16 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
             response = self.client_get(uri)
             self.assertEqual(response.status_code, 403)
             self.assert_in_response("You are not authorized to view this file.", response)
-            self.client_post('/accounts/logout/')
+            self.logout()
 
     def test_file_download_authorization_public(self):
         # type: () -> None
-        subscribed_users = ["hamlet@zulip.com", "iago@zulip.com"]
-        unsubscribed_users = ["othello@zulip.com", "prospero@zulip.com"]
+        subscribed_users = [self.example_email("hamlet"), self.example_email("iago")]
+        unsubscribed_users = [self.example_email("othello"), self.example_email("prospero")]
         for user in subscribed_users:
             self.subscribe_to_stream(user, "test-subscribe")
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
         result = self.client_post("/json/upload_file", {'file': fp})
@@ -524,8 +569,8 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
         uri = json["uri"]
         fp_path_id = re.sub('/user_uploads/', '', uri)
         body = "First message ...[zulip.txt](http://localhost:9991/user_uploads/" + fp_path_id + ")"
-        self.send_message("hamlet@zulip.com", "test-subscribe", Recipient.STREAM, body, "test")
-        self.client_post('/accounts/logout/')
+        self.send_message(self.example_email("hamlet"), "test-subscribe", Recipient.STREAM, body, "test")
+        self.logout()
 
         # Now all users should be able to access the files
         for user in subscribed_users + unsubscribed_users:
@@ -533,7 +578,7 @@ class FileUploadTest(UploadSerializeMixin, ZulipTestCase):
             response = self.client_get(uri)
             data = b"".join(response.streaming_content)
             self.assertEqual(b"zulip!", data)
-            self.client_post('/accounts/logout/')
+            self.logout()
 
     def tearDown(self):
         # type: () -> None
@@ -566,7 +611,7 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
         """
         Attempting to upload two files should fail.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         with get_test_image_file('img.png') as fp1, \
                 get_test_image_file('img.png') as fp2:
             result = self.client_put_multipart("/json/users/me/avatar", {'f1': fp1, 'f2': fp2})
@@ -577,7 +622,7 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
         """
         Calling this endpoint with no files should fail.
         """
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
 
         result = self.client_put_multipart("/json/users/me/avatar")
         self.assert_json_error(result, "You must upload exactly one avatar.")
@@ -592,8 +637,8 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_get_gravatar_avatar(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        cordelia = get_user_profile_by_email('cordelia@zulip.com')
+        self.login(self.example_email("hamlet"))
+        cordelia = self.example_user('cordelia')
 
         cordelia.avatar_source = UserProfile.AVATAR_FROM_GRAVATAR
         cordelia.save()
@@ -609,8 +654,8 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_get_user_avatar(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        cordelia = get_user_profile_by_email('cordelia@zulip.com')
+        self.login(self.example_email("hamlet"))
+        cordelia = self.example_user('cordelia')
 
         cordelia.avatar_source = UserProfile.AVATAR_FROM_USER
         cordelia.save()
@@ -624,8 +669,8 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_get_user_avatar_medium(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
-        cordelia = get_user_profile_by_email('cordelia@zulip.com')
+        self.login(self.example_email("hamlet"))
+        cordelia = self.example_user('cordelia')
 
         cordelia.avatar_source = UserProfile.AVATAR_FROM_USER
         cordelia.save()
@@ -642,7 +687,7 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
 
         # It's debatable whether we should generate avatars for non-users,
         # but this test just validates the current code's behavior.
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
 
         response = self.client_get("/avatar/nonexistent_user@zulip.com?foo=bar")
         redirect_url = response['Location']
@@ -658,7 +703,7 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
         for fname, rfname in self.correct_files:
             # TODO: use self.subTest once we're exclusively on python 3 by uncommenting the line below.
             # with self.subTest(fname=fname):
-            self.login("hamlet@zulip.com")
+            self.login(self.example_email("hamlet"))
             with get_test_image_file(fname) as fp:
                 result = self.client_put_multipart("/json/users/me/avatar", {'file': fp})
 
@@ -675,7 +720,7 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
                 self.assertEqual(Image.open(io.BytesIO(data)).size, (100, 100))
 
             # Verify that the medium-size avatar was created
-            user_profile = get_user_profile_by_email('hamlet@zulip.com')
+            user_profile = self.example_user('hamlet')
             medium_avatar_disk_path = avatar_disk_path(user_profile, medium=True)
             self.assertTrue(os.path.exists(medium_avatar_disk_path))
 
@@ -683,7 +728,7 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
             # medium size avatars from the original if needed
             os.remove(medium_avatar_disk_path)
             self.assertFalse(os.path.exists(medium_avatar_disk_path))
-            zerver.lib.upload.upload_backend.ensure_medium_avatar_image(user_profile.email)
+            zerver.lib.upload.upload_backend.ensure_medium_avatar_image(user_profile)
             self.assertTrue(os.path.exists(medium_avatar_disk_path))
 
             # Verify whether the avatar_version gets incremented with every new upload
@@ -697,12 +742,12 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
         """
         for fname in self.corrupt_files:
             # with self.subTest(fname=fname):
-            self.login("hamlet@zulip.com")
+            self.login(self.example_email("hamlet"))
             with get_test_image_file(fname) as fp:
                 result = self.client_put_multipart("/json/users/me/avatar", {'file': fp})
 
             self.assert_json_error(result, "Could not decode image; did you upload an image file?")
-            user_profile = get_user_profile_by_email("hamlet@zulip.com")
+            user_profile = self.example_user('hamlet')
             self.assertEqual(user_profile.avatar_version, 1)
 
     def test_delete_avatar(self):
@@ -710,13 +755,13 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
         """
         A DELETE request to /json/users/me/avatar should delete the user avatar and return gravatar URL
         """
-        self.login("hamlet@zulip.com")
-        hamlet = get_user_profile_by_email("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
+        hamlet = self.example_user('hamlet')
         hamlet.avatar_source = UserProfile.AVATAR_FROM_USER
         hamlet.save()
 
         result = self.client_delete("/json/users/me/avatar")
-        user_profile = get_user_profile_by_email('hamlet@zulip.com')
+        user_profile = self.example_user('hamlet')
 
         self.assert_json_success(result)
         json = ujson.loads(result.content)
@@ -728,11 +773,18 @@ class AvatarTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_avatar_upload_file_size_error(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         with get_test_image_file(self.correct_files[0][0]) as fp:
             with self.settings(MAX_AVATAR_FILE_SIZE=0):
                 result = self.client_put_multipart("/json/users/me/avatar", {'file': fp})
         self.assert_json_error(result, "Uploaded file is larger than the allowed limit of 0 MB")
+
+    def test_get_avatar_url_with_user_profile_lookup(self):
+        # type: () -> None
+        user = self.example_user("hamlet")
+        actual_url = get_avatar_url(u'U', user.email, 42)
+        expected_url_regex = u'/user_avatars/1/([0-9a-f]{40}).png\?x=x&version=42'
+        self.assertTrue(re.match(expected_url_regex, actual_url))
 
     def tearDown(self):
         # type: () -> None
@@ -746,7 +798,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
         Attempting to upload two files should fail.
         """
         # Log in as admin
-        self.login("iago@zulip.com")
+        self.login(self.example_email("iago"))
         with get_test_image_file('img.png') as fp1, \
                 get_test_image_file('img.png') as fp2:
             result = self.client_put_multipart("/json/realm/icon", {'f1': fp1, 'f2': fp2})
@@ -757,7 +809,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
         """
         Calling this endpoint with no files should fail.
         """
-        self.login("iago@zulip.com")
+        self.login(self.example_email("iago"))
 
         result = self.client_put_multipart("/json/realm/icon")
         self.assert_json_error(result, "You must upload exactly one icon.")
@@ -772,14 +824,14 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_no_admin_user_upload(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         with get_test_image_file(self.correct_files[0][0]) as fp:
             result = self.client_put_multipart("/json/realm/icon", {'file': fp})
         self.assert_json_error(result, 'Must be a realm administrator')
 
     def test_get_gravatar_icon(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         realm = get_realm('zulip')
         realm.icon_source = Realm.ICON_FROM_GRAVATAR
         realm.save()
@@ -795,7 +847,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_get_realm_icon(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
 
         realm = get_realm('zulip')
         realm.icon_source = Realm.ICON_UPLOADED
@@ -813,7 +865,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
         for fname, rfname in self.correct_files:
             # TODO: use self.subTest once we're exclusively on python 3 by uncommenting the line below.
             # with self.subTest(fname=fname):
-            self.login("iago@zulip.com")
+            self.login(self.example_email("iago"))
             with get_test_image_file(fname) as fp:
                 result = self.client_put_multipart("/json/realm/icon", {'file': fp})
             realm = get_realm('zulip')
@@ -836,7 +888,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
         """
         for fname in self.corrupt_files:
             # with self.subTest(fname=fname):
-            self.login("iago@zulip.com")
+            self.login(self.example_email("iago"))
             with get_test_image_file(fname) as fp:
                 result = self.client_put_multipart("/json/realm/icon", {'file': fp})
 
@@ -847,7 +899,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
         """
         A DELETE request to /json/realm/icon should delete the realm icon and return gravatar URL
         """
-        self.login("iago@zulip.com")
+        self.login(self.example_email("iago"))
         realm = get_realm('zulip')
         realm.icon_source = Realm.ICON_UPLOADED
         realm.save()
@@ -863,7 +915,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_realm_icon_version(self):
         # type: () -> None
-        self.login("iago@zulip.com")
+        self.login(self.example_email("iago"))
         realm = get_realm('zulip')
         icon_version = realm.icon_version
         self.assertEqual(icon_version, 1)
@@ -874,7 +926,7 @@ class RealmIconTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_realm_icon_upload_file_size_error(self):
         # type: () -> None
-        self.login("iago@zulip.com")
+        self.login(self.example_email("iago"))
         with get_test_image_file(self.correct_files[0][0]) as fp:
             with self.settings(MAX_ICON_FILE_SIZE=0):
                 result = self.client_put_multipart("/json/realm/icon", {'file': fp})
@@ -888,8 +940,7 @@ class LocalStorageTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_file_upload_local(self):
         # type: () -> None
-        sender_email = "hamlet@zulip.com"
-        user_profile = get_user_profile_by_email(sender_email)
+        user_profile = self.example_user('hamlet')
         uri = upload_message_image(u'dummy.txt', len(b'zulip!'), u'text/plain', b'zulip!', user_profile)
 
         base = '/user_uploads/'
@@ -903,7 +954,7 @@ class LocalStorageTest(UploadSerializeMixin, ZulipTestCase):
 
     def test_delete_message_image_local(self):
         # type: () -> None
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
         result = self.client_post("/json/upload_file", {'file': fp})
@@ -940,8 +991,7 @@ class S3Test(ZulipTestCase):
         conn = S3Connection(settings.S3_KEY, settings.S3_SECRET_KEY)
         bucket = conn.create_bucket(settings.S3_AUTH_UPLOADS_BUCKET)
 
-        sender_email = "hamlet@zulip.com"
-        user_profile = get_user_profile_by_email(sender_email)
+        user_profile = self.example_user('hamlet')
         uri = upload_message_image(u'dummy.txt', len(b'zulip!'), u'text/plain', b'zulip!', user_profile)
 
         base = '/user_uploads/'
@@ -953,9 +1003,9 @@ class S3Test(ZulipTestCase):
         uploaded_file = Attachment.objects.get(owner=user_profile, path_id=path_id)
         self.assertEqual(len(b"zulip!"), uploaded_file.size)
 
-        self.subscribe_to_stream("hamlet@zulip.com", "Denmark")
+        self.subscribe_to_stream(self.example_email("hamlet"), "Denmark")
         body = "First message ...[zulip.txt](http://localhost:9991" + uri + ")"
-        self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM, body, "test")
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
         self.assertIn('title="dummy.txt"', self.get_last_message().rendered_content)
 
     @use_s3_backend
@@ -964,8 +1014,7 @@ class S3Test(ZulipTestCase):
         conn = S3Connection(settings.S3_KEY, settings.S3_SECRET_KEY)
         conn.create_bucket(settings.S3_AUTH_UPLOADS_BUCKET)
 
-        sender_email = "hamlet@zulip.com"
-        user_profile = get_user_profile_by_email(sender_email)
+        user_profile = self.example_user('hamlet')
         uri = upload_message_image(u'dummy.txt', len(b'zulip!'), u'text/plain', b'zulip!', user_profile)
 
         path_id = re.sub('/user_uploads/', '', uri)
@@ -980,7 +1029,7 @@ class S3Test(ZulipTestCase):
         conn = S3Connection(settings.S3_KEY, settings.S3_SECRET_KEY)
         conn.create_bucket(settings.S3_AUTH_UPLOADS_BUCKET)
 
-        self.login("hamlet@zulip.com")
+        self.login(self.example_email("hamlet"))
         fp = StringIO("zulip!")
         fp.name = "zulip.txt"
 
@@ -997,9 +1046,9 @@ class S3Test(ZulipTestCase):
 
         self.assertEqual(b"zulip!", urllib.request.urlopen(redirect_url).read().strip()) # type: ignore # six.moves.urllib.request.urlopen is not defined in typeshed
 
-        self.subscribe_to_stream("hamlet@zulip.com", "Denmark")
+        self.subscribe_to_stream(self.example_email("hamlet"), "Denmark")
         body = "First message ...[zulip.txt](http://localhost:9991" + uri + ")"
-        self.send_message("hamlet@zulip.com", "Denmark", Recipient.STREAM, body, "test")
+        self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, body, "test")
         self.assertIn('title="zulip.txt"', self.get_last_message().rendered_content)
 
 class UploadTitleTests(TestCase):

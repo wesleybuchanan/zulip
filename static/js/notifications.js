@@ -101,7 +101,7 @@ exports.initialize = function () {
 
     if (notifications_api) {
         $(document).click(function () {
-            if (!page_params.desktop_notifications_enabled || asked_permission_already) {
+            if (!page_params.enable_desktop_notifications || asked_permission_already) {
                 return;
             }
             if (notifications_api.checkPermission() !== 0) { // 0 is PERMISSION_ALLOWED
@@ -417,7 +417,7 @@ function message_is_notifiable(message) {
         return true;
     }
     if ((message.type === "stream") &&
-        !stream_data.in_home_view(message.stream)) {
+        !stream_data.in_home_view(message.stream_id)) {
         return false;
     }
     if ((message.type === "stream") &&
@@ -441,19 +441,19 @@ function should_send_desktop_notification(message) {
     // For PMs and @-mentions, send if desktop notifications are
     // enabled.
     if ((message.type === "private") &&
-        page_params.desktop_notifications_enabled) {
+        page_params.enable_desktop_notifications) {
         return true;
     }
 
     // For alert words and @-mentions, send if desktop notifications
     // are enabled.
     if (alert_words.notifies(message) &&
-        page_params.desktop_notifications_enabled) {
+        page_params.enable_desktop_notifications) {
         return true;
     }
 
     if (exports.speaking_at_me(message) &&
-        page_params.desktop_notifications_enabled) {
+        page_params.enable_desktop_notifications) {
         return true;
     }
 
@@ -468,16 +468,16 @@ function should_send_audible_notification(message) {
     }
 
     // For PMs and @-mentions, ding if sounds are enabled.
-    if ((message.type === "private") && page_params.sounds_enabled) {
+    if ((message.type === "private") && page_params.enable_sounds) {
         return true;
     }
 
     // For alert words and @-mentions, ding if sounds are enabled.
-    if (alert_words.notifies(message) && page_params.sounds_enabled) {
+    if (alert_words.notifies(message) && page_params.enable_sounds) {
         return true;
     }
 
-    if (exports.speaking_at_me(message) && page_params.sounds_enabled) {
+    if (exports.speaking_at_me(message) && page_params.enable_sounds) {
         return true;
     }
 
@@ -548,7 +548,7 @@ exports.possibly_notify_new_messages_outside_viewport = function (messages, loca
         if (row.length === 0) {
             if (message.type === "stream" && muting.is_topic_muted(message.stream, message.subject)) {
                 note = "Sent! Your message was sent to a topic you have muted.";
-            } else if (message.type === "stream" && !stream_data.in_home_view(message.stream)) {
+            } else if (message.type === "stream" && !stream_data.in_home_view(message.stream_id)) {
                 note = "Sent! Your message was sent to a stream you have muted.";
             } else {
                 // offscreen because it is outside narrow
@@ -636,13 +636,13 @@ exports.handle_global_notification_updates = function (notification_name, settin
     // for a given message. These settings do not affect whether or not a
     // particular stream should receive notifications.
     if (notification_name === "enable_stream_desktop_notifications") {
-        page_params.stream_desktop_notifications_enabled = setting;
+        page_params.enable_stream_desktop_notifications = setting;
     } else if (notification_name === "enable_stream_sounds") {
-        page_params.stream_sounds_enabled = setting;
+        page_params.enable_stream_sounds = setting;
     } else if (notification_name === "enable_desktop_notifications") {
-        page_params.desktop_notifications_enabled = setting;
+        page_params.enable_desktop_notifications = setting;
     } else if (notification_name === "enable_sounds") {
-        page_params.sounds_enabled = setting;
+        page_params.enable_sounds = setting;
     } else if (notification_name === "enable_offline_email_notifications") {
         page_params.enable_offline_email_notifications = setting;
     } else if (notification_name === "enable_offline_push_notifications") {

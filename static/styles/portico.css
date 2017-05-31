@@ -187,7 +187,7 @@ body {
 
     color: #444;
 
-    border-width: order: 1px solid #CCC;
+    border: 1px solid #ddd;
     border-radius: 4px;
     background-color: #FAFAFA;
 }
@@ -207,10 +207,6 @@ body {
 
 .help-inline.text-error {
     color: #b94a48;
-}
-
-#company-email {
-    display: none;
 }
 
 a.title {
@@ -276,6 +272,12 @@ img.screenshot {
 #pw_strength {
     /* Same width as a Bootstrap default text <input> with padding */
     width: 220px;
+    height: 8px;
+}
+
+#registration #pw_strength {
+    width: 325px;
+    margin-top: 20px;
 }
 
 .def:before {
@@ -379,9 +381,11 @@ input.text-error {
 }
 
 .footer {
-    margin: 30px 0px 10px 0px;
-    height: 54px;
     background-color: transparent;
+}
+
+.footer .footer-navigation {
+    margin-left: 0px;
 }
 
 .header-main .logo {
@@ -565,7 +569,11 @@ a.bottom-signup-button {
 .api-page {
     min-height: 100%;
     height: auto;
-    margin-bottom: -54px;
+}
+
+.portico-page {
+    /* height of the white portico navbar */
+    min-height: calc(100% - 87px);
 }
 
 .signup-signature {
@@ -574,31 +582,24 @@ a.bottom-signup-button {
 }
 
 .devlogin_subheader {
-    margin-top: -30px;
+    margin-top: 10px;
     margin-bottom: 20px;
     padding-top: 0px;
     text-align: center;
     font-size: 16px;
 }
 
-.login-page-container,
 .terms-page-container,
 .feature-page-container,
 .apps-page-container,
 .integrations-page-container,
-.register-page-container,
 .portico-page-container,
 .api-page-container {
     padding-top: 50px !important;
 }
 
-.portico-page-container,
-.register-page-container {
+.portico-page-container {
     padding-top: 0px !important;
-}
-
-.hello-footer {
-    height: 54px !important;
 }
 
 .portico-page-header {
@@ -737,7 +738,6 @@ a.bottom-signup-button {
 .authors-page-header,
 .feature-page-header,
 .integrations-page-header,
-.login-page-header,
 .register-page-header {
     font-weight: 300;
     font-size: 40px;
@@ -858,6 +858,10 @@ a.bottom-signup-button {
     width: auto;
 }
 
+.login-page {
+    text-align: center;
+}
+
 .login-page .alert {
     width: 320px;
     margin: auto;
@@ -868,7 +872,9 @@ a.bottom-signup-button {
 
 .login-form {
     margin: auto;
-    width: 300px;
+    /* plus input padding. */
+    width: calc(300px + 28px);
+    margin-bottom: 10px;
 }
 
 .register-form {
@@ -901,11 +907,6 @@ input.new-organization-button {
     margin-bottom: 6px;
 }
 
-.login-form #id_username,
-.login-form #id_password {
-    width: 100%;
-}
-
 .login-form .control-group,
 .register-form .control-group {
     margin-right: 10px;
@@ -927,7 +928,7 @@ input.new-organization-button {
     min-width: 300px;
     margin: auto;
     text-align: center;
-    margin-top: 30px;
+    margin-top: 20px;
 }
 
 .login-google-button,
@@ -1043,10 +1044,6 @@ input.new-organization-button {
     padding: 0 !important;
 }
 
-.footer-padder {
-    height: 54px;
-}
-
 .footer-navigation {
     list-style: none;
     padding-top: 16px;
@@ -1115,18 +1112,26 @@ input.new-organization-button {
 }
 
 /* -- password reset container -- */
-.password-container {
-    text-align: center;
-    margin-top: calc(50vh - 290px);
-}
-
 .password-reset {
     display: inline-block;
     text-align: left;
 }
 
+.password-reset form {
+    margin: 0px;
+}
+
+.password-reset #pw_strength {
+    width: 328px;
+    margin-top: 20px;
+}
+
 .password-reset .control-group .control-label {
     display: block;
+}
+
+.password-reset {
+    width: 328px;
 }
 
 .password-reset .pitch {
@@ -1229,7 +1234,7 @@ input.new-organization-button {
 
 .markdown {
     max-width: 800px;
-    margin: 20px auto;
+    margin: 20px auto 0px auto;
     padding: 20px;
 
     font-weight: 400;
@@ -1362,6 +1367,13 @@ input.new-organization-button {
 
 .markdown ul li {
     margin: 5px 0px;
+}
+
+@media (max-height: 678px) {
+    .portico-page {
+        /* the footer becomes two lines */
+        min-height: calc(100% - 96px);
+    }
 }
 
 @media (max-height: 600px) {

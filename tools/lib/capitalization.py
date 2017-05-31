@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 # this list without any modification.
 IGNORED_PHRASES = [
     # Proper nouns and acronyms
+    r"Android",
     r"API",
     r"Cookie Bot",
     r"Dropbox",
@@ -24,7 +25,9 @@ IGNORED_PHRASES = [
     r"JSON",
     r"Kerberos",
     r"Mac",
+    r"MacOS",
     r"MiB",
+    r"OTP",
     r"Pivotal",
     r'REMOTE_USER',
     r'Slack',
@@ -40,6 +43,8 @@ IGNORED_PHRASES = [
     r"Zephyr",
     r"Zulip",
     r"iPhone",
+    r"iOS",
+    r"Emoji One",
     # Code things
     r".zuliprc",
     r"__\w+\.\w+__",
@@ -57,10 +62,10 @@ IGNORED_PHRASES = [
     # Fragments of larger strings
     (r'Change notification settings for individual streams on your '
      '<a href="/#streams">Streams page</a>.'),
-    (r'<p class="bot-settings-note padded-container"> Looking for our '
+    (r'Looking for our '
      '<a href="/integrations" target="_blank">Integrations</a> or '
      '<a href="{{ server_uri }}/api" target="_blank">API</a> '
-     'documentation? </p>'),
+     'documentation?'),
     r'Most stream administration is done on the <a href="/#streams">Streams page</a>.',
     r"one or more people...",
     r"confirmation email",
@@ -79,6 +84,8 @@ IGNORED_PHRASES = [
     r"more conversations",
     # We should probably just delete this string from translations
     r'activation key',
+    # this is used as a topic
+    r'^hello$',
 
     # TO CLEAN UP
     # Just want to avoid churning login.html right now

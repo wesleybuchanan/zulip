@@ -27,8 +27,12 @@ for any particular type of object.
 '''
 from __future__ import absolute_import
 from django.utils.translation import ugettext as _
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 import six
-from typing import Any, Callable, Iterable, Optional, Tuple, TypeVar
+from typing import Any, Callable, Iterable, Optional, Tuple, TypeVar, Text
+
+from zerver.lib.request import JsonableError
 
 Validator = Callable[[str, Any], Optional[str]]
 
@@ -37,6 +41,14 @@ def check_string(var_name, val):
     if not isinstance(val, six.string_types):
         return _('%s is not a string') % (var_name,)
     return None
+
+def check_short_string(var_name, val):
+    # type: (str, Any) -> Optional[str]
+    max_length = 200
+    if len(val) >= max_length:
+        return _("{var_name} is longer than {max_length}.".format(
+            var_name=var_name, max_length=max_length))
+    return check_string(var_name, val)
 
 def check_int(var_name, val):
     # type: (str, Any) -> Optional[str]
@@ -67,7 +79,7 @@ def check_none_or(sub_validator):
     return f
 
 def check_list(sub_validator, length=None):
-    # type: (Validator, Optional[int]) -> Validator
+    # type: (Optional[Validator], Optional[int]) -> Validator
     def f(var_name, val):
         # type: (str, Any) -> Optional[str]
         if not isinstance(val, list):
@@ -144,3 +156,10 @@ def equals(expected_val):
                      'value': val})
         return None
     return f
+
+def validate_login_email(email):
+    # type: (Text) -> None
+    try:
+        validate_email(email)
+    except ValidationError as err:
+        raise JsonableError(str(err.message))
