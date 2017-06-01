@@ -124,6 +124,11 @@ var event_fixtures = {
         ],
     },
 
+    hotspots: {
+        type: 'hotspots',
+        hotspots: ['nice', 'chicken'],
+    },
+
     message: {
         type: 'message',
         message: {
@@ -151,6 +156,20 @@ var event_fixtures = {
             // etc.
         },
         server_timestamp: 999999,
+    },
+
+    reaction__add: {
+        type: 'reaction',
+        op: 'add',
+        message_id: 128,
+        emoji_name: 'anguished_pig',
+    },
+
+    reaction__remove: {
+        type: 'reaction',
+        op: 'remove',
+        message_id: 256,
+        emoji_name: 'angery',
     },
 
     // Please keep this next section un-nested, as we want this to partly
@@ -243,6 +262,30 @@ var event_fixtures = {
         realm_filters: [
             ['#[123]', 'ticket %(id)s'],
         ],
+    },
+
+    realm_domains__add: {
+        type: 'realm_domains',
+        op: 'add',
+        realm_domain: {
+            domain: 'ramen',
+            allow_subdomains: false,
+        },
+    },
+
+    realm_domains__change: {
+        type: 'realm_domains',
+        op: 'change',
+        realm_domain: {
+            domain: 'ramen',
+            allow_subdomains: true,
+        },
+    },
+
+    realm_domains__remove: {
+        type: 'realm_domains',
+        op: 'remove',
+        domain: 'ramen',
     },
 
     realm_user__add: {
@@ -354,6 +397,22 @@ var event_fixtures = {
         value: 'black',
     },
 
+    typing__start: {
+        type: 'typing',
+        sender: {
+            user_id: 4,
+        },
+        op: 'start',
+    },
+
+    typing__stop: {
+        type: 'typing',
+        sender: {
+            user_id: 6,
+        },
+        op: 'stop',
+    },
+
     update_display_settings__default_language: {
         type: 'update_display_settings',
         setting_name: 'default_language',
@@ -397,6 +456,11 @@ var event_fixtures = {
         flag: 'starred',
         messages: [99],
     },
+
+    delete_message: {
+        type: 'delete_message',
+        message_id: 1337,
+    },
 };
 
 function assert_same(actual, expected) {
@@ -423,6 +487,14 @@ with_overrides(function (override) {
     dispatch(event);
     assert_same(page_params.realm_default_streams, event.default_streams);
 
+});
+
+with_overrides(function (override) {
+    // hotspots
+    var event = event_fixtures.hotspots;
+    override('hotspots.show', noop);
+    dispatch(event);
+    assert_same(page_params.hotspots, event.hotspots);
 });
 
 with_overrides(function (override) {
@@ -471,6 +543,27 @@ with_overrides(function (override) {
         assert_same(args.email, 'alice@example.com');
         assert_same(args.presence, event.presence);
         assert_same(args.server_time, event.server_timestamp);
+    });
+});
+
+with_overrides(function (override) {
+    // reaction
+    var event = event_fixtures.reaction__add;
+    global.with_stub(function (stub) {
+        override('reactions.add_reaction', stub.f);
+        dispatch(event);
+        var args = stub.get_args('event');
+        assert_same(args.event.emoji_name, event.emoji_name);
+        assert_same(args.event.message_id, event.message_id);
+    });
+
+    event = event_fixtures.reaction__remove;
+    global.with_stub(function (stub) {
+        override('reactions.remove_reaction', stub.f);
+        dispatch(event);
+        var args = stub.get_args('event');
+        assert_same(args.event.emoji_name, event.emoji_name);
+        assert_same(args.event.message_id, event.message_id);
     });
 });
 
@@ -582,6 +675,23 @@ with_overrides(function (override) {
     dispatch(event);
     assert_same(page_params.realm_filters, event.realm_filters);
 
+});
+
+with_overrides(function (override) {
+    // realm_domains
+    var event = event_fixtures.realm_domains__add;
+    page_params.realm_domains = [];
+    override('settings_org.populate_realm_domains', noop);
+    dispatch(event);
+    assert_same(page_params.realm_domains, [event.realm_domain]);
+
+    event = event_fixtures.realm_domains__change;
+    dispatch(event);
+    assert_same(page_params.realm_domains, [event.realm_domain]);
+
+    event = event_fixtures.realm_domains__remove;
+    dispatch(event);
+    assert_same(page_params.realm_domains, []);
 });
 
 with_overrides(function (override) {
@@ -717,6 +827,25 @@ with_overrides(function (override) {
 });
 
 with_overrides(function (override) {
+    // typing
+    var event = event_fixtures.typing__start;
+    global.with_stub(function (stub) {
+        override('typing_events.display_notification', stub.f);
+        dispatch(event);
+        var args = stub.get_args('event');
+        assert_same(args.event.sender.user_id, 4);
+    });
+
+    event = event_fixtures.typing__stop;
+    global.with_stub(function (stub) {
+        override('typing_events.hide_notification', stub.f);
+        dispatch(event);
+        var args = stub.get_args('event');
+        assert_same(args.event.sender.user_id, 6);
+    });
+});
+
+with_overrides(function (override) {
     // update_display_settings
     var event = event_fixtures.update_display_settings__default_language;
     page_params.default_language = 'en';
@@ -775,5 +904,16 @@ with_overrides(function (override) {
         var args = stub.get_args('message_id', 'new_value');
         assert_same(args.message_id, 99);
         assert_same(args.new_value, true); // for 'add'
+    });
+});
+
+with_overrides(function (override) {
+    // delete_message
+    var event = event_fixtures.delete_message;
+    global.with_stub(function (stub) {
+        override('ui.remove_message', stub.f);
+        dispatch(event);
+        var args = stub.get_args('message_id');
+        assert_same(args.message_id, 1337);
     });
 });
