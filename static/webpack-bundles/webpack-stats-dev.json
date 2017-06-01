@@ -1,1 +1,1 @@
-{"status":"done","publicPath":"http://0.0.0.0:9991/webpack/","chunks":{"translations":[{"name":"translations.js","publicPath":"http://0.0.0.0:9991/webpack/translations.js","path":"/home/wesley/zulip/static/webpack-bundles/translations.js"}]}}
+{"status":"done","publicPath":"/webpack/","chunks":{"translations":[{"name":"translations.js","publicPath":"/webpack/translations.js","path":"/home/wesley/zulip/static/webpack-bundles/translations.js"}]}}
