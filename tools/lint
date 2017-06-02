@@ -505,8 +505,8 @@ def build_custom_checkers(by_lang):
          ]),
          'exclude': set(["templates/zerver/emails"]),
          'description': "`title` value should be translatable."},
-        {'pattern': '\Walt=["\'][^{]',
-         'description': "alt argument should be enclosed by _().",
+        {'pattern': '\Walt=["\'][^{"\']',
+         'description': "alt argument should be enclosed by _() or it should be an empty string.",
          'exclude': set(['tools/lint',
                          'static/templates/settings/display-settings.handlebars',
                          'templates/zerver/keyboard_shortcuts.html',
@@ -595,7 +595,10 @@ def build_custom_checkers(by_lang):
             "docs/migration-renumbering.md",
             "docs/readme-symlink.md",
             "README.md",
+            "zerver/webhooks/helloworld/doc.md",
+            "zerver/webhooks/solano/doc.md",
             "zerver/webhooks/trello/doc.md",
+            "zerver/webhooks/papertrail/doc.md",
         }
         for fn in by_lang['md']:
             max_length = None

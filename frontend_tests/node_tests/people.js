@@ -4,6 +4,7 @@ add_dependencies({
 
 var people = require("js/people.js");
 set_global('blueslip', {});
+set_global('page_params', {});
 
 var _ = global._;
 
@@ -11,6 +12,7 @@ var me = {
     email: 'me@example.com',
     user_id: 30,
     full_name: 'Me Myself',
+    timezone: 'US/Pacific',
 };
 
 function initialize() {
@@ -73,11 +75,44 @@ initialize();
     // The current user should still be there
     person = people.get_by_email('me@example.com');
     assert.equal(person.full_name, 'Me Myself');
+
+    // Test undefined people
+    assert.equal(people.is_cross_realm_email('unknown@example.com'), undefined);
+    assert.equal(people.realm_get('unknown@example.com'), undefined);
+
+    // Test is_my_user_id function
+    assert.equal(people.is_my_user_id(me.user_id), true);
+    assert.equal(people.is_my_user_id(isaac.user_id), false);
+    assert.equal(people.is_my_user_id(undefined), false);
 }());
 
 (function test_get_recipients() {
     assert.equal(people.get_recipients('30'), 'Me Myself');
     assert.equal(people.get_recipients('30,32'), 'Isaac Newton');
+}());
+
+(function test_user_timezone() {
+    var expected_pref = {
+        timezone: 'US/Pacific',
+        format: 'HH:mm',
+    };
+
+    global.page_params.twenty_four_hour_time = true;
+    assert.deepEqual(people.get_user_time_preferences(me.user_id), expected_pref);
+
+    expected_pref.format = 'hh:mm A';
+    global.page_params.twenty_four_hour_time = false;
+    assert.deepEqual(people.get_user_time_preferences(me.user_id), expected_pref);
+
+    var actual_moment = require('moment-timezone');
+    set_global('moment', function () { return actual_moment('20130208T080910'); });
+
+    global.page_params.twenty_four_hour_time = true;
+    assert.equal(people.get_user_time(me.user_id), '00:09');
+
+    expected_pref.format = 'hh:mm A';
+    global.page_params.twenty_four_hour_time = false;
+    assert.equal(people.get_user_time(me.user_id), '12:09 AM');
 }());
 
 (function test_updates() {
@@ -204,6 +239,17 @@ initialize();
     assert(filtered_people.has(charles.user_id));
     assert(filtered_people.has(maria.user_id));
 
+    // Test filtering with undefined user
+    var foo = {
+        email: 'foo@example.com',
+        user_id: 42,
+        full_name: 'Foo Bar',
+    };
+    users.push(foo);
+
+    filtered_people = people.filter_people_by_search_terms(users, ['ltorv']);
+    assert.equal(filtered_people.num_items(), 1);
+    assert(filtered_people.has(linus.user_id));
 }());
 
 people.init();
@@ -295,6 +341,59 @@ initialize();
         ],
     };
     assert.equal(people.pm_with_url(message), '#narrow/pm-with/30-me');
+
+    message = { type: 'stream' };
+    assert.equal(people.pm_with_user_ids(message), undefined);
+
+    // Test undefined user_ids
+    assert.equal(people.pm_reply_to(message), undefined);
+    assert.equal(people.pm_reply_user_string(message), undefined);
+    assert.equal(people.pm_with_url(message), undefined);
+
+    // Test sender_is_bot
+    var bot = {
+        email: 'bot@example.com',
+        user_id: 42,
+        full_name: 'Test Bot',
+        is_bot: true,
+    };
+    people.add(bot);
+
+    message = { sender_id: bot.user_id };
+    assert.equal(people.sender_is_bot(message), true);
+
+    message = { sender_id: maria.user_id };
+    assert.equal(people.sender_is_bot(message), undefined);
+
+    message = { sender_id: undefined };
+    assert.equal(people.sender_is_bot(message), false);
+}());
+
+initialize();
+
+(function test_extract_people_from_message() {
+    var maria = {
+        email: 'athens@example.com',
+        user_id: 452,
+        full_name: 'Maria Athens',
+    };
+
+    var message = {
+        type: 'stream',
+        sender_full_name: maria.full_name,
+        sender_id: maria.user_id,
+        sender_email: maria.email,
+    };
+    people.extract_people_from_message(message);
+    assert(people.is_known_user_id(maria.user_id));
+
+    message = {
+        type: 'private',
+        display_recipient: [maria],
+        sent_by_me: true,
+    };
+    people.extract_people_from_message(message);
+    assert.equal(people.get_recipient_count(maria), 1);
 }());
 
 (function test_slugs() {
@@ -310,6 +409,10 @@ initialize();
 
     var email = people.slug_to_emails(slug);
     assert.equal(email, 'debbie71@example.com');
+
+    // Test undefined slug
+    people.emails_strings_to_user_ids_string = function () { return undefined; };
+    assert.equal(people.emails_to_slug(), undefined);
 }());
 
 initialize();
@@ -385,6 +488,12 @@ initialize();
     assert.equal(
         people.update_email_in_reply_to(reply_to, maria.user_id, 'maria@example.com'),
         'charles@example.com,maria@example.com'
+    );
+
+    reply_to = '    charles@example.com,   athens@example.com, unknown@example.com';
+    assert.equal(
+        people.update_email_in_reply_to(reply_to, 9999, 'whatever'),
+        reply_to
     );
 }());
 
@@ -470,5 +579,34 @@ initialize();
     };
     var uri = people.pm_with_url({});
     assert.equal(uri.indexOf('unk'), uri.length - 3);
+}());
+
+(function test_initialize() {
+    people.init();
+
+    global.page_params.realm_users = [
+        {
+            email: 'alice@example.com',
+            user_id: 16,
+            full_name: 'Alice',
+        },
+    ];
+    global.page_params.cross_realm_bots = [
+        {
+            email: 'bot@example.com',
+            user_id: 17,
+            full_name: 'Test Bot',
+        },
+    ];
+    global.page_params.user_id = 42;
+
+    people.initialize();
+
+    assert.equal(people.realm_get('alice@example.com').full_name, 'Alice');
+    assert(people.is_cross_realm_email('bot@example.com'));
+    assert(people.is_my_user_id(42));
+
+    assert.equal(global.page_params.realm_users, undefined);
+    assert.equal(global.page_params.cross_realm_bots, undefined);
 }());
 
