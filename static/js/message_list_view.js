@@ -289,8 +289,8 @@ MessageListView.prototype = {
         // Add a subscription marker
         } else if (this.list !== home_msg_list &&
                    last_msg_container.msg.historical !== first_msg_container.msg.historical) {
-            first_group.bookend_bottom = true;
-            this.add_subscription_marker(first_group, last_msg_container, first_msg_container);
+            second_group.bookend_top = true;
+            this.add_subscription_marker(second_group, last_msg_container, first_msg_container);
         }
         return false;
     },
@@ -368,6 +368,11 @@ MessageListView.prototype = {
                     // Clear the date if it is the same as the last group
                     delete second_group.show_date;
                     delete second_group.show_date_separator;
+                } else {
+                    // If we just sent the first message on a new day
+                    // in a narrow, make sure we render a date separator.
+                    add_display_time(second_group, first_msg_container,
+                                     last_msg_container);
                 }
             }
             message_actions.append_groups = new_message_groups;

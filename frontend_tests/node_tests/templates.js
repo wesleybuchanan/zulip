@@ -688,7 +688,7 @@ function render(template_name, args) {
     global.write_test_output("message_edit_history.handlebars", html);
     var edited_message = $(html).find("div.messagebox-content");
     assert.equal(edited_message.text().trim(),
-                "1468132659\n            Let's go to dinner!\n            Edited by Alice");
+                "1468132659\n                Let's go to dinner!\n                Edited by Alice");
 }());
 
 (function message_reaction() {
@@ -871,9 +871,6 @@ function render(template_name, args) {
     var html = '<ul id="stream_filters">';
     html += render('stream_sidebar_row', args);
     html += '</ul>';
-
-    // because it won't mark the template as read otherwise.
-    render('stream_privacy');
 
     global.write_handlebars_output("stream_sidebar_row", html);
 

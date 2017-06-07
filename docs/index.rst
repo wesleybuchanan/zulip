@@ -107,9 +107,10 @@ Contents:
 
    testing
    linters
-   testing-with-node
    testing-with-django
+   testing-with-node
    testing-with-casper
+   travis
    manual-testing
 
 .. _subsystem-documentation:
@@ -137,5 +138,6 @@ Contents:
    client
    logging
    release-checklist
+   api-release-checklist
    README
    user-docs

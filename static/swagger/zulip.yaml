@@ -360,12 +360,15 @@ paths:
         required: true
         type: string
       - name: invite_only
+        in: formData
         type: boolean
         default: false
       - name: announce
+        in: formData
         type: boolean
         default: false
       - name: authorization_errors_fatal
+        in: formData
         type: boolean
         default: true
       security:
@@ -583,7 +586,7 @@ paths:
         - change_one
         - change_later
         - change_all
-        default: "change_one"
+        default: change_one
       - name: content
         in: query
         description: Message's new body.
@@ -755,7 +758,7 @@ definitions:
       never_subscribed:
         type: array
         items:
-          $ref: "#/definitions/stream"
+          $ref: '#/definitions/stream'
       pointer:
         type: integer
         format: int64
@@ -776,7 +779,7 @@ definitions:
       realm_default_streams:
         type: array
         items:
-          $ref: "#/definitions/stream"
+          $ref: '#/definitions/stream'
       realm_domain:
         type: string
       realm_domains:
@@ -799,7 +802,7 @@ definitions:
       realm_users:
         type: array
         items:
-          $ref: "#/definitions/user"
+          $ref: '#/definitions/user'
       realm_waiting_period_threshold:
         type: integer
         format: int64
@@ -808,7 +811,7 @@ definitions:
       streams:
         type: array
         items:
-          $ref: "#/definitions/stream"
+          $ref: '#/definitions/stream'
       twenty_four_hour_time:
         type: boolean
       unsubscribed:
@@ -862,7 +865,7 @@ definitions:
       events:
         type: array
         items:
-          $ref: "#/definitions/event"
+          $ref: '#/definitions/event'
 
   #####
   # definitions used by /register

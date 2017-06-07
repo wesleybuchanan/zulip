@@ -150,7 +150,7 @@ exports.get_keypress_hotkey = function (e) {
 };
 
 exports.processing_text = function () {
-    var selector = 'input:focus,select:focus,textarea:focus,#compose-send-button:focus';
+    var selector = 'input:focus,select:focus,textarea:focus,#compose-send-button:focus,.editable-section:focus';
     return $(selector).length > 0;
 };
 
@@ -548,6 +548,7 @@ exports.process_hotkey = function (e, hotkey) {
             return true;
         case 'narrow_private':
             return do_narrow_action(function (target, opts) {
+                opts = _.defaults({}, opts, {select_first_unread: true});
                 narrow.by('is', 'private', opts);
             });
         case 'query_streams':

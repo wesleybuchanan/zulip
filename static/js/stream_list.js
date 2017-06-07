@@ -121,7 +121,7 @@ exports.build_stream_list = function () {
 
     _.each(stream_groups.dormant_streams, add_sidebar_li);
 
-    $(elems).appendTo(parent);
+    parent.append(elems);
 };
 
 function iterate_to_find(selector, name_to_find, context) {
@@ -137,7 +137,26 @@ function get_filter_li(type, name) {
 }
 
 exports.get_stream_li = function (stream_id) {
-    return $("#stream_sidebar_" + stream_id);
+    var row = exports.stream_sidebar.get_row(stream_id);
+    if (!row) {
+        // Not all streams are in the sidebar, so we don't report
+        // an error here, and it's up for the caller to error if
+        // they expected otherwise.
+        return;
+    }
+
+    var li = row.get_li();
+    if (!li) {
+        blueslip.error('Cannot find li for id ' + stream_id);
+        return;
+    }
+
+    if (li.length > 1) {
+        blueslip.error('stream_li has too many elements for ' + stream_id);
+        return;
+    }
+
+    return li;
 };
 
 function zoom_in() {
@@ -191,6 +210,11 @@ function reset_to_unnarrowed(narrowed_within_same_stream) {
 
 exports.set_in_home_view = function (stream_id, in_home) {
     var li = exports.get_stream_li(stream_id);
+    if (!li) {
+        blueslip.error('passed in bad stream id ' + stream_id);
+        return;
+    }
+
     if (in_home) {
         li.removeClass("out_of_home_view");
     } else {
@@ -256,6 +280,11 @@ exports.create_sidebar_row = function (sub) {
 exports.redraw_stream_privacy = function (stream_name) {
     var sub = stream_data.get_sub(stream_name);
     var li = exports.get_stream_li(sub.stream_id);
+    if (!li) {
+        blueslip.error('passed in bad stream: ' + stream_name);
+        return;
+    }
+
     var div = li.find('.stream-privacy');
     var color = stream_data.get_color(stream_name);
     var dark_background = stream_color.get_color_class(color);
@@ -276,6 +305,12 @@ function set_count(type, name, count) {
 
 function set_stream_unread_count(stream_id, count) {
     var unread_count_elem = exports.get_stream_li(stream_id);
+    if (!unread_count_elem) {
+        // This can happen for legitimate reasons, but we warn
+        // just in case.
+        blueslip.warn('stream id no longer in sidebar: ' + stream_id);
+        return;
+    }
     update_count_in_dom(unread_count_elem, count);
 }
 
@@ -348,6 +383,10 @@ exports.refresh_pinned_or_unpinned_stream = function (sub) {
     // our sight.
     if (sub.pin_to_top) {
         var stream_li = exports.get_stream_li(sub.stream_id);
+        if (!stream_li) {
+            blueslip.error('passed in bad stream id ' + sub.stream_id);
+            return;
+        }
         exports.scroll_to_active_stream(stream_li);
     }
 };
@@ -361,7 +400,7 @@ exports.maybe_activate_stream_item = function (filter) {
         if (stream_id && stream_data.id_is_subscribed(stream_id)) {
             var stream_li = exports.get_stream_li(stream_id);
 
-            if (stream_li.length !== 1) {
+            if (!stream_li) {
                 // It should be the case then when we have a subscribed
                 // stream, there will always be a stream list item
                 // corresponding to that stream in our sidebar.  We have
@@ -386,7 +425,7 @@ function deselect_top_left_corner_items() {
     $("ul.filters li").removeClass('active-filter active-sub-filter');
 }
 
-$(function () {
+exports.initialize = function () {
     // TODO, Eventually topic_list won't be a big singleton,
     // and we can create more component-based click handlers for
     // each stream.
@@ -460,7 +499,7 @@ $(function () {
         e.stopPropagation();
     });
 
-});
+};
 
 function actually_update_streams_for_search() {
     exports.update_streams_sidebar();
