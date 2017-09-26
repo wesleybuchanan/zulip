@@ -16,6 +16,7 @@
 
 #streams_inline_cog,
 #streams_filter_icon,
+#mute_notifications_icon,
 #join_unsub_stream {
     float: right;
     color: #ccc;
@@ -26,6 +27,7 @@
 
 #streams_inline_cog:hover,
 #streams_filter_icon:hover,
+#mute_notifications_icon:hover,
 #join_unsub_stream:hover {
     color: #555;
 }

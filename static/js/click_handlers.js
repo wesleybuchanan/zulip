@@ -337,6 +337,7 @@ $(function () {
     emoji_picker.register_click_handlers();
     stream_popover.register_click_handlers();
     notifications.register_click_handlers();
+    mute_popover.register_click_handlers();
 
     $('body').on('click', '.logout_button', function () {
         $('#logout_form').submit();

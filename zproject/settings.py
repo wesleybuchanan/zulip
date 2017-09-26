@@ -917,6 +917,7 @@ JS_SPECS = {
             'js/gear_menu.js',
             'js/copy_and_paste.js',
             'js/stream_popover.js',
+            'js/mute_popover.js',
             'js/popovers.js',
             'js/overlays.js',
             'js/typeahead_helper.js',

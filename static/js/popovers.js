@@ -567,6 +567,7 @@ exports.hide_all = function () {
     popovers.hide_user_sidebar_popover();
     popovers.hide_userlist_sidebar();
     stream_popover.restore_stream_list_size();
+    mute_popover.hide_mute_popover();
 
     // look through all the popovers that have been added and removed.
     list_of_popovers.forEach(function ($o) {

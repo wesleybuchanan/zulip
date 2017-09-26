@@ -498,7 +498,7 @@ exports.initialize = function () {
         e.preventDefault();
         e.stopPropagation();
     });
-
+   
 };
 
 function actually_update_streams_for_search() {
@@ -573,7 +573,7 @@ function maybe_select_stream(e) {
 }
 
 function toggle_filter_displayed(e) {
-    if (e.target.id === 'streams_inline_cog') {
+    if ((e.target.id === 'streams_inline_cog') || (e.target.id === 'mute_notifications_icon')){
         return;
     }
     if ($('#stream-filters-container .input-append.notdisplayed').length === 0) {

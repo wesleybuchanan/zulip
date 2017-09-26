@@ -431,6 +431,10 @@ function message_is_notifiable(message) {
     if ((message.type === "stream") &&
         muting.is_topic_muted(message.stream, message.subject)) {
         return false;
+    } 
+
+    if (mute_popover.notifications_muted() == true) {
+        return false;
     }
 
     // Everything else is on the table; next filter based on notification
