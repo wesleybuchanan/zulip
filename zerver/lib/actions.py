@@ -2299,6 +2299,20 @@ def do_change_enable_persistent_desktop_notifications(user_profile, enable_persi
         log_event(event)
     send_event(event, [user_profile.id])
 
+
+def do_change_unmute_time(user_profile, unmuteTime, log=True):
+    # type: (UserProfile, DateTime, bool) -> None
+    user_profile.mute_notifications_until = unmuteTime
+    user_profile.save(update_fields=["mute_notifications_until"])
+    
+    event = {'type': 'set_unmute_time',
+             'user': user_profile.email,
+             'notification_name': 'mute_notifications_until',
+             'setting': user_profile.mute_notifications_until}
+    if log:
+        log_event(event)
+    send_event(event, [user_profile.id])
+
 def do_change_autoscroll_forever(user_profile, autoscroll_forever, log=True):
     # type: (UserProfile, bool, bool) -> None
     user_profile.autoscroll_forever = autoscroll_forever

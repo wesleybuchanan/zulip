@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.http import HttpResponseRedirect, HttpResponse, HttpRequest
 from django.shortcuts import redirect, render
-from django.utils import translation
+from django.utils import translation, timezone
 from django.utils.cache import patch_cache_control
 from six.moves import zip_longest, zip, range
 
@@ -212,6 +212,7 @@ def home_real(request):
         furthest_read_time    = sent_time_in_epoch_seconds(latest_read),
         has_mobile_devices    = num_push_devices_for_user(user_profile) > 0,
         persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
+        notifications_muted   = timezone.now() >= user_profile.mute_notifications_until,
     )
 
     undesired_register_ret_fields = [

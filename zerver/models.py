@@ -585,6 +585,8 @@ class UserProfile(ModelReprMixin, AbstractBaseUser, PermissionsMixin):
 
     enable_persistent_desktop_notifications = models.BooleanField(default=True) # type: bool
 
+    mute_notifications_until = models.DateTimeField(default=timezone_now, null=True) 
+
     # Old notification field superseded by existence of stream notification
     # settings.
     default_desktop_notifications = models.BooleanField(default=True) # type: bool

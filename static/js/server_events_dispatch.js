@@ -339,6 +339,10 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
         ui.remove_message(msg_id);
         break;
 
+    case 'set_unmute_time':
+        console.log('setting unmute time');
+        page_params.mute_notifications_until = event.setting;
+
     }
 };
 

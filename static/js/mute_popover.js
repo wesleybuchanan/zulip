@@ -7,30 +7,45 @@ var exports = {};
 var current_stream_sidebar_elem;
 
 exports.notifications_muted = function () {
-    check_mute_time();
-    return $('#mute_notifications_icon').prop('checked');
+    return check_mute_time();
 }
 
 function check_mute_time(){
     // if an unmute hasn't been defined then do nothing
-    if (exports.unmuteTime == (undefined || null))
+    if (page_params.mute_notifications_until == (undefined || null))
        return;
 
     var now = new Date();
+    var unmuteTime = new Date(page_params.mute_notifications_until);
     //console.log("current time = " + now);
     
-    var mute_checkbox = $("#mute_notifications_icon");
     //console.log("unmute time = " + exports.unmuteTime);
-    if (now.getTime() >= exports.unmuteTime.getTime()){
+    if (now.getTime() >= unmuteTime.getTime()){
         update_mute_setting('');
+        return false;
     }
+    return true;
+}
+
+function send_mute_notification_ajax() {
+    channel.post({
+        url: '/json/users/me/mute_time',
+        data: {
+	    user_profile: page_params.user_id,
+            unmuteTime: page_params.mute_notifications_until,
+        },
+        success: function () {},
+        error: function (xhr) {
+            blueslip.warn("Failed to mute notification event: " + xhr.responseText);
+        },
+    });
 }
 
 function update_mute_setting(value) {
     var mute_checkbox = $("#mute_notifications_icon");
     mute_checkbox.prop('checked', value != '');
 
-    exports.unmuteTime = new Date();
+    var unmuteTime = new Date();
 
     if (value == '') {
         //console.log("Unchecking Icon");
@@ -46,22 +61,22 @@ function update_mute_setting(value) {
                 minutesToAdd = 5;
             break;
             case '2h':
-                minutesToAdd = 120;
+                minutesToAdd = 10;
             break;
             case '4h':
-                minutesToAdd = 240;
+                minutesToAdd = 20;
             break;
         }
 
-        exports.unmuteTime.setMinutes(exports.unmuteTime.getMinutes() + minutesToAdd);
+        unmuteTime.setMinutes(unmuteTime.getMinutes() + minutesToAdd);
         //console.log("Checking Icon");
         mute_checkbox.removeClass("icon-vector-bell fa fa-bell-slash");
         mute_checkbox.addClass("fa fa-bell-slash-o");
 
         window.setTimeout(check_mute_time, minutesToAdd * 60000 + 1000);
     }
-    //user_profile.mute_nofications_until = unmuteTime;
-
+    page_params.mute_notifications_until = unmuteTime.toISOString();
+    send_mute_notification_ajax();
     exports.hide_mute_popover();
 }
 
@@ -157,6 +172,26 @@ exports.register_mute_handlers = function () {
         //console.log('4 Hours Clicked');
  	update_mute_setting('4h');
     });
+};
+
+exports.initialize = function () {
+    console.log("initializing mute popover"); 
+    var mute_checkbox = $("#mute_notifications_icon");
+
+    if (check_mute_time() == true)
+    {
+        mute_checkbox.removeClass("icon-vector-bell fa fa-bell-slash");
+        mute_checkbox.addClass("fa fa-bell-slash-o");
+        var now = new Date();
+        var unmuteTime = new Date(page_params.mute_notifications_until);
+        var diff = unmuteTime.getTime() - now.getTime();
+        window.setTimeout(check_mute_time, diff + 1000);
+    }
+    else
+    {
+        mute_checkbox.removeClass("fa fa-bell-slash fa-bell-slash-o");
+        mute_checkbox.addClass("icon-vector-bell");
+    }
 };
 
 return exports;
