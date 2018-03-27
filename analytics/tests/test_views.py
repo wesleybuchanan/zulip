@@ -1,11 +1,8 @@
-from __future__ import absolute_import
-
 from django.utils.timezone import get_fixed_timezone, utc
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.timestamp import ceiling_to_hour, ceiling_to_day, \
     datetime_to_timestamp
-from zerver.models import Realm, UserProfile, Client, get_realm, \
-    get_user_profile_by_email
+from zerver.models import Realm, UserProfile, Client, get_realm
 
 from analytics.lib.counts import CountStat, COUNT_STATS
 from analytics.lib.time_utils import time_range
@@ -18,24 +15,23 @@ from datetime import datetime, timedelta
 import mock
 import ujson
 
-from six.moves import range
 from typing import List, Dict, Optional
 
 class TestStatsEndpoint(ZulipTestCase):
     def test_stats(self):
         # type: () -> None
-        self.user = get_user_profile_by_email('hamlet@zulip.com')
+        self.user = self.example_user('hamlet')
         self.login(self.user.email)
         result = self.client_get('/stats')
         self.assertEqual(result.status_code, 200)
         # Check that we get something back
-        self.assert_in_response("Zulip Analytics for", result)
+        self.assert_in_response("Zulip analytics for", result)
 
 class TestGetChartData(ZulipTestCase):
     def setUp(self):
         # type: () -> None
         self.realm = get_realm('zulip')
-        self.user = get_user_profile_by_email('hamlet@zulip.com')
+        self.user = self.example_user('hamlet')
         self.login(self.user.email)
         self.end_times_hour = [ceiling_to_hour(self.realm.date_created) + timedelta(hours=i)
                                for i in range(4)]
@@ -72,7 +68,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'number_of_humans'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data, {
             'msg': '',
             'end_times': [datetime_to_timestamp(dt) for dt in self.end_times_day],
@@ -89,7 +85,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'messages_sent_over_time'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data, {
             'msg': '',
             'end_times': [datetime_to_timestamp(dt) for dt in self.end_times_hour],
@@ -108,7 +104,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'messages_sent_by_message_type'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data, {
             'msg': '',
             'end_times': [datetime_to_timestamp(dt) for dt in self.end_times_day],
@@ -133,7 +129,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'messages_sent_by_client'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data, {
             'msg': '',
             'end_times': [datetime_to_timestamp(dt) for dt in self.end_times_day],
@@ -152,7 +148,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'number_of_humans'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data['realm'], {'human': [0]})
         self.assertFalse('user' in data)
 
@@ -161,7 +157,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'messages_sent_over_time'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data['realm'], {'human': [0], 'bot': [0]})
         self.assertEqual(data['user'], {'human': [0], 'bot': [0]})
 
@@ -170,7 +166,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'messages_sent_by_message_type'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data['realm'], {
             'Public streams': [0], 'Private streams': [0], 'Private messages': [0], 'Group private messages': [0]})
         self.assertEqual(data['user'], {
@@ -181,7 +177,7 @@ class TestGetChartData(ZulipTestCase):
         result = self.client_get('/json/analytics/chart_data',
                                  {'chart_name': 'messages_sent_by_client'})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data['realm'], {})
         self.assertEqual(data['user'], {})
 
@@ -197,7 +193,7 @@ class TestGetChartData(ZulipTestCase):
                                   'start': end_time_timestamps[1],
                                   'end': end_time_timestamps[2]})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data['end_times'], end_time_timestamps[1:3])
         self.assertEqual(data['realm'], {'human': [0, 100]})
 
@@ -217,7 +213,7 @@ class TestGetChartData(ZulipTestCase):
                                  {'chart_name': 'number_of_humans',
                                   'min_length': 2})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         self.assertEqual(data['end_times'], [datetime_to_timestamp(dt) for dt in self.end_times_day])
         self.assertEqual(data['realm'], {'human': self.data(100)})
         # test min_length larger than filled data
@@ -225,7 +221,7 @@ class TestGetChartData(ZulipTestCase):
                                  {'chart_name': 'number_of_humans',
                                   'min_length': 5})
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
+        data = result.json()
         end_times = [ceiling_to_day(self.realm.date_created) + timedelta(days=i) for i in range(-1, 4)]
         self.assertEqual(data['end_times'], [datetime_to_timestamp(dt) for dt in end_times])
         self.assertEqual(data['realm'], {'human': [0]+self.data(100)})
@@ -277,12 +273,10 @@ class TestTimeRange(ZulipTestCase):
         # type: () -> None
         HOUR = timedelta(hours=1)
         DAY = timedelta(days=1)
-        TZINFO = get_fixed_timezone(-100)  # 100 minutes west of UTC
 
-        # Using 22:59 so that converting to UTC and applying floor_to_{hour,day} do not commute
-        a_time = datetime(2016, 3, 14, 22, 59).replace(tzinfo=TZINFO)
-        floor_hour = datetime(2016, 3, 14, 22).replace(tzinfo=TZINFO)
-        floor_day = datetime(2016, 3, 14).replace(tzinfo=TZINFO)
+        a_time = datetime(2016, 3, 14, 22, 59).replace(tzinfo=utc)
+        floor_hour = datetime(2016, 3, 14, 22).replace(tzinfo=utc)
+        floor_day = datetime(2016, 3, 14).replace(tzinfo=utc)
 
         # test start == end
         self.assertEqual(time_range(a_time, a_time, CountStat.HOUR, None), [])
@@ -309,6 +303,7 @@ class TestMapArrays(ZulipTestCase):
              'desktop app 3.0': [21, 22, 23],
              'website': [1, 2, 3],
              'ZulipiOS': [1, 2, 3],
+             'ZulipElectron': [2, 5, 7],
              'ZulipMobile': [1, 5, 7],
              'ZulipPython': [1, 2, 3],
              'API: Python': [1, 2, 3],
@@ -319,9 +314,10 @@ class TestMapArrays(ZulipTestCase):
         self.assertEqual(result,
                          {'Old desktop app': [32, 36, 39],
                           'Old iOS app': [1, 2, 3],
-                          'New iOS app': [1, 5, 7],
+                          'Desktop app': [2, 5, 7],
+                          'Mobile app': [1, 5, 7],
                           'Website': [1, 2, 3],
                           'Python API': [2, 4, 6],
                           'SomethingRandom': [4, 5, 6],
                           'GitHub webhook': [7, 7, 9],
-                          'Android app': [64, 63, 65]})
+                          'Old Android app': [64, 63, 65]})

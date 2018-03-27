@@ -1,8 +1,6 @@
-from __future__ import absolute_import
-from __future__ import print_function
 from contextlib import contextmanager
 from typing import (cast, Any, Callable, Dict, Generator, Iterable, Iterator, List, Mapping,
-                    Optional, Set, Sized, Tuple, Union, IO)
+                    Optional, Set, Sized, Tuple, Union, IO, Text)
 
 from django.core import signing
 from django.core.urlresolvers import LocaleRegexURLResolver
@@ -34,7 +32,6 @@ from zerver.models import (
     get_recipient,
     get_stream,
     get_user,
-    get_user_profile_by_email,
     Client,
     Message,
     Realm,
@@ -58,11 +55,9 @@ import ujson
 import unittest
 from six.moves import urllib
 from six import binary_type
-from typing import Text
 from zerver.lib.str_utils import NonBinaryStr
 
 from contextlib import contextmanager
-import six
 import fakeldap
 import ldap
 
@@ -80,8 +75,17 @@ class MockLDAP(fakeldap.MockLDAP):
         pass
 
 @contextmanager
+def stub_event_queue_user_events(event_queue_return, user_events_return):
+    # type: (Any, Any) -> Iterator[None]
+    with mock.patch('zerver.lib.events.request_event_queue',
+                    return_value=event_queue_return):
+        with mock.patch('zerver.lib.events.get_user_events',
+                        return_value=user_events_return):
+            yield
+
+@contextmanager
 def simulated_queue_client(client):
-    # type: (type) -> Iterator[None]
+    # type: (Callable) -> Iterator[None]
     real_SimpleQueueClient = queue_processors.SimpleQueueClient
     queue_processors.SimpleQueueClient = client  # type: ignore # https://github.com/JukkaL/mypy/issues/1152
     yield
@@ -173,7 +177,7 @@ def stdout_suppressed():
     """Redirect stdout to /dev/null."""
 
     with open(os.devnull, 'a') as devnull:
-        stdout, sys.stdout = sys.stdout, devnull  # type: ignore
+        stdout, sys.stdout = sys.stdout, devnull
         yield stdout
         sys.stdout = stdout
 
@@ -183,7 +187,7 @@ def get_test_image_file(filename):
     return open(os.path.join(test_avatar_dir, filename), 'rb')
 
 def avatar_disk_path(user_profile, medium=False):
-    # type: (UserProfile, bool) -> str
+    # type: (UserProfile, bool) -> Text
     avatar_url_path = avatar_url(user_profile, medium)
     avatar_disk_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars",
                                     avatar_url_path.split("/")[-2],
@@ -198,7 +202,7 @@ def make_client(name):
 def find_key_by_email(address):
     # type: (Text) -> Optional[Text]
     from django.core.mail import outbox
-    key_regex = re.compile("accounts/do_confirm/([a-f0-9]{40})>")
+    key_regex = re.compile("accounts/do_confirm/([a-z0-9]{24})>")
     for message in reversed(outbox):
         if address in message.to:
             return key_regex.search(message.body).groups()[0]
@@ -264,14 +268,24 @@ class POSTRequestMock(object):
         self._tornado_handler = DummyHandler()
         self._log_data = {}  # type: Dict[str, Any]
         self.META = {'PATH_INFO': 'test'}
+        self.path = ''
 
 class HostRequestMock(object):
     """A mock request object where get_host() works.  Useful for testing
     routes that use Zulip's subdomains feature"""
 
-    def __init__(self, host=settings.EXTERNAL_HOST):
-        # type: (Text) -> None
+    def __init__(self, user_profile=None, host=settings.EXTERNAL_HOST):
+        # type: (UserProfile, Text) -> None
         self.host = host
+        self.GET = {}  # type: Dict[str, Any]
+        self.POST = {}  # type: Dict[str, Any]
+        self.META = {'PATH_INFO': 'test'}
+        self.path = ''
+        self.user = user_profile
+        self.method = ''
+        self.body = ''
+        self.content_type = ''
+        self._email = ''
 
     def get_host(self):
         # type: () -> Text
@@ -396,6 +410,7 @@ def write_instrumentation_reports(full_suite):
             # static content URLs, since the content they point to may
             # or may not exist.
             'coverage/(?P<path>.*)',
+            'node-coverage/(?P<path>.*)',
             'docs/(?P<path>.*)',
         ])
 
@@ -442,6 +457,7 @@ def get_all_templates():
                and not n.startswith('.') \
                and not n.startswith('__init__') \
                and not n.endswith('.md') \
+               and not n.endswith('.source.html') \
                and isfile(p)
 
     def process(template_dir, dirname, fnames):

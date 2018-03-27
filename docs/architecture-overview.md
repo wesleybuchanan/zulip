@@ -12,24 +12,22 @@ server-side code and the web client, as well as Python API bindings
 and most of our integrations with other services and applications (see
 [the directory structure guide](directory-structure.html)).
 
-We maintain several separate repositories for integrations and other
-glue code: a [Hubot adapter](https://github.com/zulip/hubot-zulip);
-integrations with
-[Phabricator](https://github.com/zulip/phabricator-to-zulip),
+[Zulip Mobile](https://github.com/zulip/zulip-mobile) is the official
+mobile Zulip client supporting both iOS and Android, written in
+JavaScript with React Native, and
+[Zulip Desktop](https://github.com/zulip/zulip-electron) is the
+official Zulip desktop client for macOS, Linux, and Windows.
+
+We also maintain several separate repositories for integrations and
+other glue code: a
+[Hubot adapter](https://github.com/zulip/hubot-zulip); integrations
+with [Phabricator](https://github.com/zulip/phabricator-to-zulip),
 [Jenkins](https://github.com/zulip/zulip-jenkins-plugin),
 [Puppet](https://github.com/matthewbarr/puppet-zulip),
 [Redmine](https://github.com/zulip/zulip-redmine-plugin), and
-[Trello](https://github.com/zulip/trello-to-zulip); [node.js API
-bindings](https://github.com/zulip/zulip-node); and our [full-text
-search PostgreSQL extension](https://github.com/zulip/tsearch_extras).
-
-Our mobile clients are separate code repositories:
-[Android](https://github.com/zulip/zulip-android) and
-[React Native iOS app](https://github.com/zulip/zulip-mobile).  Our
-[legacy desktop application (implemented in QT/WebKit)](https://github.com/zulip/zulip-desktop)
-and our new, alpha
-[cross-platform desktop app (implemented in Electron)](https://github.com/zulip/zulip-electron)
-are also separate repositories.
+[Trello](https://github.com/zulip/trello-to-zulip);
+[node.js API bindings](https://github.com/zulip/zulip-node); and our
+[full-text search PostgreSQL extension](https://github.com/zulip/tsearch_extras).
 
 We use [Transifex](https://www.transifex.com/zulip/zulip/) to do
 translations.
@@ -118,6 +116,24 @@ There is detailed documentation on the
 [real-time push and event queue system](events-system.html); most of
 the code is in `zerver/tornado`.
 
+#### HTML templates, JavaScript, etc.
+
+Zulip's HTML is primarily implemented using two types of HTML
+templates: backend templates (powered by the [Jinja2][] template
+engine used for logged-out ("portico") pages and the webapp's base
+content) and frontend templates (powered by [Handlebars][]) used for
+live-rendering HTML from JavaScript for things like the main message
+feed.
+
+For more details on the frontend, see our documentation on
+[translation](translating.html),
+[templates](html-templates.html),
+[directory structure](directory-structure.html), and
+[the static asset pipeline](front-end-build-process.html).
+
+[Jinja2]: http://jinja.pocoo.org/
+[Handlebars]: http://handlebarsjs.com/
+
 ### nginx
 
 nginx is the front-end web server to all Zulip traffic; it serves static
@@ -147,6 +163,10 @@ from outside.
     `puppet/zulip/files/nginx/zulip-include-frontend/upstreams`). We use
     `zproject/wsgi.py` to implement uWSGI here (see
     `django.core.wsgi`).
+- By default (i.e. if `LOCAL_UPLOADS_DIR` is set), nginx will serve
+  user-uploaded content like avatars, custom emoji, and uploaded
+  files.  However, one can configure Zulip to store these in a cloud
+  storage service like Amazon S3 instead.
 
 ### Supervisor
 
@@ -175,7 +195,7 @@ Redis is used for a few very short-term data stores, such as in the
 basis of `zerver/lib/rate_limiter.py`, a per-user rate limiting scheme
 [example](http://blog.domaintools.com/2013/04/rate-limiting-with-redis/)),
 and the [email-to-Zulip
-integration](https://zulipchat.com/integrations/#email).
+integration](https://zulipchat.com/integrations/doc/email).
 
 Redis is configured in `zulip/puppet/zulip/files/redis` and it's a
 pretty standard configuration except for the last line, which turns off

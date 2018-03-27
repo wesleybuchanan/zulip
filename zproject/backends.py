@@ -1,32 +1,31 @@
-from __future__ import absolute_import
-
 import logging
 from typing import Any, Dict, List, Set, Tuple, Optional, Text
 
+from apiclient.sample_tools import client as googleapiclient
+from django_auth_ldap.backend import LDAPBackend, _LDAPUser
+import django.contrib.auth
+from django.contrib.auth import authenticate
 from django.contrib.auth.backends import RemoteUserBackend
 from django.conf import settings
+from django.core.mail.backends.base import BaseEmailBackend
+from django.core.mail import EmailMultiAlternatives
 from django.http import HttpResponse
-import django.contrib.auth
-
-from django_auth_ldap.backend import LDAPBackend, _LDAPUser
-from zerver.lib.actions import do_create_user
-
-from zerver.models import UserProfile, Realm, get_user_profile_by_id, \
-    get_user_profile_by_email, remote_user_to_email, email_to_username, \
-    get_realm, get_realm_by_email_domain
-
-from apiclient.sample_tools import client as googleapiclient
+from django.template import loader
 from oauth2client.crypt import AppIdentityError
 from social_core.backends.github import GithubOAuth2, GithubOrganizationOAuth2, \
     GithubTeamOAuth2
 from social_core.exceptions import AuthFailed, SocialAuthBaseException
-from django.contrib.auth import authenticate
-from zerver.lib.users import check_full_name
-from zerver.lib.request import JsonableError
-from zerver.lib.utils import check_subdomain, get_subdomain
-
 from social_django.models import DjangoStorage
 from social_django.strategy import DjangoStrategy
+
+from zerver.lib.actions import do_create_user
+from zerver.lib.onboarding import send_initial_pms
+from zerver.lib.request import JsonableError
+from zerver.lib.subdomains import check_subdomain, get_subdomain
+from zerver.lib.users import check_full_name
+from zerver.models import UserProfile, Realm, get_user_profile_by_id, \
+    get_user_profile_by_email, remote_user_to_email, email_to_username, \
+    get_realm
 
 def pad_method_dict(method_dict):
     # type: (Dict[Text, bool]) -> Dict[Text, bool]
@@ -82,6 +81,13 @@ def any_oauth_backend_enabled(realm=None):
     """Used by the login page process to determine whether to show the
     'OR' for login with Google"""
     return auth_enabled_helper([u'GitHub', u'Google'], realm)
+
+def require_email_format_usernames(realm=None):
+    # type: (Optional[Realm]) -> bool
+    if ldap_auth_enabled(realm):
+        if settings.LDAP_EMAIL_ATTR or settings.LDAP_APPEND_DOMAIN:
+            return False
+    return True
 
 def common_get_active_user_by_email(email, return_data=None):
     # type: (Text, Optional[Dict[str, Any]]) -> Optional[UserProfile]
@@ -140,11 +146,8 @@ class SocialAuthMixin(ZulipAuthMixin):
         if user is None:
             user = {}
 
-        if return_data is None:
-            return_data = {}
-
-        if response is None:
-            response = {}
+        assert return_data is not None
+        assert response is not None
 
         return self._common_authenticate(self,
                                          realm_subdomain=realm_subdomain,
@@ -223,10 +226,12 @@ class SocialAuthMixin(ZulipAuthMixin):
         is_signup = strategy.session_get('is_signup') == '1'
 
         subdomain = strategy.session_get('subdomain')
-        if not subdomain:
+        mobile_flow_otp = strategy.session_get('mobile_flow_otp')
+        if not subdomain or mobile_flow_otp is not None:
             return login_or_register_remote_user(request, email_address,
                                                  user_profile, full_name,
                                                  invalid_subdomain=bool(invalid_subdomain),
+                                                 mobile_flow_otp=mobile_flow_otp,
                                                  is_signup=is_signup)
         try:
             realm = Realm.objects.get(string_id=subdomain)
@@ -243,12 +248,12 @@ class SocialAuthMixin(ZulipAuthMixin):
         to the login page.
         """
         try:
-            # Call the auth_complete method of BaseOAuth2 is Python Social Auth
-            return super(SocialAuthMixin, self).auth_complete(*args, **kwargs)  # type: ignore
+            # Call the auth_complete method of social_core.backends.oauth.BaseOAuth2
+            return super(SocialAuthMixin, self).auth_complete(*args, **kwargs)  # type: ignore # monkey-patching
         except AuthFailed:
             return None
         except SocialAuthBaseException as e:
-            logging.exception(e)
+            logging.warning(str(e))
             return None
 
 class ZulipDummyBackend(ZulipAuthMixin):
@@ -369,7 +374,10 @@ class ZulipRemoteUserBackend(RemoteUserBackend):
             return None
         return user_profile
 
-class ZulipLDAPException(Exception):
+class ZulipLDAPException(_LDAPUser.AuthenticationFailed):
+    pass
+
+class ZulipLDAPConfigurationError(Exception):
     pass
 
 class ZulipLDAPAuthBackendBase(ZulipAuthMixin, LDAPBackend):
@@ -411,28 +419,36 @@ class ZulipLDAPAuthBackendBase(ZulipAuthMixin, LDAPBackend):
         return username
 
 class ZulipLDAPAuthBackend(ZulipLDAPAuthBackendBase):
+    REALM_IS_NONE_ERROR = 1
+
     def authenticate(self, username, password, realm_subdomain=None, return_data=None):
         # type: (Text, str, Optional[Text], Optional[Dict[str, Any]]) -> Optional[UserProfile]
         try:
-            if settings.REALMS_HAVE_SUBDOMAINS:
-                self._realm = get_realm(realm_subdomain)
-            else:
-                self._realm = get_realm_by_email_domain(username)
+            self._realm = get_realm(realm_subdomain)
             username = self.django_to_ldap_username(username)
-            user_profile = ZulipLDAPAuthBackendBase.authenticate(self, username, password)
+            user_profile = ZulipLDAPAuthBackendBase.authenticate(self,
+                                                                 username=username,
+                                                                 password=password)
             if user_profile is None:
                 return None
             if not check_subdomain(realm_subdomain, user_profile.realm.subdomain):
                 return None
             return user_profile
         except Realm.DoesNotExist:
-            return None
+            return None  # nocoverage # TODO: this may no longer be possible
         except ZulipLDAPException:
-            return None
+            return None  # nocoverage # TODO: this may no longer be possible
 
     def get_or_create_user(self, username, ldap_user):
         # type: (str, _LDAPUser) -> Tuple[UserProfile, bool]
         try:
+            if settings.LDAP_EMAIL_ATTR is not None:
+                # Get email from ldap attributes.
+                if settings.LDAP_EMAIL_ATTR not in ldap_user.attrs:
+                    raise ZulipLDAPException("LDAP user doesn't have the needed %s attribute" % (settings.LDAP_EMAIL_ATTR,))
+
+                username = ldap_user.attrs[settings.LDAP_EMAIL_ATTR][0]
+
             user_profile = get_user_profile_by_email(username)
             if not user_profile.is_active or user_profile.realm.deactivated:
                 raise ZulipLDAPException("Realm has been deactivated")
@@ -440,6 +456,8 @@ class ZulipLDAPAuthBackend(ZulipLDAPAuthBackendBase):
                 raise ZulipLDAPException("LDAP Authentication is not enabled")
             return user_profile, False
         except UserProfile.DoesNotExist:
+            if self._realm is None:
+                raise ZulipLDAPConfigurationError("Realm is None", self.REALM_IS_NONE_ERROR)
             # No need to check for an inactive user since they don't exist yet
             if self._realm.deactivated:
                 raise ZulipLDAPException("Realm has been deactivated")
@@ -449,12 +467,14 @@ class ZulipLDAPAuthBackend(ZulipLDAPAuthBackendBase):
             try:
                 full_name = check_full_name(full_name)
             except JsonableError as e:
-                raise ZulipLDAPException(e.error)
+                raise ZulipLDAPException(e.msg)
             if "short_name" in settings.AUTH_LDAP_USER_ATTR_MAP:
                 short_name_attr = settings.AUTH_LDAP_USER_ATTR_MAP["short_name"]
                 short_name = ldap_user.attrs[short_name_attr][0]
 
             user_profile = do_create_user(username, None, self._realm, full_name, short_name)
+            send_initial_pms(user_profile)
+
             return user_profile, True
 
 # Just like ZulipLDAPAuthBackend, but doesn't let you log in.
@@ -482,7 +502,7 @@ class GitHubAuthBackend(SocialAuthMixin, GithubOAuth2):
         # type: (*Any, **Any) -> Optional[Text]
         try:
             return kwargs['response']['email']
-        except KeyError:
+        except KeyError:  # nocoverage # TODO: investigate
             return None
 
     def get_full_name(self, *args, **kwargs):
@@ -557,3 +577,40 @@ AUTH_BACKEND_NAME_MAP = {
     u'LDAP': ZulipLDAPAuthBackend,
     u'RemoteUser': ZulipRemoteUserBackend,
 }  # type: Dict[Text, Any]
+
+class EmailLogBackEnd(BaseEmailBackend):
+    def log_email(self, email):
+        # type: (EmailMultiAlternatives) -> None
+        """Used in development to record sent emails in a nice HTML log"""
+        html_message = 'Missing HTML message'
+        if len(email.alternatives) > 0:
+            html_message = email.alternatives[0][0]
+
+        context = {
+            'subject': email.subject,
+            'from_email': email.from_email,
+            'recipients': email.to,
+            'body': email.body,
+            'html_message': html_message
+        }
+
+        new_email = loader.render_to_string('zerver/email.html', context)
+
+        # Read in the pre-existing log, so that we can add the new entry
+        # at the top.
+        try:
+            with open(settings.EMAIL_CONTENT_LOG_PATH, "r") as f:
+                previous_emails = f.read()
+        except FileNotFoundError:
+            previous_emails = ""
+
+        with open(settings.EMAIL_CONTENT_LOG_PATH, "w+") as f:
+            f.write(new_email + previous_emails)
+
+    def send_messages(self, email_messages):
+        # type: (List[EmailMultiAlternatives]) -> int
+        for email in email_messages:
+            self.log_email(email)
+            email_log_url = settings.ROOT_DOMAIN_URI + "/emails"
+            print("You can access all the emails sent in development environment by visiting ", email_log_url)
+        return len(email_messages)

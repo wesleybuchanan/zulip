@@ -39,7 +39,7 @@ function message_hover(message_row) {
         return;
     }
 
-    // But the message edit hover icon is determined by whether the message is still editablex
+    // But the message edit hover icon is determined by whether the message is still editable
     if ((message_edit.get_editability(message) === message_edit.editability_types.FULL) &&
         !message.status_message) {
         message_row.find(".edit_content").html('<i class="icon-vector-pencil edit_content_button"></i>');
@@ -54,11 +54,11 @@ $(function () {
         // scroll handler, but when we're at the top or bottom of the
         // page, the pointer may still need to move.
 
-        if (delta > 0) {
+        if (delta < 0) {
             if (message_viewport.at_top()) {
                 navigate.up();
             }
-        } else if (delta < 0) {
+        } else if (delta > 0) {
             if (message_viewport.at_bottom()) {
                 navigate.down();
             }
@@ -67,7 +67,8 @@ $(function () {
         message_viewport.last_movement_direction = delta;
     });
 
-    message_viewport.message_pane.mousewheel(function (e, delta) {
+    message_viewport.message_pane.on('wheel', function (e) {
+        var delta = e.originalEvent.deltaY;
         if (!overlays.is_active()) {
             // In the message view, we use a throttled mousewheel handler.
             throttled_mousewheelhandler(e, delta);
@@ -83,23 +84,24 @@ $(function () {
     // propagation in all cases.  Also, ignore the event if the
     // element is already at the top or bottom.  Otherwise we get a
     // new scroll event on the parent (?).
-    $('.modal-body, .scrolling_list, input, textarea').mousewheel(function (e, delta) {
+    $('.modal-body, .scrolling_list, input, textarea').on('wheel', function (e) {
         var self = $(this);
         var scroll = self.scrollTop();
+        var delta = e.originalEvent.deltaY;
 
         // The -1 fudge factor is important here due to rounding errors.  Better
         // to err on the side of not scrolling.
         var max_scroll = this.scrollHeight - self.innerHeight() - 1;
 
         e.stopPropagation();
-        if (   ((delta > 0) && (scroll <= 0))
-            || ((delta < 0) && (scroll >= max_scroll))) {
+        if (((delta < 0) && (scroll <= 0)) ||
+            ((delta > 0) && (scroll >= max_scroll))) {
             e.preventDefault();
         }
     });
 
     // Ignore wheel events in the compose area which weren't already handled above.
-    $('#compose').mousewheel(function (e) {
+    $('#compose').on('wheel', function (e) {
         e.stopPropagation();
         e.preventDefault();
     });
@@ -111,6 +113,10 @@ $(function () {
 
     if (!page_params.left_side_userlist) {
         $("#navbar-buttons").addClass("right-userlist");
+    }
+
+    if (page_params.high_contrast_mode) {
+        $("body").addClass("high-contrast");
     }
 
     $("#main_div").on("mouseover", ".message_row", function () {
@@ -241,9 +247,13 @@ $(function () {
 
     // initialize other stuff
     reload.initialize();
+    server_events.initialize();
     people.initialize();
+    unread.initialize();
     bot_data.initialize(); // Must happen after people.initialize()
-    markdown.initialize();
+    message_fetch.initialize();
+    emoji.initialize();
+    markdown.initialize(); // Must happen after emoji.initialize()
     composebox_typeahead.initialize();
     search.initialize();
     tutorial.initialize();
@@ -254,11 +264,16 @@ $(function () {
     pointer.initialize();
     unread_ui.initialize();
     activity.initialize();
-    emoji.initialize();
-    hotspots.initialize();
-    reactions.initialize();
+    emoji_picker.initialize();
     compose_fade.initialize();
+    pm_list.initialize();
     stream_list.initialize();
+    drafts.initialize();
+    sent_messages.initialize();
+    compose.initialize();
+    hotspots.initialize();
+    ui.initialize();
+    desktop_notifications_panel.initialize();
 });
 
 

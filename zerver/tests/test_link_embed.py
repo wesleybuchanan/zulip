@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
 import mock
 import ujson
@@ -306,3 +304,4 @@ class PreviewTestCase(ZulipTestCase):
         # type: () -> None
         with self.settings(INLINE_URL_EMBED_PREVIEW=True, TEST_SUITE=False, CACHES=TEST_CACHES):
             self.assertIsNone(get_link_embed_data('com.notvalidlink'))
+            self.assertIsNone(get_link_embed_data(u'μένει.com.notvalidlink'))

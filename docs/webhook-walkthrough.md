@@ -58,9 +58,8 @@ python file, `zerver/webhooks/mywebhook/view.py`.
 The Hello World integration is in `zerver/webhooks/helloworld/view.py`:
 
 ```
-from __future__ import absolute_import
 from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
 from zerver.lib.validator import check_dict, check_string
@@ -78,24 +77,19 @@ def api_helloworld_webhook(request, user_profile,
                            topic=REQ(default='Hello World')):
     # type: (HttpRequest, UserProfile, Dict[str, Iterable[Dict[str, Any]]], Text, Optional[Text]) -> HttpResponse
 
-  # construct the body of the message
-  body = 'Hello! I am happy to be here! :smile:'
+    # construct the body of the message
+    body = 'Hello! I am happy to be here! :smile:'
 
-  # try to add the Wikipedia article of the day
-  # return appropriate error if not successful
-  try:
-      body_template = '\nThe Wikipedia featured article for today is **[{featured_title}]({featured_url})**'
-      body += body_template.format(**payload)
-  except KeyError as e:
-      return json_error(_("Missing key {} in JSON").format(str(e)))
+    # try to add the Wikipedia article of the day
+    body_template = '\nThe Wikipedia featured article for today is **[{featured_title}]({featured_url})**'
+    body += body_template.format(**payload)
 
-  # send the message
-  check_send_message(user_profile, request.client, 'stream',
-                     [stream], topic, body)
+    # send the message
+    check_send_stream_message(user_profile, request.client,
+                              stream, topic, body)
 
-  # return json result
-  return json_success()
-
+    # return json result
+    return json_success()
 ```
 
 The above code imports the required functions and defines the main webhook
@@ -137,12 +131,13 @@ functions.
 
 In the body of the function we define the body of the message as `Hello! I am
 happy to be here! :smile:`. The `:smile:` indicates an emoji. Then we append a
-link to the Wikipedia article of the day as provided by the json payload. If
-the json payload does not include data for `featured_title` and `featured_url`
-we catch a `KeyError` and use `json_error` to return the appropriate
-information: a 400 http status code with relevant details.
+link to the Wikipedia article of the day as provided by the json payload.
 
-Then we send a public (stream) message with `check_send_message` which will
+* Sometimes, it might occur that a json payload does not contain all required keys your
+  integration checks for. In such a case, any `KeyError` thrown is handled by the server
+  backend and will create an appropriate response.
+
+Then we send a public (stream) message with `check_send_stream_message` which will
 validate the message and then send it.
 
 Finally, we return a 200 http status with a JSON format success message via
@@ -162,7 +157,7 @@ WEBHOOK_INTEGRATIONS = [
 And you'll find the entry for Hello World:
 
 ```
-  WebhookIntegration('helloworld', display_name='Hello World'),
+  WebhookIntegration('helloworld', ['misc'], display_name='Hello World'),
 ```
 
 This tells the Zulip api to call the `api_helloworld_webhook` function in
@@ -171,7 +166,8 @@ This tells the Zulip api to call the `api_helloworld_webhook` function in
 
 This line also tells Zulip to generate an entry for Hello World on the Zulip
 integrations page using `static/images/integrations/logos/helloworld.png` as its
-icon.
+icon. The second positional argument defines a list of categories for the
+integration.
 
 At this point, if you're following along and/or writing your own Hello World
 webhook, you have written enough code to test your integration.
@@ -328,51 +324,50 @@ There are two parts to the end-user documentation on this page.
 The first is the lozenge in the grid of integrations, showing your
 integration logo and name, which links to the full documentation.
 This is generated automatically once you've registered the integration
-in WEBHOOK_INTEGRATIONS in `zerver/lib/integrations.py`, and supports
+in `WEBHOOK_INTEGRATIONS` in `zerver/lib/integrations.py`, and supports
 some customization via options to the `WebhookIntegration` class.
 
 Second, you need to write the actual documentation content in
-`zerver/webhooks/mywebhook/doc.html`.
+`zerver/webhooks/mywebhook/doc.md`.
 
 ```
-<p>Learn how Zulip integrations work with this simple Hello World example!</p>
+Learn how Zulip integrations work with this simple Hello World example!
 
-<p>
-    The Hello World webhook will use the <code>test</code> stream, which is
-    created by default in the Zulip development environment. If you are running
-    Zulip in production, you should make sure this stream exists.
-</p>
+The Hello World webhook will use the `test` stream, which is
+created by default in the Zulip dev environment. If you are running
+Zulip in production, you should make sure that this stream exists.
 
-<p>
-    Next, on your {{ settings_html|safe }}, create a Hello World bot. Construct the
-    URL for the Hello World bot using the API key and stream name:
-    <code>{{ external_api_uri_subdomain }}/v1/external/helloworld?api_key=abcdefgh&amp;stream=test</code>
-</p>
+Next, on your {{ settings_html|safe }}, create a Hello World bot.
+Construct the URL for the Hello World bot using the API key and
+stream name:
 
-<p>
-    To trigger a notication using this webhook, use `send_webhook_fixture_message`
-    from the Zulip command line:
-</p>
-<div class="codehilite">
-      <pre>(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip$
-./manage.py send_webhook_fixture_message \
-> --fixture=zerver/webhooks/helloworld/fixtures/hello.json \
-> '--url=http://localhost:9991/api/v1/external/helloworld?api_key=&lt;api_key&gt;'
-      </pre>
-</div>
+`{{ external_api_uri_subdomain }}/v1/external/helloworld?api_key=abcdefgh&stream=test`
 
-<p>Or, use curl:</p>
-<div class="codehilite">
-    <pre>curl -X POST -H "Content-Type: application/json" -d '{ "featured_title":"Marilyn Monroe", "featured_url":"https://en.wikipedia.org/wiki/Marilyn_Monroe" }' http://localhost:9991/api/v1/external/helloworld\?api_key\=&lt;api_key&gt;</pre>
-</div>
 
-<p><b>Congratulations! You're done!</b><br/> Your messages may look like:</p>
+To trigger a notification using this webhook, use
+`send_webhook_fixture_message` from the Zulip command line:
 
-<img class="screenshot" src="/static/images/integrations/helloworld/001.png"/>
+    (zulip-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip$
+    ./manage.py send_webhook_fixture_message \
+    > --fixture=zerver/fixtures/helloworld/hello.json \
+    > '--url=http://localhost:9991/api/v1/external/helloworld?api_key=&lt;api_key&gt;'
+
+Or, use curl:
+
+    curl -X POST -H "Content-Type: application/json" -d '{ "featured_title":"Marilyn Monroe", "featured_url":"https://en.wikipedia.org/wiki/Marilyn_Monroe" }' http://localhost:9991/api/v1/external/helloworld\?api_key\=&lt;api_key&gt;
+
+{!congrats.md!}
+
+![](/static/images/integrations/helloworld/001.png)
+
 ```
 
-See [Documenting your integration](integration-guide.html#documenting-your-integration) for further
-details, including how to easily create the message screenshot.
+`{!congrats.md!}` is an example of a Markdown macro. Zulip has a macro-based
+Markdown/Jinja2 framework that includes macros for common instructions in
+Zulip's webhooks/integrations documentation.
+
+See [Documenting your integration](integration-guide.html#documenting-your-integration)
+for further details, including how to easily create the message screenshot.
 
 ## Step 5: Preparing a pull request to zulip/zulip
 
@@ -425,7 +420,7 @@ def test_unknown_action_no_data(self):
     # return if no params are sent. The fixture for this test is an empty file.
 
     # subscribe to the target stream
-    self.subscribe_to_stream(self.TEST_USER_EMAIL, self.STREAM_NAME)
+    self.subscribe(self.test_user, self.STREAM_NAME)
 
     # post to the webhook url
     post_params = {'stream_name': self.STREAM_NAME,

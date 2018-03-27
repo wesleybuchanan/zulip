@@ -1,4 +1,4 @@
-from __future__ import absolute_import
+# System documented in https://zulip.readthedocs.io/en/latest/logging.html
 
 from django.conf import settings
 from typing import Any, Dict, Optional

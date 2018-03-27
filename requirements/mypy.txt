@@ -1,3 +1,4 @@
-six==1.10.0
-git+https://github.com/python/mypy.git@71efcdb29226e1dd76b2fe95982c82588807173b
-typed-ast==1.0.3
+# After editing this file, you MUST afterward run
+# /tools/update-locked-requirements to update requirements/dev_lock.txt.
+# See requirements/README.md for more detail.
+mypy==0.530

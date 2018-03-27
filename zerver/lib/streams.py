@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 
 from typing import Any, Iterable, List, Mapping, Set, Text, Tuple
 
@@ -10,6 +9,26 @@ from zerver.lib.request import JsonableError
 from zerver.models import UserProfile, Stream, Subscription, \
     Realm, Recipient, bulk_get_recipients, get_recipient, get_stream, \
     bulk_get_streams
+
+def access_stream_for_delete(user_profile, stream_id):
+    # type: (UserProfile, int) -> Stream
+
+    # We should only ever use this for realm admins, who are allowed
+    # to delete all streams on their realm, even private streams to
+    # which they are not subscribed.  We do an assert here, because
+    # all callers should have the require_realm_admin decorator.
+    assert(user_profile.is_realm_admin)
+
+    error = _("Invalid stream id")
+    try:
+        stream = Stream.objects.get(id=stream_id)
+    except Stream.DoesNotExist:
+        raise JsonableError(error)
+
+    if stream.realm_id != user_profile.realm_id:
+        raise JsonableError(error)
+
+    return stream
 
 def access_stream_common(user_profile, stream, error):
     # type: (UserProfile, Stream, Text) -> Tuple[Recipient, Subscription]
@@ -75,6 +94,48 @@ def access_stream_by_name(user_profile, stream_name):
     (recipient, sub) = access_stream_common(user_profile, stream, error)
     return (stream, recipient, sub)
 
+def access_stream_for_unmute_topic(user_profile, stream_name, error):
+    # type: (UserProfile, Text, Text) -> Stream
+    """
+    It may seem a little silly to have this helper function for unmuting
+    topics, but it gets around a linter warning, and it helps to be able
+    to review all security-related stuff in one place.
+
+    Our policy for accessing streams when you unmute a topic is that you
+    don't necessarily need to have an active subscription or even "legal"
+    access to the stream.  Instead, we just verify the stream_id has been
+    muted in the past (not here, but in the caller).
+
+    Long term, we'll probably have folks just pass us in the id of the
+    MutedTopic row to unmute topics.
+    """
+    try:
+        stream = get_stream(stream_name, user_profile.realm)
+    except Stream.DoesNotExist:
+        raise JsonableError(error)
+    return stream
+
+def is_public_stream_by_name(stream_name, realm):
+    # type: (Text, Realm) -> bool
+    """Determine whether a stream is public, so that
+    our caller can decide whether we can get
+    historical messages for a narrowing search.
+
+    Because of the way our search is currently structured,
+    we may be passed an invalid stream here.  We return
+    False in that situation, and subsequent code will do
+    validation and raise the appropriate JsonableError.
+
+    Note that this function should only be used in contexts where
+    access_stream is being called elsewhere to confirm that the user
+    can actually see this stream.
+    """
+    try:
+        stream = get_stream(stream_name, realm)
+    except Stream.DoesNotExist:
+        return False
+    return stream.is_public()
+
 def filter_stream_authorization(user_profile, streams):
     # type: (UserProfile, Iterable[Stream]) -> Tuple[List[Stream], List[Stream]]
     streams_subscribed = set()  # type: Set[int]
@@ -88,7 +149,7 @@ def filter_stream_authorization(user_profile, streams):
 
     unauthorized_streams = []  # type: List[Stream]
     for stream in streams:
-        # The user is authorized for his own streams
+        # The user is authorized for their own streams
         if stream.id in streams_subscribed:
             continue
 

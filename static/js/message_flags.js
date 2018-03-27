@@ -11,7 +11,7 @@ function batched_updater(flag, op, immediate) {
     function server_request() {
         // Wait for server IDs before sending flags
         var real_msgs = _.filter(queue, function (msg) {
-            return msg.local_id === undefined;
+            return !msg.locally_echoed;
         });
         var real_msg_ids = _.map(real_msgs, function (msg) {
             return msg.id;
@@ -96,14 +96,6 @@ exports.send_collapsed = function send_collapse(messages, value) {
 
 exports.send_starred = function send_starred(messages, value) {
     send_flag(messages, "starred", value);
-};
-
-exports.send_force_expand = function send_force_expand(messages, value) {
-    send_flag(messages, "force_expand", value);
-};
-
-exports.send_force_collapse = function send_force_collapse(messages, value) {
-    send_flag(messages, "force_collapse", value);
 };
 
 exports.toggle_starred = function (message) {

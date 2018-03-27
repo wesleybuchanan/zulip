@@ -1,38 +1,38 @@
-from __future__ import absolute_import
 
 from django.utils.translation import ugettext as _
 from django.http import HttpResponseRedirect, HttpResponse
-from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.contrib.auth import REDIRECT_FIELD_NAME, login as django_login
 from django.views.decorators.csrf import csrf_exempt
 from django.http import QueryDict, HttpResponseNotAllowed, HttpRequest
 from django.http.multipartparser import MultiPartParser
-from zerver.models import UserProfile, get_client, get_user_profile_by_email
+from zerver.models import UserProfile, get_client, get_user_profile_by_api_key
 from zerver.lib.response import json_error, json_unauthorized, json_success
 from django.shortcuts import resolve_url
 from django.utils.decorators import available_attrs
 from django.utils.timezone import now as timezone_now
 from django.conf import settings
 from zerver.lib.queue import queue_json_publish
+from zerver.lib.subdomains import get_subdomain, check_subdomain
 from zerver.lib.timestamp import datetime_to_timestamp, timestamp_to_datetime
-from zerver.lib.utils import statsd, get_subdomain, check_subdomain, \
-    is_remote_server
-from zerver.exceptions import RateLimited
+from zerver.lib.utils import statsd, is_remote_server
+from zerver.lib.exceptions import RateLimited, JsonableError, ErrorCode
+
 from zerver.lib.rate_limiter import incr_ratelimit, is_ratelimited, \
-    api_calls_left
+    api_calls_left, RateLimitedUser
 from zerver.lib.request import REQ, has_request_variables, JsonableError, RequestVariableMissingError
 from django.core.handlers import base
 
 from functools import wraps
 import base64
 import datetime
-import logging
-import cProfile
 import ujson
+import logging
 from io import BytesIO
 from six.moves import zip, urllib
 
 from typing import Union, Any, Callable, Sequence, Dict, Optional, TypeVar, Text, cast
 from zerver.lib.str_utils import force_bytes
+from zerver.lib.logging_util import create_logger
 
 # This is a hack to ensure that RemoteZulipServer always exists even
 # if Zilencer isn't enabled.
@@ -47,16 +47,8 @@ FuncT = TypeVar('FuncT', bound=Callable[..., Any])
 ViewFuncT = TypeVar('ViewFuncT', bound=Callable[..., HttpResponse])
 
 ## logger setup
-log_format = "%(asctime)s: %(message)s"
-
-formatter = logging.Formatter(log_format)
-file_handler = logging.FileHandler(
-    settings.API_KEY_ONLY_WEBHOOK_LOG_PATH)
-file_handler.setFormatter(formatter)
-
-webhook_logger = logging.getLogger("zulip.zerver.webhooks")
-webhook_logger.setLevel(logging.DEBUG)
-webhook_logger.addHandler(file_handler)
+webhook_logger = create_logger(
+    "zulip.zerver.webhooks", settings.API_KEY_ONLY_WEBHOOK_LOG_PATH, 'DEBUG')
 
 class _RespondAsynchronously(object):
     pass
@@ -130,7 +122,7 @@ def require_realm_admin(func):
 
 from zerver.lib.user_agent import parse_user_agent
 
-def get_client_name(request, is_json_view):
+def get_client_name(request, is_browser_view):
     # type: (HttpRequest, bool) -> Text
     # If the API request specified a client in the request content,
     # that has priority.  Otherwise, extract the client from the
@@ -146,11 +138,10 @@ def get_client_name(request, is_json_view):
     if user_agent is not None:
         # We could check for a browser's name being "Mozilla", but
         # e.g. Opera and MobileSafari don't set that, and it seems
-        # more robust to just key off whether it was a json view
-        if is_json_view and user_agent["name"] not in {"ZulipDesktop", "ZulipElectron"}:
-            # Avoid changing the client string for browsers Once this
-            # is out to prod, we can name the field to something like
-            # Browser for consistency.
+        # more robust to just key off whether it was a browser view
+        if is_browser_view and not user_agent["name"].startswith("Zulip"):
+            # Avoid changing the client string for browsers, but let
+            # the Zulip desktop and mobile apps be themselves.
             return "website"
         else:
             return user_agent["name"]
@@ -158,75 +149,111 @@ def get_client_name(request, is_json_view):
         # In the future, we will require setting USER_AGENT, but for
         # now we just want to tag these requests so we can review them
         # in logs and figure out the extent of the problem
-        if is_json_view:
+        if is_browser_view:
             return "website"
         else:
             return "Unspecified"
 
-def process_client(request, user_profile, is_json_view=False, client_name=None,
+def process_client(request, user_profile, is_browser_view=False, client_name=None,
                    remote_server_request=False):
     # type: (HttpRequest, UserProfile, bool, Optional[Text], bool) -> None
     if client_name is None:
-        client_name = get_client_name(request, is_json_view)
-
-    # Transitional hack for early 2014.  Eventually the ios clients
-    # will all report ZulipiOS, and we can remove the next couple lines.
-    if client_name == 'ios':
-        client_name = 'ZulipiOS'
+        client_name = get_client_name(request, is_browser_view)
 
     request.client = get_client(client_name)
     if not remote_server_request:
         update_user_activity(request, user_profile)
 
-def validate_api_key(request, role, api_key, is_webhook=False):
-    # type: (HttpRequest, Text, Text, bool) -> Union[UserProfile, RemoteZulipServer]
+class InvalidZulipServerError(JsonableError):
+    code = ErrorCode.INVALID_ZULIP_SERVER
+    data_fields = ['role']
+
+    def __init__(self, role):
+        # type: (Text) -> None
+        self.role = role  # type: Text
+
+    @staticmethod
+    def msg_format():
+        # type: () -> Text
+        return "Zulip server auth failure: {role} is not registered"
+
+class InvalidZulipServerKeyError(JsonableError):
+    @staticmethod
+    def msg_format():
+        # type: () -> Text
+        return "Zulip server auth failure: key does not match role {role}"
+
+def validate_api_key(request, role, api_key, is_webhook=False,
+                     client_name=None):
+    # type: (HttpRequest, Optional[Text], Text, bool, Optional[Text]) -> Union[UserProfile, RemoteZulipServer]
     # Remove whitespace to protect users from trivial errors.
-    role, api_key = role.strip(), api_key.strip()
+    api_key = api_key.strip()
+    if role is not None:
+        role = role.strip()
 
-    if not is_remote_server(role):
+    if settings.ZILENCER_ENABLED and role is not None and is_remote_server(role):
         try:
-            profile = get_user_profile_by_email(role)  # type: Union[UserProfile, RemoteZulipServer]
-        except UserProfile.DoesNotExist:
-            raise JsonableError(_("Invalid user: %s") % (role,))
-    else:
-        try:
-            profile = get_remote_server_by_uuid(role)
+            remote_server = get_remote_server_by_uuid(role)
         except RemoteZulipServer.DoesNotExist:
-            raise JsonableError(_("Invalid Zulip server: %s") % (role,))
+            raise InvalidZulipServerError(role)
+        if api_key != remote_server.api_key:
+            raise InvalidZulipServerKeyError(role)
 
-    if api_key != profile.api_key:
-        if len(api_key) != 32:
-            reason = _("Incorrect API key length (keys should be 32 "
-                       "characters long) for role '%s'")
-        else:
-            reason = _("Invalid API key for role '%s'")
-        raise JsonableError(reason % (role,))
-
-    # early exit for RemoteZulipServer instances
-    if settings.ZILENCER_ENABLED and isinstance(profile, RemoteZulipServer):
         if not check_subdomain(get_subdomain(request), ""):
-            raise JsonableError(_("This API key only works on the root subdomain"))
-        return profile
+            raise JsonableError(_("Invalid subdomain for push notifications bouncer"))
+        request.user = remote_server
+        request._email = "zulip-server:" + role
+        remote_server.rate_limits = ""
+        process_client(request, remote_server, remote_server_request=True)
+        return remote_server
 
-    profile = cast(UserProfile, profile)  # is UserProfile
-    if not profile.is_active:
+    user_profile = access_user_by_api_key(request, api_key, email=role)
+    if user_profile.is_incoming_webhook and not is_webhook:
+        raise JsonableError(_("This API is not available to incoming webhook bots."))
+
+    request.user = user_profile
+    request._email = user_profile.email
+    process_client(request, user_profile, client_name=client_name)
+
+    return user_profile
+
+def validate_account_and_subdomain(request, user_profile):
+    # type: (HttpRequest, UserProfile) -> None
+    if not user_profile.is_active:
         raise JsonableError(_("Account not active"))
-    if profile.is_incoming_webhook and not is_webhook:
-        raise JsonableError(_("Account is not valid to post webhook messages"))
 
-    if profile.realm.deactivated:
+    if user_profile.realm.deactivated:
         raise JsonableError(_("Realm for account has been deactivated"))
 
-    if (not check_subdomain(get_subdomain(request), profile.realm.subdomain) and
-        # Allow access to localhost for Tornado
+    # Either the subdomain matches, or processing a websockets message
+    # in the message_sender worker (which will have already had the
+    # subdomain validated), or we're accessing Tornado from and to
+    # localhost (aka spoofing a request as the user).
+    if (not check_subdomain(get_subdomain(request), user_profile.realm.subdomain) and
+        not (request.method == "SOCKET" and
+             request.META['SERVER_NAME'] == "127.0.0.1") and
         not (settings.RUNNING_INSIDE_TORNADO and
              request.META["SERVER_NAME"] == "127.0.0.1" and
              request.META["REMOTE_ADDR"] == "127.0.0.1")):
-        logging.warning("User %s attempted to access API on wrong subdomain %s" % (
-            profile.email, get_subdomain(request)))
+        logging.warning("User %s (%s) attempted to access API on wrong subdomain (%s)" % (
+            user_profile.email, user_profile.realm.subdomain, get_subdomain(request)))
         raise JsonableError(_("Account is not associated with this subdomain"))
 
-    return profile
+def access_user_by_api_key(request, api_key, email=None):
+    # type: (HttpRequest, Text, Optional[Text]) -> UserProfile
+    try:
+        user_profile = get_user_profile_by_api_key(api_key)
+    except UserProfile.DoesNotExist:
+        raise JsonableError(_("Invalid API key"))
+    if email is not None and email != user_profile.email:
+        # This covers the case that the API key is correct, but for a
+        # different user.  We may end up wanting to relaxing this
+        # constraint or give a different error message in the future.
+        raise JsonableError(_("Invalid API key"))
+
+    validate_account_and_subdomain(request, user_profile)
+
+    return user_profile
 
 # Use this for webhook views that don't get an email passed in.
 def api_key_only_webhook_view(client_name):
@@ -241,48 +268,39 @@ def api_key_only_webhook_view(client_name):
         def _wrapped_func_arguments(request, api_key=REQ(),
                                     *args, **kwargs):
             # type: (HttpRequest, Text, *Any, **Any) -> HttpResponse
-            try:
-                user_profile = UserProfile.objects.get(api_key=api_key)
-            except UserProfile.DoesNotExist:
-                raise JsonableError(_("Invalid API key"))
-            if not user_profile.is_active:
-                raise JsonableError(_("Account not active"))
-            if user_profile.realm.deactivated:
-                raise JsonableError(_("Realm for account has been deactivated"))
-            if not check_subdomain(get_subdomain(request), user_profile.realm.subdomain):
-                logging.warning("User %s attempted to access webhook API on wrong subdomain %s" % (
-                    user_profile.email, get_subdomain(request)))
-                raise JsonableError(_("Account is not associated with this subdomain"))
+            user_profile = validate_api_key(request, None, api_key, is_webhook=True,
+                                            client_name="Zulip{}Webhook".format(client_name))
 
-            request.user = user_profile
-            request._email = user_profile.email
-            webhook_client_name = "Zulip{}Webhook".format(client_name)
-            process_client(request, user_profile, client_name=webhook_client_name)
             if settings.RATE_LIMITING:
                 rate_limit_user(request, user_profile, domain='all')
             try:
                 return view_func(request, user_profile, *args, **kwargs)
-            except Exception:
+            except Exception as err:
                 if request.content_type == 'application/json':
-                    request_body = ujson.dumps(ujson.loads(request.body), indent=4)
+                    try:
+                        request_body = ujson.dumps(ujson.loads(request.body), indent=4)
+                    except ValueError:
+                        request_body = str(request.body)
                 else:
                     request_body = str(request.body)
                 message = """
 user: {email} ({realm})
 client: {client_name}
 URL: {path_info}
+content_type: {content_type}
 body:
 
 {body}
                 """.format(
                     email=user_profile.email,
                     realm=user_profile.realm.string_id,
-                    client_name=webhook_client_name,
+                    client_name=request.client.name,
                     body=request_body,
                     path_info=request.META.get('PATH_INFO', None),
+                    content_type=request.content_type,
                 )
                 webhook_logger.exception(message)
-                raise
+                raise err
 
         return _wrapped_func_arguments
     return _wrapped_view_func
@@ -337,13 +355,22 @@ def user_passes_test(test_func, login_url=None, redirect_field_name=REDIRECT_FIE
 
 def logged_in_and_active(request):
     # type: (HttpRequest) -> bool
-    if not request.user.is_authenticated():
+    if not request.user.is_authenticated:
         return False
     if not request.user.is_active:
         return False
     if request.user.realm.deactivated:
         return False
     return check_subdomain(get_subdomain(request), request.user.realm.subdomain)
+
+def do_login(request, user_profile):
+    # type: (HttpRequest, UserProfile) -> None
+    """Creates a session, logging in the user, using the Django method,
+    and also adds helpful data needed by our server logs.
+    """
+    django_login(request, user_profile)
+    request._email = user_profile.email
+    process_client(request, user_profile, is_browser_view=True)
 
 def add_logging_data(view_func):
     # type: (ViewFuncT) -> ViewFuncT
@@ -352,7 +379,7 @@ def add_logging_data(view_func):
         # type: (HttpRequest, *Any, **Any) -> HttpResponse
         request._email = request.user.email
         request._query = view_func.__name__
-        process_client(request, request.user, is_json_view=True)
+        process_client(request, request.user, is_browser_view=True)
         return rate_limit()(view_func)(request, *args, **kwargs)
     return _wrapped_view_func  # type: ignore # https://github.com/python/mypy/issues/1927
 
@@ -415,9 +442,6 @@ def authenticated_api_view(is_webhook=False):
             if api_key is None:
                 raise RequestVariableMissingError("api_key")
             user_profile = validate_api_key(request, email, api_key, is_webhook)
-            request.user = user_profile
-            request._email = user_profile.email
-            process_client(request, user_profile)
             # Apply rate limiting
             limited_func = rate_limit()(view_func)
             return limited_func(request, user_profile, *args, **kwargs)
@@ -453,17 +477,7 @@ def authenticated_rest_api_view(is_webhook=False):
                 # profile is a Union[UserProfile, RemoteZulipServer]
                 profile = validate_api_key(request, role, api_key, is_webhook)
             except JsonableError as e:
-                return json_unauthorized(e.error)
-            request.user = profile
-            if is_remote_server(role):
-                assert isinstance(profile, RemoteZulipServer)  # type: ignore # https://github.com/python/mypy/issues/2957
-                request._email = "zulip-server:" + role
-                profile.rate_limits = ""
-                process_client(request, profile, remote_server_request=True)
-            else:
-                assert isinstance(profile, UserProfile)  # type: ignore # https://github.com/python/mypy/issues/2957
-                request._email = profile.email
-                process_client(request, profile)
+                return json_unauthorized(e.msg)
             # Apply rate limiting
             return rate_limit()(view_func)(request, profile, *args, **kwargs)
         return _wrapped_func_arguments
@@ -503,25 +517,15 @@ def process_as_post(view_func):
 
 def authenticate_log_and_execute_json(request, view_func, *args, **kwargs):
     # type: (HttpRequest, Callable[..., HttpResponse], *Any, **Any) -> HttpResponse
-    if not request.user.is_authenticated():
+    if not request.user.is_authenticated:
         return json_error(_("Not logged in"), status=401)
     user_profile = request.user
-    if not user_profile.is_active:
-        raise JsonableError(_("Account not active"))
-    if user_profile.realm.deactivated:
-        raise JsonableError(_("Realm for account has been deactivated"))
+    validate_account_and_subdomain(request, user_profile)
+
     if user_profile.is_incoming_webhook:
         raise JsonableError(_("Webhook bots can only access webhooks"))
-    if (not check_subdomain(get_subdomain(request), user_profile.realm.subdomain) and
-        # Exclude the SOCKET requests from this filter; they were
-        # checked when the original websocket request reached Tornado
-        not (request.method == "SOCKET" and
-             request.META['SERVER_NAME'] == "127.0.0.1")):
-        logging.warning("User %s attempted to access JSON API on wrong subdomain %s" % (
-            user_profile.email, get_subdomain(request)))
-        raise JsonableError(_("Account is not associated with this subdomain"))
 
-    process_client(request, user_profile, True)
+    process_client(request, user_profile, is_browser_view=True)
     request._email = user_profile.email
     return rate_limit()(view_func)(request, user_profile, *args, **kwargs)
 
@@ -648,17 +652,18 @@ def rate_limit_user(request, user, domain):
     if the user has been rate limited, otherwise returns and modifies request to contain
     the rate limit information"""
 
-    ratelimited, time = is_ratelimited(user, domain)
+    entity = RateLimitedUser(user, domain=domain)
+    ratelimited, time = is_ratelimited(entity)
     request._ratelimit_applied_limits = True
     request._ratelimit_secs_to_freedom = time
     request._ratelimit_over_limit = ratelimited
-    # Abort this request if the user is over her rate limits
+    # Abort this request if the user is over their rate limits
     if ratelimited:
         statsd.incr("ratelimiter.limited.%s.%s" % (type(user), user.id))
         raise RateLimited()
 
-    incr_ratelimit(user, domain)
-    calls_remaining, time_reset = api_calls_left(user, domain)
+    incr_ratelimit(entity)
+    calls_remaining, time_reset = api_calls_left(entity)
 
     request._ratelimit_remaining = calls_remaining
     request._ratelimit_secs_to_freedom = time_reset
@@ -705,34 +710,6 @@ def rate_limit(domain='all'):
             return func(request, *args, **kwargs)
         return wrapped_func
     return wrapper
-
-def profiled(func):
-    # type: (FuncT) -> FuncT
-    """
-    This decorator should obviously be used only in a dev environment.
-    It works best when surrounding a function that you expect to be
-    called once.  One strategy is to write a backend test and wrap the
-    test case with the profiled decorator.
-
-    You can run a single test case like this:
-
-        # edit zerver/tests/test_external.py and place @profiled above the test case below
-        ./tools/test-backend zerver.tests.test_external.RateLimitTests.test_ratelimit_decrease
-
-    Then view the results like this:
-
-        ./tools/show-profile-results.py test_ratelimit_decrease.profile
-
-    """
-    @wraps(func)
-    def wrapped_func(*args, **kwargs):
-        # type: (*Any, **Any) -> Any
-        fn = func.__name__ + ".profile"
-        prof = cProfile.Profile()
-        retval = prof.runcall(func, *args, **kwargs)  # type: Any
-        prof.dump_stats(fn)
-        return retval
-    return wrapped_func  # type: ignore # https://github.com/python/mypy/issues/1927
 
 def return_success_on_head_request(view_func):
     # type: (Callable) -> Callable

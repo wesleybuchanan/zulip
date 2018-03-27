@@ -1,6 +1,6 @@
 <div class="overlay-modal hide" id="search-operators" tabindex="-1" role="dialog"
-    aria-label="{{ _('Search operators') }}" aria-hidden="true">
-    <div class="modal-body" tabindex="1">
+    aria-label="{{ _('Search operators') }}">
+    <div class="modal-body" tabindex="0">
         <table class="table table-striped table-condensed table-rounded table-bordered help-table">
             <thead>
                 <tr>
@@ -19,6 +19,10 @@
             <tr>
                 <td class="operator">pm-with:<span class="operator_value">email</span></td>
                 <td class="definition">{{ _('Narrow to private messages with') }} <span class="operator_value">email</span></td>
+            </tr>
+            <tr>
+                <td class="operator">group-pm-with:<span class="operator_value">email</span></td>
+                <td class="definition">{{ _('Narrow to group private messages with') }} <span class="operator_value">email</span></td>
             </tr>
             <tr>
                 <td class="operator">sender:<span class="operator_value">email</span></td>
@@ -53,6 +57,10 @@
                 <td class="definition">{{ _('Narrow to starred messages.') }}</td>
             </tr>
             <tr>
+                <td class="operator">is:unread</td>
+                <td class="definition">{{ _('Narrow to unread messages.') }}</td>
+            </tr>
+            <tr>
                 <td class="operator">has:link</td>
                 <td class="definition">{{ _('Narrow to messages containing links.') }}</td>
             </tr>
@@ -76,13 +84,23 @@
         {% trans %}
         <p>You can use any combination of these search operators in a single query. For example:</p>
 
-        <p>&nbsp; <span class="operator">stream:<span class="operator_value">streamname</span>
-            sender:<span class="operator_value">user@example.com</span>
-                <span class="operator_value">keyword</span></span></p>
+        <p>
+            &nbsp;
+            <span class="operator">
+                stream:<span class="operator_value">streamname</span>
+                sender:<span class="operator_value">user@example.com</span>
+                <span class="operator_value">keyword</span>
+            </span>
+        </p>
 
-        <p>would search for messages sent by <span class="operator_value">user@example.com</span> to stream
+        <p>
+            would search for messages sent by
+            <span class="operator_value">user@example.com</span>
+            to stream
             <span class="operator_value">streamname</span>
-        containing the keyword <span class="operator_value">keyword</span>.</p>
+            containing the keyword
+            <span class="operator_value">keyword</span>.
+        </p>
         {% endtrans %}
         <hr/>
         <a href="/help/search-for-messages#search-operators" target="_blank">Detailed search operators documentation</a>

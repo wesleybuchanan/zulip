@@ -9,13 +9,13 @@ exports.set_up = function () {
     $("#emojiset_select").val(page_params.emojiset);
 
     $("#default_language_modal [data-dismiss]").click(function () {
-      $("#default_language_modal").fadeOut(300);
+        overlays.close_modal('default_language_modal');
     });
 
     $("#default_language_modal .language").click(function (e) {
         e.preventDefault();
         e.stopPropagation();
-        $('#default_language_modal').fadeOut(300);
+        overlays.close_modal('default_language_modal');
 
         var data = {};
         var $link = $(e.target).closest("a[data-code]");
@@ -44,9 +44,32 @@ exports.set_up = function () {
     $('#default_language').on('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        $('#default_language_modal').show().attr('aria-hidden', false);
+        overlays.open_modal('default_language_modal');
     });
 
+    $("#high_contrast_mode").change(function () {
+        var high_contrast_mode = this.checked;
+        var data = {};
+        data.high_contrast_mode = JSON.stringify(high_contrast_mode);
+        var context = {};
+        if (data.high_contrast_mode === "true") {
+            context.enabled_or_disabled = i18n.t('Enabled');
+        } else {
+            context.enabled_or_disabled = i18n.t('Disabled');
+        }
+
+        channel.patch({
+            url: '/json/settings/display',
+            data: data,
+            success: function () {
+                ui_report.success(i18n.t("High contrast mode __enabled_or_disabled__!", context),
+                                  $('#display-settings-status').expectOne());
+            },
+            error: function (xhr) {
+                ui_report.error(i18n.t("Error updating high contrast setting"), xhr, $('#display-settings-status').expectOne());
+            },
+        });
+    });
 
     $("#left_side_userlist").change(function () {
         var left_side_userlist = this.checked;
@@ -129,7 +152,7 @@ exports.set_up = function () {
             url: '/json/settings/display',
             data: data,
             success: function () {
-                ui_report.success(i18n.t("Your time zone have been set to " + timezone), $('#display-settings-status').expectOne());
+                ui_report.success(i18n.t("Your time zone have been set to __timezone__", {timezone: timezone}), $('#display-settings-status').expectOne());
             },
             error: function (xhr) {
                 ui_report.error(i18n.t("Error updating time zone"), xhr, $('#display-settings-status').expectOne());

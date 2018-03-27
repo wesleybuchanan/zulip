@@ -8,7 +8,6 @@ var notice_memory = {};
 // case after a server-initiated reload.
 var window_has_focus = document.hasFocus && document.hasFocus();
 
-var asked_permission_already = false;
 var supports_sound;
 
 var unread_pms_favicon = '/static/images/favicon/favicon-pms.png';
@@ -98,27 +97,15 @@ exports.initialize = function () {
                                       .attr("src", "/static/audio/zulip.mp3"));
         }
     }
+};
 
-    if (notifications_api) {
-        $(document).click(function () {
-            if (!page_params.enable_desktop_notifications || asked_permission_already) {
-                return;
-            }
-            if (notifications_api.checkPermission() !== 0) { // 0 is PERMISSION_ALLOWED
-                if (tutorial.is_running()) {
-                    tutorial.defer(function () {
-                        notifications_api.requestPermission(function () {
-                            asked_permission_already = true;
-                        });
-                    });
-                } else {
-                    notifications_api.requestPermission(function () {
-                        asked_permission_already = true;
-                    });
-                }
-            }
-        });
+exports.permission_state = function () {
+    if (window.Notification === undefined) {
+        // act like notifications are blocked if they do not have access to
+        // the notification API.
+        return "denied";
     }
+    return window.Notification.permission;
 };
 
 // For web pages, the initial favicon is the same as the favicon we
@@ -396,14 +383,6 @@ exports.close_notification = function (message) {
     });
 };
 
-exports.speaking_at_me = function (message) {
-    if (message === undefined) {
-        return false;
-    }
-
-    return message.mentioned_me_directly;
-};
-
 function message_is_notifiable(message) {
     // Independent of the user's notification settings, are there
     // properties of the message that unconditionally mean we
@@ -419,15 +398,19 @@ function message_is_notifiable(message) {
         return false;
     }
 
-    // @-<username> mentions take precedence over muted-ness. @all mentions
-    // are suppressed.
-    if (exports.speaking_at_me(message)) {
+    // @-<username> mentions take precedence over muted-ness. Note
+    // that @all mentions are still suppressed by muting.
+    if (message.mentioned_me_directly) {
         return true;
     }
+
+    // Messages to muted streams that don't mention us specifically
+    // are not notifiable.
     if ((message.type === "stream") &&
         !stream_data.in_home_view(message.stream_id)) {
         return false;
     }
+
     if ((message.type === "stream") &&
         muting.is_topic_muted(message.stream, message.subject)) {
         return false;
@@ -460,7 +443,7 @@ function should_send_desktop_notification(message) {
         return true;
     }
 
-    if (exports.speaking_at_me(message) &&
+    if (message.mentioned &&
         page_params.enable_desktop_notifications) {
         return true;
     }
@@ -485,12 +468,27 @@ function should_send_audible_notification(message) {
         return true;
     }
 
-    if (exports.speaking_at_me(message) && page_params.enable_sounds) {
+    if (message.mentioned && page_params.enable_sounds) {
         return true;
     }
 
     return false;
 }
+
+exports.granted_desktop_notifications_permission = function () {
+    return (notifications_api &&
+            // 0 is PERMISSION_ALLOWED
+            notifications_api.checkPermission() === 0) ||
+        // window.bridge is the legacy desktop app
+        (window.bridge !== undefined);
+};
+
+
+exports.request_desktop_notifications_permission = function () {
+    if (notifications_api) {
+        return notifications_api.requestPermission();
+    }
+};
 
 exports.received_messages = function (messages) {
     _.each(messages, function (message) {
@@ -536,41 +534,59 @@ function get_message_header(message) {
     return "PM with " + message.display_reply_to;
 }
 
-exports.possibly_notify_new_messages_outside_viewport = function (messages, local_id) {
+exports.get_local_notify_mix_reason = function (message) {
+    var row = current_msg_list.get_row(message.id);
+    if (row.length > 0) {
+        // If our message is in the current message list, we do
+        // not have a mix, so we are happy.
+        return;
+    }
+
+    if (message.type === "stream" && muting.is_topic_muted(message.stream, message.subject)) {
+        return "Sent! Your message was sent to a topic you have muted.";
+    }
+
+    if (message.type === "stream" && !stream_data.in_home_view(message.stream_id)) {
+        return "Sent! Your message was sent to a stream you have muted.";
+    }
+
+    // offscreen because it is outside narrow
+    // we can only look for these on non-search (can_apply_locally) messages
+    // see also: exports.notify_messages_outside_current_search
+    return "Sent! Your message is outside your current narrow.";
+};
+
+exports.notify_local_mixes = function (messages) {
+    /*
+        This code should only be called when we are locally echoing
+        messages.  It notifies users that their messages aren't
+        actually in the view that they composed to.
+
+        This code is called after we insert messages into our
+        message list widgets.  All of the conditions here are
+        checkable locally, so we may want to execute this code
+        earlier in the codepath at some point and possibly punt
+        on local rendering.
+    */
+
     _.each(messages, function (message) {
-        // A warning should only be displayed when the message was sent by the user and
-        // this is the tab he sent it in.
-        if (!people.is_current_user(message.sender_email) ||
-            local_id === undefined) {
+        if (!people.is_my_user_id(message.sender_id)) {
+            blueslip.warn('We did not expect messages sent by others to get here');
             return;
         }
-        // queue up offscreen because of narrowed, or (secondarily) offscreen
-        // because it doesn't fit in the currently visible viewport
 
-        var note;
-        var link_class;
+        var reason = exports.get_local_notify_mix_reason(message);
+
+        if (!reason) {
+            // This is more than normal, just continue on.
+            return;
+        }
+
         var link_msg_id = message.id;
-        var link_text;
+        var link_class = "compose_notification_narrow_by_subject";
+        var link_text = "Narrow to " + get_message_header(message);
 
-        var row = current_msg_list.get_row(message.id);
-        if (row.length === 0) {
-            if (message.type === "stream" && muting.is_topic_muted(message.stream, message.subject)) {
-                note = "Sent! Your message was sent to a topic you have muted.";
-            } else if (message.type === "stream" && !stream_data.in_home_view(message.stream_id)) {
-                note = "Sent! Your message was sent to a stream you have muted.";
-            } else {
-                // offscreen because it is outside narrow
-                // we can only look for these on non-search (can_apply_locally) messages
-                // see also: exports.notify_messages_outside_current_search
-                note = "Sent! Your message is outside your current narrow.";
-            }
-            link_class = "compose_notification_narrow_by_subject";
-            link_text = "Narrow to " + get_message_header(message);
-        } else {
-            // return with _.each is like continue for normal for loops.
-            return;
-        }
-        exports.notify_above_composebox(note, link_class, link_msg_id, link_text);
+        exports.notify_above_composebox(reason, link_class, link_msg_id, link_text);
     });
 };
 
@@ -601,22 +617,23 @@ $(function () {
         window.bridge = bridge;
     }
 
-    $(document).on('message_id_changed', function (event) {
-        var old_id = event.old_id;
-        var new_id = event.new_id;
-
-        // If a message ID that we're currently storing (as a link) has changed,
-        // update that link as well
-        _.each($('#out-of-view-notification a'), function (e) {
-            var elem = $(e);
-            var msgid = elem.data('msgid');
-
-            if (msgid === old_id) {
-                elem.data('msgid', new_id);
-            }
-        });
-    });
 });
+
+exports.reify_message_id = function (opts) {
+    var old_id = opts.old_id;
+    var new_id = opts.new_id;
+
+    // If a message ID that we're currently storing (as a link) has changed,
+    // update that link as well
+    _.each($('#out-of-view-notification a'), function (e) {
+        var elem = $(e);
+        var msgid = elem.data('msgid');
+
+        if (msgid === old_id) {
+            elem.data('msgid', new_id);
+        }
+    });
+};
 
 exports.register_click_handlers = function () {
     $('#out-of-view-notification').on('click', '.compose_notification_narrow_by_subject', function (e) {
@@ -645,6 +662,8 @@ exports.handle_global_notification_updates = function (notification_name, settin
     // particular stream should receive notifications.
     if (notification_name === "enable_stream_desktop_notifications") {
         page_params.enable_stream_desktop_notifications = setting;
+    } else if (notification_name === "enable_stream_push_notifications") {
+        page_params.enable_stream_push_notifications = setting;
     } else if (notification_name === "enable_stream_sounds") {
         page_params.enable_stream_sounds = setting;
     } else if (notification_name === "enable_desktop_notifications") {

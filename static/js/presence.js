@@ -36,11 +36,10 @@ exports.get_status = function (user_id) {
     if (user_id === page_params.user_id) {
         return "active";
     }
-    return exports.presence_info[user_id].status;
-};
-
-exports.get_mobile = function (user_id) {
-    return exports.presence_info[user_id].mobile;
+    if (user_id in exports.presence_info) {
+        return exports.presence_info[user_id].status;
+    }
+    return "offline";
 };
 
 exports.get_user_ids = function () {
@@ -147,6 +146,11 @@ exports.update_info_for_small_realm = function () {
         if (presence_info[user_id]) {
             // this is normal, we have data for active
             // users that we don't want to clobber.
+            return;
+        }
+
+        if (person.is_bot) {
+            // we don't show presence for bots
             return;
         }
 

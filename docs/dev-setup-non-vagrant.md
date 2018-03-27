@@ -12,13 +12,13 @@ Start by cloning this repository: `git clone
 https://github.com/zulip/zulip.git`
 
 If you'd like to install a Zulip development environment on a computer
-that's already running Ubuntu 14.04 Trusty or Ubuntu 16.04 Xenial, you
+that's already running Ubuntu 16.04 Xenial or Ubuntu 14.04 Trusty, you
 can do that by just running:
 
 ```
 # From a clone of zulip.git
 ./tools/provision
-source /srv/zulip-venv/bin/activate
+source /srv/zulip-py3-venv/bin/activate
 ./tools/run-dev.py  # starts the development server
 ```
 
@@ -46,12 +46,12 @@ should work.
 Install the following non-Python dependencies:
  * libffi-dev — needed for some Python extensions
  * postgresql 9.1 or later — our database (client, server, headers)
- * nodejs 0.10 (and npm)
+ * nodejs 0.10 (and yarn)
  * memcached (and headers)
  * rabbitmq-server
  * libldap2-dev
- * python-dev
  * python3-dev
+ * python-dev
  * python-virtualenv
  * redis-server — rate limiting
  * tsearch-extras — better text search
@@ -67,9 +67,9 @@ https://github.com/zulip/zulip.git`
 ```
 sudo apt-get install closure-compiler libfreetype6-dev libffi-dev \
     memcached rabbitmq-server libldap2-dev redis-server \
-    postgresql-server-dev-all libmemcached-dev python-dev \
-    python3-dev python-virtualenv hunspell-en-us nodejs \
-    nodejs-legacy npm git yui-compressor puppet gettext postgresql
+    postgresql-server-dev-all libmemcached-dev python3-dev \
+    python-dev python-virtualenv hunspell-en-us nodejs \
+    nodejs-legacy git yui-compressor puppet gettext postgresql
 
 # If using Ubuntu, install PGroonga from its PPA
 sudo add-apt-repository -ys ppa:groonga/ppa
@@ -127,8 +127,8 @@ sudo add-apt-repository ppa:tabbott/zulip
 sudo apt-get update
 sudo apt-get install closure-compiler libfreetype6-dev libffi-dev \
     memcached rabbitmq-server libldap2-dev redis-server \
-    postgresql-server-dev-all libmemcached-dev python-dev \
-    hunspell-en-us nodejs nodejs-legacy npm git yui-compressor \
+    postgresql-server-dev-all libmemcached-dev python3-dev python-dev \
+    hunspell-en-us nodejs nodejs-legacy git yui-compressor \
     puppet gettext tsearch-extras
 ```
 
@@ -146,7 +146,7 @@ https://github.com/zulip/zulip.git`
 sudo dnf install libffi-devel memcached rabbitmq-server \
     openldap-devel python-devel redis postgresql-server \
     postgresql-devel postgresql libmemcached-devel freetype-devel \
-    nodejs npm yuicompressor closure-compiler gettext
+    nodejs yuicompressor closure-compiler gettext
 ```
 
 Now continue with the [Common to Fedora/CentOS](#common-to-fedora-centos-instructions) instructions below.
@@ -295,40 +295,36 @@ Make sure you have followed the steps specific for your platform:
 For managing Zulip's python dependencies, we recommend using
 [virtualenvs](https://virtualenv.pypa.io/en/stable/).
 
-You must create two virtualenvs. One for Python 2 and one for Python 3.
-You must also install appropriate python packages in them.
+You must create a Python 3 virtualenv.  You must also install appropriate
+python packages in it.
 
-You should either install the virtualenvs in `/srv`, or put symlinks to
-them in `/srv`.  If you don't do that, some scripts might not work correctly.
+You should either install the virtualenv in `/srv`, or put a symlink to it in
+`/srv`.  If you don't do that, some scripts might not work correctly.
 
-You can run `tools/setup/setup_venvs.py` to do this.  This script will create two
-virtualenvs - /srv/zulip-venv and /srv/zulip-py3-venv.
+You can run `python3 tools/setup/setup_venvs.py`.  This script will create a
+virtualenv `/srv/zulip-py3-venv`.
 
 If you want to do it manually, here are the steps:
 
 ```
-sudo virtualenv /srv/zulip-venv -p python2 # Create a python2 virtualenv
-sudo chown -R `whoami`:`whoami` /srv/zulip-venv
-source /srv/zulip-venv/bin/activate # Activate python2 virtualenv
-pip install --upgrade pip # upgrade pip itself because older versions have known issues
-pip install --no-deps -r requirements/py2_dev.txt # install python packages required for development
-
 sudo virtualenv /srv/zulip-py3-venv -p python3 # Create a python3 virtualenv
 sudo chown -R `whoami`:`whoami` /srv/zulip-py3-venv
 source /srv/zulip-py3-venv/bin/activate # Activate python3 virtualenv
 pip install --upgrade pip # upgrade pip itself because older versions have known issues
-pip install --no-deps -r requirements/py3_dev.txt # install python packages required for development
+pip install --no-deps -r requirements/dev_lock.txt # install python packages required for development
 ```
 
 Now run these commands:
 
 ```
-./tools/install-mypy
+sudo ./scripts/lib/install-node
+yarn install
 sudo mkdir /srv/zulip-emoji-cache
 sudo chown -R `whoami`:`whoami` /srv/zulip-emoji-cache
-./tools/setup/emoji/download-emoji-data
 ./tools/setup/emoji/build_emoji
-./tools/setup/build_pygments_data.py
+./tools/inline-email-css
+./tools/setup/build_pygments_data
+./tools/setup/generate_zulip_bots_static_files
 ./scripts/setup/generate_secrets.py --development
 if [ $(uname) = "OpenBSD" ]; then
     sudo cp ./puppet/zulip/files/postgresql/zulip_english.stop /var/postgresql/tsearch_data/
@@ -341,8 +337,6 @@ fi
 ./tools/setup/postgres-init-test-db
 ./tools/do-destroy-rebuild-test-database
 ./manage.py compilemessages
-sudo ./scripts/lib/install-node
-npm install
 ```
 
 To start the development server:
@@ -365,10 +359,10 @@ proxy in the environment as follows:
  export http_proxy=http://proxy_host:port
  ```
 
-- And set the npm proxy and https-proxy using:
+- And set the yarn proxy and https-proxy using:
  ```
- npm config set proxy http://proxy_host:port
- npm config set https-proxy http://proxy_host:port
+ yarn config set proxy http://proxy_host:port
+ yarn config set https-proxy http://proxy_host:port
  ```
 
 ## Using Docker (experimental)
@@ -396,7 +390,7 @@ Then you should create the Docker image based on Ubuntu Linux, first
 go to the directory with the Zulip source code:
 
 ```
-docker build -t user/zulipdev .
+docker build -t user/zulipdev -f Dockerfile-dev .
 ```
 
 

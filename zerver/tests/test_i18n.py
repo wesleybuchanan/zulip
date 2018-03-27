@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 from typing import Any
 
@@ -86,16 +85,17 @@ class JsonTranslationTestCase(ZulipTestCase):
     @mock.patch('zerver.lib.request._')
     def test_json_error(self, mock_gettext):
         # type: (Any) -> None
-        dummy_value = "Some other language '%s'"
+        dummy_value = "this arg is bad: '{var_name}' (translated to German)"
         mock_gettext.return_value = dummy_value
 
         email = self.example_email('hamlet')
         self.login(email)
-        result = self.client_post("/json/refer_friend",
+        result = self.client_post("/json/invites",
                                   HTTP_ACCEPT_LANGUAGE='de')
 
+        expected_error = u"this arg is bad: 'invitee_emails' (translated to German)"
         self.assert_json_error_contains(result,
-                                        dummy_value % 'email',
+                                        expected_error,
                                         status_code=400)
 
     @mock.patch('zerver.views.auth._')
@@ -142,6 +142,6 @@ class FrontendRegexTestCase(TestCase):
         ]
 
         for input_text, expected in data:
-            result = list(command.extract_strings(input_text).keys())
+            result = command.extract_strings(input_text)
             self.assertEqual(len(result), 1)
             self.assertEqual(result[0], expected)

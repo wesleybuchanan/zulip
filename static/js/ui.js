@@ -4,8 +4,6 @@ var exports = {};
 
 var actively_scrolling = false;
 
-exports.have_scrolled_away_from_top = true;
-
 exports.actively_scrolling = function () {
     return actively_scrolling;
 };
@@ -14,8 +12,24 @@ exports.actively_scrolling = function () {
 
 exports.replace_emoji_with_text = function (element) {
     element.find(".emoji").replaceWith(function () {
-        return $(this).attr("alt");
+        if ($(this).is("img")) {
+            return $(this).attr("alt");
+        }
+        return $(this).text();
     });
+};
+
+exports.set_up_scrollbar = function (element) {
+    element.perfectScrollbar({
+        suppressScrollX: true,
+        useKeyboard: false,
+        wheelSpeed: 0.68,
+    });
+};
+
+exports.update_scrollbar = function (element) {
+    element.scrollTop = 0;
+    element.perfectScrollbar('update');
 };
 
 function update_message_in_all_views(message_id, callback) {
@@ -32,6 +46,21 @@ function update_message_in_all_views(message_id, callback) {
         callback(row);
     });
 }
+
+exports.show_error_for_unsupported_platform = function () {
+    // Check if the user is using old desktop app
+    if (window.bridge !== undefined) {
+        // We don't internationalize this string because it is long,
+        // and few users will have both the old desktop app and an
+        // internationalized version of Zulip anyway.
+        var error = "Hello! You're using the unsupported old Zulip desktop app," +
+            " which is no longer developed. We recommend switching to the new, " +
+            "modern desktop app, which you can download at " +
+            "<a href='https://zulipchat.com/apps'>zulipchat.com/apps</a>.";
+
+        ui_report.generic_embed_error(error);
+    }
+};
 
 exports.find_message = function (message_id) {
     // Try to find the message object. It might be in the narrow list
@@ -69,24 +98,9 @@ exports.update_starred = function (message_id, starred) {
         } else {
             elt.removeClass("icon-vector-star").addClass("icon-vector-star-empty").addClass("empty-star");
         }
-        var title_state = message.starred ? "Unstar" : "Star";
-        elt.attr("title", title_state + " this message");
+        var title_state = starred ? i18n.t("Unstar") : i18n.t("Star");
+        elt.attr("title", i18n.t("__starred_status__ this message", {starred_status: title_state}));
     });
-};
-
-var local_messages_to_show = [];
-var show_message_timestamps = _.throttle(function () {
-    _.each(local_messages_to_show, function (message_id) {
-        update_message_in_all_views(message_id, function update_row(row) {
-            row.find('.message_time').toggleClass('notvisible', false);
-        });
-    });
-    local_messages_to_show = [];
-}, 100);
-
-exports.show_local_message_arrived = function (message_id) {
-    local_messages_to_show.push(message_id);
-    show_message_timestamps();
 };
 
 exports.show_message_failed = function (message_id, failed_msg) {
@@ -117,15 +131,14 @@ exports.show_failed_message_success = function (message_id) {
     });
 };
 
-$(document).ready(function () {
-
+function _setup_info_overlay() {
     var info_overlay_toggle = components.toggle({
         name: "info-overlay-toggle",
         selected: 0,
         values: [
-            { label: "Keyboard shortcuts", key: "keyboard-shortcuts" },
-            { label: "Message formatting", key: "markdown-help" },
-            { label: "Search operators", key: "search-operators" },
+            { label: i18n.t("Keyboard shortcuts"), key: "keyboard-shortcuts" },
+            { label: i18n.t("Message formatting"), key: "markdown-help" },
+            { label: i18n.t("Search operators"), key: "search-operators" },
         ],
         callback: function (name, key) {
             $(".overlay-modal").hide();
@@ -136,7 +149,7 @@ $(document).ready(function () {
 
     $(".informational-overlays .overlay-tabs")
         .append($(info_overlay_toggle).addClass("large"));
-});
+}
 
 exports.show_info_overlay = function (target) {
     var overlay = $(".informational-overlays");
@@ -154,6 +167,16 @@ exports.show_info_overlay = function (target) {
     if (target) {
         components.toggle.lookup("info-overlay-toggle").goto(target);
     }
+};
+
+exports.maybe_show_keyboard_shortcuts = function () {
+    if (overlays.is_active()) {
+        return;
+    }
+    if (popovers.any_active()) {
+        return;
+    }
+    ui.show_info_overlay("keyboard-shortcuts");
 };
 
 var loading_more_messages_indicator_showing = false;
@@ -198,13 +221,10 @@ function scroll_finished() {
             pointer.suppress_scroll_pointer_update = false;
         }
         floating_recipient_bar.update();
-        if (message_viewport.scrollTop() === 0 &&
-            ui.have_scrolled_away_from_top) {
-            ui.have_scrolled_away_from_top = false;
+        if (message_viewport.scrollTop() === 0) {
             message_fetch.load_more_messages(current_msg_list);
-        } else if (!ui.have_scrolled_away_from_top) {
-            ui.have_scrolled_away_from_top = true;
         }
+
         // When the window scrolls, it may cause some messages to
         // enter the screen and become read.  Calling
         // unread_ops.process_visible will update necessary
@@ -260,6 +280,11 @@ $(function () {
         $("#desktop-zephyr-mirror-error-text").removeClass("notdisplayed");
     }
 });
+
+exports.initialize = function () {
+    i18n.ensure_i18n(_setup_info_overlay);
+    exports.show_error_for_unsupported_platform();
+};
 
 return exports;
 }());

@@ -55,7 +55,11 @@ exports.MessageList.prototype = {
                     return;
                 }
 
-                // Put messages in correct order on either side of the message list
+                // Put messages in correct order on either side of the
+                // message list.  This code path assumes that messages
+                // is a (1) sorted, and (2) consecutive block of
+                // messages that belong in this message list; those
+                // facts should be ensured by the caller.
                 if (self.empty() || msg.id > self.last().id) {
                     bottom_messages.push(msg);
                 } else if (msg.id < self.first().id) {
@@ -169,6 +173,8 @@ exports.MessageList.prototype = {
 
         var closest_id = this.closest_id(id);
 
+        var error_data;
+
         // The name "use_closest" option is a bit legacy.  We
         // are always gonna move to the closest visible id; the flag
         // just says whether we call blueslip.error or not.  The caller
@@ -176,12 +182,17 @@ exports.MessageList.prototype = {
         // pointer as needed, so only generate an error if the flag is
         // false.
         if (!opts.use_closest && closest_id !== id) {
+            error_data = {
+                table_name: this.table_name,
+                id: id,
+                closest_id: closest_id,
+            };
             blueslip.error("Selected message id not in MessageList",
-                           {table_name: this.table_name, id: id});
+                           error_data);
         }
 
         if (closest_id === -1 && !opts.empty_ok) {
-            var error_data = {
+            error_data = {
                 table_name: this.table_name,
                 id: id,
                 items_length: this._items.length,
@@ -281,7 +292,14 @@ exports.MessageList.prototype = {
                 if (potential_idx < 0) {
                     return;
                 }
-                var potential_match = items[potential_idx].id;
+                var item = items[potential_idx];
+
+                if (item === undefined) {
+                    blueslip.warn('Invalid potential_idx: ' + potential_idx);
+                    return;
+                }
+
+                var potential_match = item.id;
                 // If the potential id is the closest to the requested, save that one
                 if (Math.abs(id - potential_match) < Math.abs(best_match - id)) {
                     best_match = potential_match;
@@ -365,23 +383,33 @@ exports.MessageList.prototype = {
         if (!this.narrowed) {
             return;
         }
-        var stream = narrow_state.stream();
-        if (stream === undefined) {
+        var stream_name = narrow_state.stream();
+        if (stream_name === undefined) {
             return;
         }
         var trailing_bookend_content;
-        var subscribed = stream_data.is_subscribed(stream);
+        var show_button = true;
+        var subscribed = stream_data.is_subscribed(stream_name);
         if (subscribed) {
-            trailing_bookend_content = this.subscribed_bookend_content(stream);
+            trailing_bookend_content = this.subscribed_bookend_content(stream_name);
         } else {
             if (!this.last_message_historical) {
-                trailing_bookend_content = this.unsubscribed_bookend_content(stream);
+                trailing_bookend_content = this.unsubscribed_bookend_content(stream_name);
+
+                // For invite only streams or streams that no longer
+                // exist, hide the resubscribe button
+                var sub = stream_data.get_sub(stream_name);
+                if (sub !== undefined) {
+                    show_button = !sub.invite_only;
+                } else {
+                    show_button = false;
+                }
             } else {
-                trailing_bookend_content = this.not_subscribed_bookend_content(stream);
+                trailing_bookend_content = this.not_subscribed_bookend_content(stream_name);
             }
         }
         if (trailing_bookend_content !== undefined) {
-            this.view.render_trailing_bookend(trailing_bookend_content, subscribed);
+            this.view.render_trailing_bookend(trailing_bookend_content, subscribed, show_button);
         }
     },
 
@@ -478,23 +506,26 @@ exports.MessageList.prototype = {
     show_edit_message: function MessageList_show_edit_message(row, edit_obj) {
         row.find(".message_edit_form").empty().append(edit_obj.form);
         row.find(".message_content, .status-message").hide();
-        row.find(".message_edit").show();
+        row.find(".message_edit").css("display", "block");
         row.find(".message_edit_content").autosize();
     },
 
     hide_edit_message: function MessageList_hide_edit_message(row) {
         row.find(".message_content, .status-message").show();
         row.find(".message_edit").hide();
+        row.trigger("mouseleave");
     },
 
     show_edit_topic: function MessageList_show_edit_topic(recipient_row, form) {
         recipient_row.find(".topic_edit_form").empty().append(form);
+        recipient_row.find('.icon-vector-pencil').hide();
         recipient_row.find(".stream_topic").hide();
         recipient_row.find(".topic_edit").show();
     },
 
     hide_edit_topic: function MessageList_hide_edit_topic(recipient_row) {
         recipient_row.find(".stream_topic").show();
+        recipient_row.find('.icon-vector-pencil').show();
         recipient_row.find(".topic_edit").hide();
     },
 
@@ -533,6 +564,19 @@ exports.MessageList.prototype = {
 
     all_messages: function MessageList_all_messages() {
         return this._items;
+    },
+
+    first_unread_message_id: function MessageList_first_unread_message_id() {
+        var first_unread = _.find(this._items, function (message) {
+            return unread.message_unread(message);
+        });
+
+        if (first_unread) {
+            return first_unread.id;
+        }
+
+        // if no unread, return the bottom message
+        return this.last().id;
     },
 
     // Returns messages from the given message list in the specified range, inclusive
@@ -626,7 +670,7 @@ exports.MessageList.prototype = {
             var index = self._items.indexOf(current_message);
 
             if (index === -1) {
-                if ( !self.muting_enabled && current_msg_list === self) {
+                if (!self.muting_enabled && current_msg_list === self) {
                     blueslip.error("Trying to re-order message but can't find message with new_id in _items!");
                 }
                 return;
@@ -672,7 +716,7 @@ exports.all = new exports.MessageList(
 // doing something.  Be careful, though, if you try to capture
 // mousemove, then you will have to contend with the autoscroll
 // itself generating mousemove events.
-$(document).on('message_selected.zulip zuliphashchange.zulip mousewheel', function () {
+$(document).on('message_selected.zulip zuliphashchange.zulip wheel', function () {
     message_viewport.stop_auto_scrolling();
 });
 

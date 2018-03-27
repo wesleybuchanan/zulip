@@ -128,6 +128,19 @@ exports.restore_draft = function (draft_id) {
                               draft_copy);
     }
 
+    if (draft.type === "stream") {
+        if (draft.stream !== "") {
+            narrow.activate([{operator: "stream", operand: draft.stream},
+                             {operator: "topic", operand: draft.subject}],
+                             {select_first_unread: true, trigger: "restore draft"});
+        }
+    } else {
+        if (draft.private_message_recipient !== "") {
+            narrow.activate([{operator: "pm-with", operand: draft.private_message_recipient}],
+                             {select_first_unread: true, trigger: "restore draft"});
+        }
+    }
+
     overlays.close_overlay("drafts");
     compose_fade.clear_compose();
     if (draft.type === "stream" && draft.stream === "") {
@@ -162,7 +175,8 @@ exports.setup_page = function (callback) {
     }
 
     function format_drafts(data) {
-        var drafts = _.mapObject(data, function (draft, id) {
+        var drafts = {};
+        _.each(data, function (draft, id) {
             var formatted;
             if (draft.type === "stream") {
                 // In case there is no stream for the draft, we need a
@@ -181,8 +195,6 @@ exports.setup_page = function (callback) {
                     raw_content: draft.content,
 
                 };
-
-                markdown.apply_markdown(formatted);
             } else {
                 var emails = util.extract_pm_recipients(draft.private_message_recipient);
                 var recipients = _.map(emails, function (email) {
@@ -200,9 +212,25 @@ exports.setup_page = function (callback) {
                     recipients: recipients,
                     raw_content: draft.content,
                 };
-                markdown.apply_markdown(formatted);
             }
-            return formatted;
+
+            try {
+                markdown.apply_markdown(formatted);
+            } catch (error) {
+                // In the unlikely event that there is syntax in the
+                // draft content which our markdown processor is
+                // unable to process, we delete the draft, so that the
+                // drafts overlay can be opened without any errors.
+                // We also report the exception to the server so that
+                // the bug can be fixed.
+                draft_model.deleteDraft(id);
+                blueslip.error("Error in rendering draft.", {
+                    draft_content: draft.content,
+                }, error.stack);
+                return;
+            }
+
+            drafts[id] = formatted;
         });
         return drafts;
     }
@@ -229,10 +257,6 @@ exports.setup_page = function (callback) {
         });
     }
     populate_and_fill();
-};
-
-exports.drafts_overlay_open = function () {
-    return $("#draft_overlay").hasClass("show");
 };
 
 function drafts_initialize_focus(event_name) {
@@ -353,7 +377,7 @@ exports.drafts_handle_events = function (e, event_key) {
 };
 
 exports.toggle = function () {
-    if (exports.drafts_overlay_open()) {
+    if (overlays.drafts_open()) {
         overlays.close_overlay("drafts");
     } else {
         exports.launch();
@@ -370,7 +394,6 @@ exports.launch = function () {
             },
         });
 
-        $("#draft_overlay").addClass("show");
         var draft_list = drafts.draft_model.get();
         var draft_id_list = Object.getOwnPropertyNames(draft_list);
         if (draft_id_list.length > 0) {
@@ -383,14 +406,13 @@ exports.launch = function () {
     });
 };
 
-$(function () {
-
+exports.initialize = function () {
     window.addEventListener("beforeunload", function () {
         exports.update_draft();
     });
 
     $("#new_message_content").focusout(exports.update_draft);
-});
+};
 
 return exports;
 

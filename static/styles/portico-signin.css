@@ -2,36 +2,17 @@ html {
     min-height: 500px;
 }
 
-.app-main .bg-image {
-    position: fixed;
-    top: 0px;
-    left: 0px;
-    width: 100vw;
-    height: 100vh;
-
-    background-color: #fafafa;
-
-    z-index: -1;
-}
-
 .flex {
     display: flex;
-    height: calc(100vh - 100px);
+    padding: 80px 0px;
     align-items: center;
     justify-content: center;
-}
 
-.flex.full-page {
-    min-height: calc(100vh - 170px);
-    height: auto;
+    min-height: calc(100vh - 407px);
 }
 
 .m-10 {
     margin: 10px;
-}
-
-.footer {
-    padding: 20px 0px 10px 0px;
 }
 
 .white-box {
@@ -40,10 +21,16 @@ html {
     min-width: 0px;
 
     background-color: #fff;
-    box-shadow: 0px 0px 100px rgba(0,0,0,0.2);
+    box-shadow: 0px 0px 4px hsla(0, 0%, 0%, 0.1);
+    border: 1px solid #ddd;
+    border-radius: 4px;
 }
 
-.find-team-page-container #find_my_team i {
+.grey {
+    color: #aaa;
+}
+
+.find-account-page-container #find_account i {
     font-size: 0.8em;
 }
 
@@ -76,6 +63,30 @@ html {
     font-weight: 600;
 }
 
+.register-page-container.closed-realm .right-side {
+    display: none;
+}
+
+.register-page-container.closed-realm .left-side {
+    border-right: none;
+}
+
+.register-page-container .invite-required {
+    display: none;
+    line-height: 1;
+}
+
+.register-page-container .invite-required i {
+    margin-right: 5px;
+}
+
+.register-page-container.closed-realm .invite-required {
+    display: block;
+
+    color: #aaa;
+    font-weight: normal;
+}
+
 .new-style .inline-block {
     text-align: left;
 }
@@ -97,7 +108,7 @@ html {
 
 .app-main .login-page-container.dev-login h2 {
     font-size: 1em;
-    font-weight: 500;
+    font-weight: 400;
 }
 
 .app-main .login-page-container .group {
@@ -111,22 +122,41 @@ html {
     font-weight: 400;
 }
 
-.app-main.find-team-page-container {
-    width: 456px;
+.app-main.find-account-page-container {
+    width: 500px;
     font-weight: 400;
 }
 
 .app-main.confirm-continue-page-container {
-    width: 600px;
+    width: 400px;
     font-weight: 400;
 }
 
-.app-main.confirm-continue-page-container .form-inline {
-    width: 320px;
-    margin: auto;
+.app-main.confirm-continue-page-container .white-box {
+    min-width: 365px;
 }
 
-.find-team-page-container h3,
+.app-main.confirm-continue-page-container .form-inline {
+    display: inline-block;
+    width: 180px;
+}
+
+.app-main.confirm-continue-page-container .form-inline .outline {
+    border: 2px inset hsl(213, 23%, 25%);
+    background-color: hsl(0, 0%, 100%);
+    color: hsl(213, 23%, 25%);
+    padding: 13px 20px 11px 20px;
+}
+
+.app-main.confirm-continue-page-container .form-inline .outline:hover {
+    background-color: hsl(213, 65%, 97%);
+}
+
+.app-main.confirm-continue-page-container p {
+    font-size: 19px;
+}
+
+.find-account-page-container h3,
 .forgot-password-container h3 {
     margin-top: 0px;
 
@@ -146,25 +176,25 @@ html {
     margin-bottom: 0px;
 }
 
-.header {
-    padding: 15px 0px 15px 0px;
+.deactivated-realm-container {
+    width: 503px;
 }
 
-.header,
-.header .stripes,
-.header .darker {
-    background: #fff;
+.header {
+    color: hsl(0, 0%, 27%);
+}
 
-    color: #444;
+.header {
+    background-color: #fff;
 }
 
 .header .top-links a,
 .header .header-main .logo span {
-    color: #444;
+    color: hsl(0, 0%, 27%);
 }
 
 .header .header-main .logo .brand-logo circle {
-    fill: #444 !important;
+    fill: hsl(0, 0%, 27%) !important;
 }
 
 .header .header-main .logo .brand-logo path {
@@ -179,11 +209,12 @@ html {
 
 .register-form.new-style {
     text-align: left;
+    color: hsl(0, 0%, 45%);
 }
 
 .register-form #errors {
     font-size: 0.8em;
-    font-weight: 500;
+    font-weight: 400;
     margin-bottom: 20px;
     margin-top: 10px;
 }
@@ -193,11 +224,18 @@ html {
 }
 
 .register-account .terms-of-service .input-group {
-    margin: 0px 0px 10px 10px;
+    margin: 0px 30px 10px 32px;
 }
 
-.register-account .terms-of-service .submit-button-box button {
-    margin-top: 0px;
+.register-account .terms-of-service .text-error {
+    position: relative;
+    display: block;
+    top: -5px;
+    padding: 0;
+    height: 0;
+
+    font-size: 0.7em;
+    font-weight: 600;
 }
 
 .account-creation {
@@ -241,7 +279,11 @@ html {
 .new-style button {
     display: inline-block;
     vertical-align: top;
-    margin-top: 20px;
+    margin-top: 25px;
+}
+
+.new-style button:focus {
+    outline: 3px solid hsl(213, 81%, 79%);
 }
 
 .new-style button.full-width {
@@ -256,13 +298,13 @@ html {
     padding: 0;
     margin-bottom: 0;
 
-    font-weight: 500;
-    font-size: 0.8em;
+    font-weight: 600;
+    font-size: 0.7em;
     line-height: 1.2;
     background-color: transparent;
 
     border: none;
-    color: rgb(190, 88, 88);
+    color: hsl(0, 44%, 54%);
 
 }
 
@@ -270,18 +312,24 @@ html {
     max-width: 328px;
 }
 
+.new-style .alert.alert-error {
+    text-align: left;
+}
+
 .new-style .input-box input[type=text],
 .new-style .input-box input[type=email],
 .new-style .input-box input[type=password] {
-    padding: 13px 32px 11px 12px;
-    margin-top: 25px;
+    padding: 9px 32px 11px 12px;
+    margin: 25px 0 4px;
 
-    font-family: "Humbug";
+    font-family: "Source Sans Pro";
     font-size: 1.2rem;
+    line-height: normal;
+    height: auto;
 
     width: 280px;
 
-    border: 2px solid #ddd;
+    border: 2px solid hsl(0, 0%, 86%);
     box-shadow: none;
     border-radius: 0px;
 
@@ -301,11 +349,10 @@ html {
 .new-style .input-box.moving-label input[type=text]:invalid + label,
 .new-style .input-box.moving-label input[type=email]:invalid + label,
 .new-style .input-box.moving-label input[type=password]:invalid + label {
-    left: 50%;
-    transform: translateY(35px) translateX(-50%);
+    transform: translateY(35px) translateX(14px);
     font-size: 1.2rem;
-    font-weight: 500;
-    color: #aaa;
+    font-weight: 400;
+    color: hsl(0, 0%, 66%);
 
     pointer-events: none;
 }
@@ -314,55 +361,13 @@ html {
 .new-style .input-box input[type=email]:focus:invalid,
 .new-style .input-box input[type=password]:focus:invalid {
     box-shadow: none;
-    color: #444;
+    color: hsl(0, 0%, 27%);
 }
 
 .new-style .input-box input[type=text]:focus,
 .new-style .input-box input[type=email]:focus,
 .new-style .input-box input[type=password]:focus {
-    border: 2px solid #888;
-}
-
-.new-style .input-box input[required] ~ .required:after {
-    /* content: "*"; */
-    position: absolute;
-    top: 25px;
-    right: 5px;
-    transform: translateY(8px);
-
-    color: #d66a6a;
-    font-size: 2em;
-    font-weight: 300;
-    transition: all 0.3s ease;
-}
-
-.new-style .input-box.no-validation input[required] ~ .required:after {
-    visibility: hidden;
-}
-
-.new-style .input-box.horizontal button {
-    margin-top: 25px;
-}
-
-.new-style .input-box input[required]:valid ~ .required:after {
-    transform: translateY(0px);
-    opacity: 0;
-}
-
-.new-style .input-box input[required] ~ .valid {
-    position: absolute;
-    top: 42px;
-    right: 15px;
-    width: 15px;
-    transform: translateX(10px);
-    opacity: 0;
-
-    transition: all 0.3s ease;
-}
-
-.new-style .input-box input[required]:valid ~ .valid {
-    opacity: 1;
-    transform: translateX(0);
+    border: 2px solid hsl(0, 0%, 53%);
 }
 
 .new-style .input-box label,
@@ -378,27 +383,29 @@ html {
 
     font-size: 1rem;
     font-weight: 600;
-    color: #444;
+    color: hsl(0, 0%, 27%);
 }
 
 .new-style .input-box p.text-error {
     display: block;
     padding: 0px;
 
-    color: #d26666;
+    color: hsl(0, 54%, 61%);
     font-size: 0.7em;
     font-weight: 600;
+    text-align: left;
     height: 0;
 
     position: relative;
     top: -4px;
+    left: 1px;
 }
 
 .new-style .input-box label.text-error {
     display: block;
 
     top: 66px;
-    color: #d26666;
+    color: hsl(0, 54%, 61%);
     font-size: 0.7em;
     font-weight: 600;
     padding-left: 0px;
@@ -407,7 +414,7 @@ html {
 .new-style .get-started {
     font-size: 2.5rem;
     text-align: center;
-    color: #666;
+    color: hsl(0, 0%, 40%);
 }
 
 .new-style button {
@@ -415,14 +422,14 @@ html {
     vertical-align: top;
     padding: 15px 22px 13px 22px;
 
-    font-family: "Humbug";
+    font-family: "Source Sans Pro";
 
     font-size: 1.2rem;
     font-weight: 400;
     box-sizing: border-box;
     outline: none;
     color: #fff;
-    background-color: #313e4e;
+    background-color: hsl(213, 23%, 25%);
 
     border: none;
 
@@ -430,11 +437,11 @@ html {
 }
 
 .new-style button:hover {
-    background-color: #354c69;
+    background-color: hsl(213, 33%, 31%);
 }
 
 .new-style button:active {
-    background-color: #1d2734;
+    background-color: hsl(214, 28%, 16%);
 }
 
 /* -- /accounts/register/ page -- */
@@ -444,7 +451,7 @@ html {
 
 .portico-page .pitch p {
     font-weight: 400;
-    color: #aaa;
+    color: hsl(0, 0%, 66%);
 }
 
 .register-account .pitch {
@@ -453,8 +460,8 @@ html {
 }
 
 .login-page-container input[type=submit] {
-    color: #aaa;
-    border: 2px solid #ddd;
+    color: hsl(0, 0%, 66%);
+    border: 2px solid hsl(0, 0%, 86%);
     border-radius: 0px;
     background: transparent;
 
@@ -462,18 +469,18 @@ html {
 }
 
 .login-page-container input[type=submit]:hover {
-    border-color: #888;
-    color: #444;
+    border-color: hsl(0, 0%, 53%);
+    color: hsl(0, 0%, 27%);
 }
 
 .login-page-container input[type=submit].btn-admin {
-    border-color: #54b8a7;
-    color: #54b8a7;
+    border-color: hsl(170, 41%, 52%);
+    color: hsl(170, 41%, 52%);
 }
 
 .login-page-container input[type=submit].btn-admin:hover {
-    color: #60daaa;
-    border-color: #60daaa;
+    color: hsl(156, 62%, 61%);
+    border-color: hsl(156, 62%, 61%);
 }
 
 .split-view .org-header {
@@ -497,7 +504,7 @@ html {
 .split-view .org-header .info-box {
     display: inline-block;
     position: relative;
-    margin: 15px 0px 0px 20px;
+    margin: 20px 0px 0px 20px;
     width: calc(100% - 125px);
 
     /* full width minus the avatar + padding + borders */
@@ -515,24 +522,28 @@ html {
 .split-view .info-box .organization-name {
     font-size: 1.5em;
     font-weight: 300;
-    line-height: 1;
+    line-height: 1.2;
 }
 
 .split-view .info-box .organization-path {
-    font-weight: 500;
-    color: #aaa;
-    margin-top: 10px;
+    font-weight: 400;
+    color: hsl(0, 0%, 46%);
+    margin-top: 5px;
 }
 
 .new-style .lead {
     margin: 0px;
 }
 
+.confirm-email-change-page .white-box {
+    max-width: 500px;
+}
+
 .portico-page .or {
     width: 328px;
     display: block;
-    margin: 0 auto;
-    color: #bbb;
+    margin: 10px auto;
+    color: hsl(0, 0%, 34%);
     font-weight: 600;
     text-align: center;
     text-transform: uppercase;
@@ -547,7 +558,7 @@ html {
     width: calc(149px);
     top: -3px;
 
-    border-bottom: 2px solid #ddd;
+    border-bottom: 2px solid hsl(0, 0%, 86%);
 
 }
 
@@ -560,7 +571,6 @@ html {
 }
 
 .login-google {
-    margin-top: 10px;
     margin-bottom: 10px;
 }
 
@@ -581,20 +591,20 @@ button.login-github-button {
 button.login-google-button,
 button.login-github-button {
     background-color: #fff;
-    box-shadow: 0px 1px 3px rgba(0,0,0,0.3), 0px 0px 5px rgba(0,0,0,0.1);
-    color: #888;
+    box-shadow: 0px 1px 3px hsla(0, 0%, 0%, 0.3), 0px 0px 5px hsla(0, 0%, 0%, 0.1);
+    color: hsl(0, 0%, 34%);
 }
 
 button.login-google-button:hover,
 button.login-github-button:hover {
-    background-color: #fafafa;
-    box-shadow: 1px 2px 5px rgba(0,0,0,0.2);
+    background-color: hsl(0, 0%, 98%);
+    box-shadow: 1px 2px 5px hsla(0, 0%, 0%, 0.2);
 }
 
 button.login-google-button:active,
 button.login-github-button:active {
-    background-color: #eee;
-    box-shadow: 0px 1px 1px rgba(0,0,0,0.3);
+    background-color: hsl(0, 0%, 93%);
+    box-shadow: 0px 1px 1px hsla(0, 0%, 0%, 0.3);
 }
 
 button.login-google-button {
@@ -607,17 +617,29 @@ button.login-google-button {
 
     font-family: "FontAwesome";
     font-size: 2rem;
-    color: #333;
+    color: hsl(0, 0%, 20%);
     transform: translateX(15px) translateY(13px);
 }
 
-.login-page-container .right-side .actions {
+.login-page-container .right-side .actions,
+.forgot-password-container .actions {
     margin: 20px 0px 0px;
     text-align: left;
 }
 
-.split-view .actions a {
-    color: #54b8a7;
+.forgot-password-container .actions {
+    line-height: 0;
+}
+.forgot-password-container .actions .back-to-login i {
+    position: relative;
+    top: 5px;
+
+    font-size: 0.8em;
+}
+
+.split-view .actions a,
+.back-to-login {
+    color: hsl(164, 100%, 23%);
     text-decoration: none;
     font-weight: 600;
     font-size: 0.8em;
@@ -627,16 +649,93 @@ button.login-google-button {
     transition: color 0.2s ease;
 }
 
-.split-view .actions a:hover {
-    color: #60daaa;
-}
-
-#registration .input-box {
-    margin: 10px;
+.split-view .actions a:hover,
+.back-to-login:hover {
+    text-decoration: none;
+    color: hsl(156, 62%, 61%);
 }
 
 #registration {
-    width: 700px;
+    width: auto;
+    padding: 0;
+    margin: 30px;
+}
+
+#registration section {
+    margin: 30px;
+}
+
+#registration .input-box {
+    display: block;
+    text-align: center;
+    width: 330px;
+    margin: 30px auto 10px;
+    position: relative;
+}
+
+#registration .input-box.with-top-space {
+    margin-top: 50px;
+}
+
+#registration .input-box label {
+    position: absolute;
+    margin: 0;
+    top: 0;
+    left: 2px;
+}
+
+#registration .input-box label.static {
+    width: 100%;
+    text-align: left;
+    position: static !important;
+    margin-left: 2px;
+}
+
+
+#registration [for="realm_in_root_domain"] {
+    font-weight: normal !important;
+}
+
+#registration .register-button-box {
+    text-align: center;
+}
+
+#registration .register-button {
+    margin: 25px auto 30px;
+    width: 330px;
+    border-radius: 4px;
+}
+
+#registration #id_team_subdomain.subdomain {
+    text-align: right;
+    position: relative;
+    padding-right: 10px;
+
+    width: 156px;
+}
+
+#registration #id_team_subdomain.subdomain + .realm_subdomain_label {
+    float: right;
+    margin-top: 12px;
+    margin-left: 10px;
+
+    font-weight: normal;
+}
+
+#registration #id_team_subdomain.subdomain {
+    margin-top: 0px;
+}
+
+#registration #subdomain_section .or {
+    margin-top: 0px;
+}
+
+.static.org-url + #subdomain_section {
+    margin-top: 0px !important;
+}
+
+.static.org-url + #subdomain_section .or {
+    display: none;
 }
 
 #registration .input-box.full-width {
@@ -644,13 +743,14 @@ button.login-google-button {
 }
 
 #registration .help-box {
-    width: calc(100% - 20px);
+    width: calc(100% - 25px);
     max-width: none;
-    margin: 0px;
+    margin: 0 auto;
 }
 
 #registration .help-box.margin-top {
-    margin-top: 20px;
+    margin-top: 21px;
+    text-align: left;
 }
 
 #registration .external-host {
@@ -660,7 +760,7 @@ button.login-google-button {
     font-weight: 400;
     font-size: 1.2rem;
 
-    background-color: #ddd;
+    background-color: hsl(0, 0%, 86%);
 }
 
 #registration .center-block .pitch {
@@ -680,6 +780,10 @@ button.login-google-button {
     margin-top: -1px;
 }
 
+#registration .org-url {
+    margin-bottom: 5px !important;
+}
+
 .split-view .right-side,
 .split-view .left-side {
     display: inline-block;
@@ -688,13 +792,13 @@ button.login-google-button {
 
 .split-view .left-side {
     width: 500px;
-    border-right: 1px solid #eee;
+    border-right: 1px solid hsl(0, 0%, 93%);
     position: relative;
     left: -1px;
 }
 
 .split-view .left-side + .right-side {
-    border-left: 1px solid #eee;
+    border-left: 1px solid hsl(0, 0%, 93%);
     /* this is to make sure the borders of the left and right side overlap
        each other. */
     padding-left: 15px;
@@ -709,6 +813,8 @@ button.login-google-button {
     margin-right: 10px;
 }
 
+/* -- media queries -- */
+
 @media (max-width: 950px) {
     .split-view .left-side {
         width: 400px;
@@ -721,16 +827,21 @@ button.login-google-button {
     }
 }
 
+@media (max-width: 815px) {
+    .flex {
+        min-height: calc(100vh - 530px);
+    }
+}
 
 @media (max-width: 795px) {
     .register-account #registration {
         padding: 10px;
-        width: calc(350px);
     }
 
     .register-page-container,
     .login-page-container {
         width: 400px;
+        text-align: center;
     }
 
     .split-view .org-header .avatar {
@@ -771,25 +882,23 @@ button.login-google-button {
         margin: 20px 0px;
     }
 
+    .split-view .left-side .description a {
+        color: hsl(200, 100%, 36%);
+    }
+
     .split-view .right-side {
         width: 324px;
     }
 }
 
 @media (max-width: 500px) {
-    .flex.full-page {
-        display: block;
-        margin: 0 auto;
-        text-align: center;
-    }
-
     .new-style .get-started {
         font-size: 1.6em;
     }
 
     .app-main.register-page-container,
     .app-main.login-page-container,
-    .app-main.find-team-page-container,
+    .app-main.find-account-page-container,
     .app-main.forgot-password-container {
         display: inline-block;
         padding: 20px;
@@ -815,5 +924,16 @@ button.login-google-button {
 
     .account-creation {
         font-weight: 400;
+    }
+
+    .flex {
+        /* the header becomes smaller, so comp for that. */
+        min-height: calc(100vh - 505px);
+    }
+}
+
+@media (max-width: 400px) {
+    .flex {
+        min-height: calc(100vh - 560px);
     }
 }

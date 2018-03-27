@@ -1,10 +1,9 @@
-from __future__ import absolute_import
 import re
 import logging
 from functools import partial
 from typing import Any, Callable, Text, Dict, Optional
 from django.http import HttpRequest, HttpResponse
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success
 from zerver.lib.request import JsonableError
 from zerver.models import UserProfile
@@ -42,14 +41,16 @@ def get_opened_or_update_pull_request_body(payload):
 def get_assigned_or_unassigned_pull_request_body(payload):
     # type: (Dict[str, Any]) -> Text
     pull_request = payload['pull_request']
-    assignee = pull_request.get('assignee', {}).get('login')
+    assignee = pull_request.get('assignee')
+    if assignee is not None:
+        assignee = assignee.get('login')
 
     base_message = get_pull_request_event_message(
         get_sender_name(payload),
         payload['action'],
         pull_request['html_url'],
     )
-    if assignee:
+    if assignee is not None:
         return "{} to {}".format(base_message, assignee)
     return base_message
 
@@ -270,7 +271,7 @@ def get_status_body(payload):
         )
     else:
         status = payload['state']
-    return u"[{}]({}) changed it's status to {}".format(
+    return u"[{}]({}) changed its status to {}".format(
         payload['sha'][:7],  # TODO
         payload['commit']['html_url'],
         status
@@ -307,6 +308,10 @@ def get_ping_body(payload):
 def get_repository_name(payload):
     # type: (Dict[str, Any]) -> Text
     return payload['repository']['name']
+
+def get_organization_name(payload):
+    # type: (Dict[str, Any]) -> Text
+    return payload['organization']['login']
 
 def get_sender_name(payload):
     # type: (Dict[str, Any]) -> Text
@@ -357,6 +362,9 @@ def get_subject_based_on_type(payload, event):
             repo=get_repository_name(payload),
             branch='Wiki Pages'
         )
+    elif event == 'ping':
+        if payload.get('repository') is None:
+            return get_organization_name(payload)
     return get_repository_name(payload)
 
 EVENT_FUNCTION_MAPPER = {
@@ -370,7 +378,7 @@ EVENT_FUNCTION_MAPPER = {
     'fork': get_fork_body,
     'gollum': get_wiki_pages_body,
     'issue_comment': get_issue_comment_body,
-    'issue': get_issue_body,
+    'issues': get_issue_body,
     'member': get_member_body,
     'membership': get_membership_body,
     'opened_or_update_pull_request': get_opened_or_update_pull_request_body,
@@ -398,7 +406,7 @@ def api_github_webhook(
     if event is not None:
         subject = get_subject_based_on_type(payload, event)
         body = get_body_function_based_on_type(event)(payload)
-        check_send_message(user_profile, request.client, 'stream', [stream], subject, body)
+        check_send_stream_message(user_profile, request.client, stream, subject, body)
     return json_success()
 
 def get_event(request, payload, branches):
@@ -412,7 +420,7 @@ def get_event(request, payload, branches):
             return 'assigned_or_unassigned_pull_request'
         if action == 'closed':
             return 'closed_pull_request'
-        logging.warn(u'Event pull_request with {} action is unsupported'.format(action))
+        logging.warning(u'Event pull_request with {} action is unsupported'.format(action))
         return None
     if event == 'push':
         if is_commit_push_event(payload):
@@ -425,7 +433,7 @@ def get_event(request, payload, branches):
             return "push_tags"
     elif event in list(EVENT_FUNCTION_MAPPER.keys()) or event == 'ping':
         return event
-    logging.warn(u'Event {} is unknown and cannot be handled'.format(event))
+    logging.warning(u'Event {} is unknown and cannot be handled'.format(event))
     return None
 
 def get_body_function_based_on_type(type):

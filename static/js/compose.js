@@ -17,7 +17,7 @@ exports.all_everyone_warn_threshold = 15;
 var uploads_domain = document.location.protocol + '//' + document.location.host;
 var uploads_path = '/user_uploads';
 var uploads_re = new RegExp("\\]\\(" + uploads_domain + "(" + uploads_path + "[^\\)]+)\\)", 'g');
-
+var clone_file_input;
 function make_upload_absolute(uri) {
     if (uri.indexOf(uploads_path) === 0) {
         // Rewrite the URI to a usable link
@@ -34,17 +34,16 @@ function make_uploads_relative(content) {
 // This function resets an input type="file".  Pass in the
 // jquery object.
 function clear_out_file_list(jq_file_list) {
-    var clone_for_ie_sake = jq_file_list.clone(true);
-    jq_file_list.replaceWith(clone_for_ie_sake);
-
+    if (clone_file_input !== undefined) {
+        jq_file_list.replaceWith(clone_file_input.clone(true));
+    }
     // Hack explanation:
     // IE won't let you do this (untested, but so says StackOverflow):
     //    $("#file_input").val("");
 }
 
 function show_all_everyone_warnings() {
-    var current_stream = stream_data.get_sub(compose_state.stream_name());
-    var stream_count = current_stream.subscribers.num_items();
+    var stream_count = stream_data.get_subscriber_count(compose_state.stream_name()) || 0;
 
     var all_everyone_template = templates.render("compose_all_everyone", {count: stream_count});
     var error_area_all_everyone = $("#compose-all-everyone");
@@ -91,15 +90,8 @@ function update_fade() {
     compose_fade.update_faded_messages();
 }
 
-$(function () {
-    $('#stream,#subject,#private_message_recipient').bind({
-         keyup: update_fade,
-         change: update_fade,
-    });
-});
-
 exports.abort_xhr = function () {
-    $("#compose-send-button").removeAttr("disabled");
+    $("#compose-send-button").prop("disabled", false);
     var xhr = $("#compose").data("filedrop_xhr");
     if (xhr !== undefined) {
         xhr.abort();
@@ -154,11 +146,11 @@ function create_message_object() {
 exports.create_message_object = create_message_object;
 
 function compose_error(error_text, bad_input) {
-    $('#send-status').removeClass(status_classes)
+    $('#send-status').removeClass(common.status_classes)
                .addClass('alert-error')
                .stop(true).fadeTo(0, 1);
     $('#error-msg').html(error_text);
-    $("#compose-send-button").removeAttr('disabled');
+    $("#compose-send-button").prop('disabled', false);
     $("#sending-indicator").hide();
     if (bad_input !== undefined) {
         bad_input.focus().select();
@@ -187,20 +179,6 @@ function send_message_ajax(request, success, error) {
     });
 }
 
-function report_send_time(send_time, receive_time, display_time, locally_echoed, rendered_changed) {
-    var data = {time: send_time.toString(),
-                received: receive_time.toString(),
-                displayed: display_time.toString(),
-                locally_echoed: locally_echoed};
-    if (locally_echoed) {
-        data.rendered_content_disparity = rendered_changed;
-    }
-    channel.post({
-        url: '/json/report_send_time',
-        data: data,
-    });
-}
-
 var socket;
 if (page_params.use_websockets) {
     socket = new Socket("/sockjs");
@@ -219,101 +197,35 @@ function send_message_socket(request, success, error) {
     });
 }
 
-exports.send_times_log = [];
-exports.send_times_data = {};
-function maybe_report_send_times(message_id) {
-    var data = exports.send_times_data[message_id];
-    if (data.send_finished === undefined || data.received === undefined ||
-        data.displayed === undefined) {
-        // We report the data once we have both the send and receive times
-        return;
-    }
-    report_send_time(data.send_finished - data.start,
-                     data.received - data.start,
-                     data.displayed - data.start,
-                     data.locally_echoed,
-                     data.rendered_content_disparity || false);
-}
-
-function mark_end_to_end_receive_time(message_id) {
-    if (exports.send_times_data[message_id] === undefined) {
-        exports.send_times_data[message_id] = {};
-    }
-    exports.send_times_data[message_id].received = new Date();
-    maybe_report_send_times(message_id);
-}
-
-function mark_end_to_end_display_time(message_id) {
-    if (exports.send_times_data[message_id] === undefined) {
-        exports.send_times_data[message_id] = {};
-    }
-    exports.send_times_data[message_id].displayed = new Date();
-    maybe_report_send_times(message_id);
-}
-
-exports.mark_rendered_content_disparity = function (message_id, changed) {
-    if (exports.send_times_data[message_id] === undefined) {
-        exports.send_times_data[message_id] = {};
-    }
-    exports.send_times_data[message_id].rendered_content_disparity = changed;
-};
-
-exports.report_as_received = function report_as_received(message) {
-    if (message.sent_by_me) {
-        mark_end_to_end_receive_time(message.id);
-        setTimeout(function () {
-            mark_end_to_end_display_time(message.id);
-        }, 0);
-    }
-};
-
-function process_send_time(message_id, start_time, locally_echoed) {
-    var send_finished = new Date();
-    var send_time = (send_finished - start_time);
-    if (feature_flags.log_send_times) {
-        blueslip.log("send time: " + send_time);
-    }
-    if (feature_flags.collect_send_times) {
-        exports.send_times_log.push(send_time);
-    }
-    if (exports.send_times_data[message_id] === undefined) {
-        exports.send_times_data[message_id] = {};
-    }
-    exports.send_times_data[message_id].start = start_time;
-    exports.send_times_data[message_id].send_finished = send_finished;
-    exports.send_times_data[message_id].locally_echoed  = locally_echoed;
-    maybe_report_send_times(message_id);
-}
-
 function clear_compose_box() {
     $("#new_message_content").val('').focus();
     drafts.delete_draft_after_send();
     compose_ui.autosize_textarea();
     $("#send-status").hide(0);
-    $("#compose-send-button").removeAttr('disabled');
+    $("#compose-send-button").prop('disabled', false);
     $("#sending-indicator").hide();
     resize.resize_bottom_whitespace();
 }
 
-exports.send_message_success = function (local_id, message_id, start_time, locally_echoed) {
+exports.send_message_success = function (local_id, message_id, locally_echoed) {
     if (!locally_echoed) {
         clear_compose_box();
     }
 
-    process_send_time(message_id, start_time, locally_echoed);
-
     echo.reify_message_id(local_id, message_id);
-
-    setTimeout(function () {
-        if (exports.send_times_data[message_id].received === undefined) {
-            blueslip.log("Restarting get_events due to delayed receipt of sent message " + message_id);
-            server_events.restart_get_events();
-        }
-    }, 5000);
 };
 
-exports.transmit_message = function (request, success, error) {
-    delete exports.send_times_data[request.id];
+exports.transmit_message = function (request, on_success, error) {
+
+    function success(data) {
+        // Call back to our callers to do things like closing the compose
+        // box and turning off spinners and reifying locally echoed messages.
+        on_success(data);
+
+        // Once everything is done, get ready to report times to the server.
+        sent_messages.report_server_ack(request.local_id);
+    }
+
     if (page_params.use_websockets) {
         send_message_socket(request, success, error);
     } else {
@@ -321,7 +233,7 @@ exports.transmit_message = function (request, success, error) {
     }
 };
 
-function send_message(request) {
+exports.send_message = function send_message(request) {
     if (request === undefined) {
         request = create_message_object();
     }
@@ -332,25 +244,41 @@ function send_message(request) {
         request.to = JSON.stringify([request.to]);
     }
 
-    var start_time = new Date();
     var local_id;
+    var locally_echoed;
 
     local_id = echo.try_deliver_locally(request);
-    if (local_id !== undefined) {
-        // We delivered this message locally
-        request.local_id = local_id;
+    if (local_id) {
+        // We are rendering this message locally with an id
+        // like 92l99.01 that corresponds to a reasonable
+        // approximation of the id we'll get from the server
+        // in terms of sorting messages.
+        locally_echoed = true;
+    } else {
+        // We are not rendering this message locally, but we
+        // track the message's life cycle with an id like
+        // loc-1, loc-2, loc-3,etc.
+        locally_echoed = false;
+        local_id = sent_messages.get_new_local_id();
     }
 
-    var locally_echoed = local_id !== undefined;
+    request.local_id = local_id;
+
+    sent_messages.start_tracking_message({
+        local_id: local_id,
+        locally_echoed: locally_echoed,
+    });
+
+    request.locally_echoed = locally_echoed;
 
     function success(data) {
-        exports.send_message_success(local_id, data.id, start_time, locally_echoed);
+        exports.send_message_success(local_id, data.id, locally_echoed);
     }
 
     function error(response) {
         // If we're not local echo'ing messages, or if this message was not
         // locally echoed, show error in compose box
-        if (request.local_id === undefined) {
+        if (!locally_echoed) {
             compose_error(response, $('#new_message_content'));
             return;
         }
@@ -364,44 +292,17 @@ function send_message(request) {
     if (locally_echoed) {
         clear_compose_box();
     }
-}
+};
 
 exports.enter_with_preview_open = function () {
     exports.clear_preview_area();
     if (page_params.enter_sends) {
-        // If enter_sends is enabled, we just send the message
-        send_message();
+        // If enter_sends is enabled, we attempt to send the message
+        exports.finish();
     } else {
         // Otherwise, we return to the compose box and focus it
         $("#new_message_content").focus();
     }
-};
-
-// This function is for debugging / data collection only.  Arguably it
-// should live in debug.js, but then it wouldn't be able to call
-// send_message() directly below.
-exports.test_send_many_messages = function (stream, subject, count) {
-    var num_sent = 0;
-
-    function do_send_one() {
-        var message = {};
-        num_sent += 1;
-
-        message.type = "stream";
-        message.to = stream;
-        message.subject = subject;
-        message.content = num_sent.toString();
-
-        send_message(message);
-
-        if (num_sent === count) {
-            return;
-        }
-
-        setTimeout(do_send_one, 1000);
-    }
-
-    do_send_one();
 };
 
 exports.finish = function () {
@@ -410,20 +311,13 @@ exports.finish = function () {
     if (! compose.validate()) {
         return false;
     }
-    send_message();
+    exports.send_message();
     exports.clear_preview_area();
     // TODO: Do we want to fire the event even if the send failed due
     // to a server-side error?
     $(document).trigger($.Event('compose_finished.zulip'));
     return true;
 };
-
-$(function () {
-    $("#compose form").on("submit", function (e) {
-       e.preventDefault();
-       compose.finish();
-    });
-});
 
 exports.update_email = function (user_id, new_email) {
     var reply_to = compose_state.recipient();
@@ -441,10 +335,6 @@ exports.get_invalid_recipient_emails = function () {
     var private_recipients = util.extract_pm_recipients(compose_state.recipient());
     var invalid_recipients = [];
     _.each(private_recipients, function (email) {
-        // This case occurs when compose_state.recipient() ends with ','
-        if (email === "") {
-            return;
-        }
         if (people.realm_get(email) !== undefined) {
             return;
         }
@@ -457,14 +347,11 @@ exports.get_invalid_recipient_emails = function () {
     return invalid_recipients;
 };
 
-function check_stream_for_send(stream_name, autosubscribe) {
+function check_unsubscribed_stream_for_send(stream_name, autosubscribe) {
     var stream_obj = stream_data.get_sub(stream_name);
     var result;
     if (!stream_obj) {
         return "does-not-exist";
-    }
-    if (stream_obj.subscribed) {
-        return "subscribed";
     }
     if (!autosubscribe) {
         return "not-subscribed";
@@ -497,8 +384,7 @@ function check_stream_for_send(stream_name, autosubscribe) {
 }
 
 function validate_stream_message_mentions(stream_name) {
-    var current_stream = stream_data.get_sub(stream_name);
-    var stream_count = current_stream.subscribers.num_items();
+    var stream_count = stream_data.get_subscriber_count(stream_name) || 0;
 
     // check if @all or @everyone is in the message
     if (util.is_all_or_everyone_mentioned(compose_state.message_content()) &&
@@ -508,7 +394,7 @@ function validate_stream_message_mentions(stream_name) {
             // user has not seen a warning message yet if undefined
             show_all_everyone_warnings();
 
-            $("#compose-send-button").removeAttr('disabled');
+            $("#compose-send-button").prop('disabled', false);
             $("#sending-indicator").hide();
             return false;
         }
@@ -522,31 +408,33 @@ function validate_stream_message_mentions(stream_name) {
     return true;
 }
 
-function validate_stream_message_address_info(stream_name) {
-    var response;
-
-    if (!stream_data.is_subscribed(stream_name)) {
-        switch (check_stream_for_send(stream_name, page_params.narrow_stream !== undefined)) {
-        case "does-not-exist":
-            response = "<p>The stream <b>" +
-                Handlebars.Utils.escapeExpression(stream_name) + "</b> does not exist.</p>" +
-                "<p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>";
-            compose_error(response, $('#stream'));
-            return false;
-        case "error":
-            compose_error(i18n.t("Error checking subscription"), $("#stream"));
-            return false;
-        case "not-subscribed":
-            response = "<p>You're not subscribed to the stream <b>" +
-                Handlebars.Utils.escapeExpression(stream_name) + "</b>.</p>" +
-                "<p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>";
-            compose_error(response, $('#stream'));
-            return false;
-        }
+exports.validate_stream_message_address_info = function (stream_name) {
+    if (stream_data.is_subscribed(stream_name)) {
+        return true;
     }
 
+    var response;
+
+    switch (check_unsubscribed_stream_for_send(stream_name,
+                                               page_params.narrow_stream !== undefined)) {
+    case "does-not-exist":
+        response = "<p>The stream <b>" +
+            Handlebars.Utils.escapeExpression(stream_name) + "</b> does not exist.</p>" +
+            "<p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>";
+        compose_error(response, $('#stream'));
+        return false;
+    case "error":
+        compose_error(i18n.t("Error checking subscription"), $("#stream"));
+        return false;
+    case "not-subscribed":
+        response = "<p>You're not subscribed to the stream <b>" +
+            Handlebars.Utils.escapeExpression(stream_name) + "</b>.</p>" +
+            "<p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>";
+        compose_error(response, $('#stream'));
+        return false;
+    }
     return true;
-}
+};
 
 function validate_stream_message() {
     var stream_name = compose_state.stream_name();
@@ -563,7 +451,7 @@ function validate_stream_message() {
         }
     }
 
-    if (!validate_stream_message_address_info(stream_name) ||
+    if (!exports.validate_stream_message_address_info(stream_name) ||
         !validate_stream_message_mentions(stream_name)) {
         return false;
     }
@@ -617,7 +505,15 @@ exports.validate = function () {
     return validate_stream_message();
 };
 
-$(function () {
+exports.initialize = function () {
+    $('#stream,#subject,#private_message_recipient').on('keyup', update_fade);
+    $('#stream,#subject,#private_message_recipient').on('change', update_fade);
+
+    $("#compose form").on("submit", function (e) {
+       e.preventDefault();
+       compose.finish();
+    });
+
     resize.watch_manual_resize("#new_message_content");
 
     // Run a feature test and decide whether to display
@@ -662,15 +558,16 @@ $(function () {
             }
 
             if (compose_fade.would_receive_message(email) === false) {
-                var new_row = templates.render("compose-invite-users",
-                                               {email: email, name: data.mentioned.full_name});
                 var error_area = $("#compose_invite_users");
+                var existing_invites_area = $('#compose_invite_users .compose_invite_user');
 
-                var existing_invites = _.map($(".compose_invite_user", error_area), function (user_row) {
+                var existing_invites = _.map($(existing_invites_area), function (user_row) {
                     return $(user_row).data('useremail');
                 });
 
                 if (existing_invites.indexOf(email) === -1) {
+                    var context = {email: email, name: data.mentioned.full_name};
+                    var new_row = templates.render("compose-invite-users", context);
                     error_area.append(new_row);
                 }
 
@@ -745,22 +642,35 @@ $(function () {
 
     $("#compose").on("click", "#attach_files", function (e) {
         e.preventDefault();
+        if (clone_file_input === undefined) {
+            clone_file_input = $('#file_input').clone(true);
+        }
         $("#compose #file_input").trigger("click");
-    } );
+    });
 
+    function show_preview(rendered_content) {
+        var preview_html;
+        if (rendered_content.indexOf("<p>/me ") === 0) {
+            // Handle previews of /me messages
+            preview_html = "<strong>" + page_params.full_name + "</strong> " + rendered_content.slice(4 + 3, -4);
+        } else {
+            preview_html = rendered_content;
+        }
+        $("#preview_content").html(preview_html);
+    }
 
     $("#compose").on("click", "#markdown_preview", function (e) {
         e.preventDefault();
-        var message = $("#new_message_content").val();
+        var content = $("#new_message_content").val();
         $("#new_message_content").hide();
         $("#markdown_preview").hide();
         $("#undo_markdown_preview").show();
         $("#preview_message_area").show();
 
-        if (message.length === 0) {
-            $("#preview_content").html(i18n.t("Nothing to preview"));
+        if (content.length === 0) {
+            show_preview(i18n.t("Nothing to preview"));
         } else {
-            if (markdown.contains_bugdown(message))  {
+            if (markdown.contains_backend_only_syntax(content))  {
                 var spinner = $("#markdown_preview_spinner").expectOne();
                 loading.make_indicator(spinner);
             } else {
@@ -769,25 +679,28 @@ $(function () {
                 // marked.js frontend processor, we render using the
                 // frontend markdown processor message (but still
                 // render server-side to ensure the preview is
-                // accurate; if the `markdown.contains_bugdown` logic is
+                // accurate; if the `markdown.contains_backend_only_syntax` logic is
                 // incorrect wrong, users will see a brief flicker).
-                $("#preview_content").html(markdown.apply_markdown(message));
+                var message_obj = {
+                    raw_content: content,
+                };
+                markdown.apply_markdown(message_obj);
             }
             channel.post({
                 url: '/json/messages/render',
                 idempotent: true,
-                data: {content: message},
+                data: {content: content},
                 success: function (response_data) {
-                    if (markdown.contains_bugdown(message)) {
+                    if (markdown.contains_backend_only_syntax(content)) {
                         loading.destroy_indicator($("#markdown_preview_spinner"));
                     }
-                    $("#preview_content").html(response_data.rendered);
+                    show_preview(response_data.rendered);
                 },
                 error: function () {
-                    if (markdown.contains_bugdown(message)) {
+                    if (markdown.contains_backend_only_syntax(content)) {
                         loading.destroy_indicator($("#markdown_preview_spinner"));
                     }
-                    $("#preview_content").html(i18n.t("Failed to generate preview"));
+                    show_preview(i18n.t("Failed to generate preview"));
                 },
             });
         }
@@ -836,7 +749,7 @@ $(function () {
         var msg;
         $("#send-status").addClass("alert-error")
                         .removeClass("alert-info");
-        $("#compose-send-button").removeAttr("disabled");
+        $("#compose-send-button").prop("disabled", false);
         switch (err) {
         case 'BrowserNotSupported':
             msg = i18n.t("File upload is not yet available for your browser.");
@@ -853,9 +766,11 @@ $(function () {
             msg = i18n.t("Sorry, the file was too large.");
             break;
         case 'QuotaExceeded':
-            msg = i18n.t("Upload would exceed your maximum quota."
-                      + " Consider deleting some previously uploaded files.");
-            break;
+            var translation_part1 = i18n.t('Upload would exceed your maximum quota. You can delete old attachments to free up space.');
+            var translation_part2 = i18n.t('Click here');
+            msg = translation_part1 + ' <a href="#settings/uploaded-files">' + translation_part2 + '</a>';
+            $("#error-msg").html(msg);
+            return;
         default:
             msg = i18n.t("An unknown error occurred.");
             break;
@@ -886,7 +801,7 @@ $(function () {
             textbox.val(textbox.val() + "[" + filename + "](" + uri + ")" + " ");
         }
         compose_ui.autosize_textarea();
-        $("#compose-send-button").removeAttr("disabled");
+        $("#compose-send-button").prop("disabled", false);
         $("#send-status").removeClass("alert-info")
                          .hide();
 
@@ -908,7 +823,7 @@ $(function () {
     }
 
     $("#compose").filedrop({
-        url: "/json/upload_file",
+        url: "/json/user_uploads",
         fallback_id: "file_input",
         paramname: "file",
         maxfilesize: page_params.maxfilesize,
@@ -938,16 +853,7 @@ $(function () {
             compose_actions.start("stream", {});
         }
     }
-
-    $(document).on('message_id_changed', function (event) {
-        if (exports.send_times_data[event.old_id] !== undefined) {
-            var value = exports.send_times_data[event.old_id];
-            delete exports.send_times_data[event.old_id];
-            exports.send_times_data[event.new_id] =
-                _.extend({}, exports.send_times_data[event.old_id], value);
-        }
-    });
-});
+};
 
 return exports;
 }());

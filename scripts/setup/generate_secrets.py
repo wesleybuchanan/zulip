@@ -1,24 +1,21 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # This tools generates /etc/zulip/zulip-secrets.conf
 
-from __future__ import print_function
 import sys
 import os
-import os.path
-from os.path import dirname, abspath
 if False:
     from typing import Dict, List, Optional, Text
 
-BASE_DIR = dirname(dirname(dirname(abspath(__file__))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(BASE_DIR)
 import scripts.lib.setup_path_on_import
 
 os.environ['DJANGO_SETTINGS_MODULE'] = 'zproject.settings'
 
 from django.utils.crypto import get_random_string
-import six
 import argparse
 import uuid
+import configparser
 from zerver.lib.str_utils import force_str
 from zerver.lib.utils import generate_random_token
 
@@ -58,10 +55,10 @@ def get_old_conf(output_filename):
     if not os.path.exists(output_filename):
         return {}
 
-    secrets_file = six.moves.configparser.RawConfigParser()
+    secrets_file = configparser.RawConfigParser()
     secrets_file.read(output_filename)
 
-    return dict(secrets_file.items("secrets"))  # type: ignore
+    return dict(secrets_file.items("secrets"))
 
 def generate_secrets(development=False):
     # type: (bool) -> None
@@ -94,6 +91,9 @@ def generate_secrets(development=False):
     if need_secret('camo_key'):
         add_secret('camo_key', get_random_string(64))
 
+    # zulip_org_key is generated using os.urandom().
+    # zulip_org_id does not require a secure CPRNG,
+    # it only needs to be unique.
     if need_secret('zulip_org_key'):
         add_secret('zulip_org_key', get_random_string(64))
     if need_secret('zulip_org_id'):

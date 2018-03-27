@@ -137,7 +137,7 @@ soon as it attempted to send them to the client; if that specific HTTP
 response didn't reach the client due to a network TCP failure, then
 those events could be lost).
 
-[api-bindings-code]: https://github.com/zulip/zulip/blob/master/api/zulip/__init__.py
+[api-bindings-code]: https://github.com/zulip/python-zulip-api/blob/master/zulip/zulip/__init__.py
 
 The queue servers are a very high-traffic system, processing at a
 minimum a request for every message delivered to every Zulip client.
@@ -178,9 +178,9 @@ server:
   changed by a client (aka an event queue).
 
 Ideally, one would get those two things atomically, i.e. if some other
-user changes their name, either the name change happens before the
+user changes their name, either the name change happens after the
 fetch (and thus the old name is in the initial state and there will be
-an event in the queue for the name change) or after (the new name is
+an event in the queue for the name change) or before (the new name is
 in the initial state, and there is no event for that name change in
 the queue).
 

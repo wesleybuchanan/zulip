@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Forward messages sent to the configured email gateway to Zulip.
@@ -37,8 +37,6 @@ Also you can use optional keys to configure the script and change default values
 
 -t                  Disable sending request to the Zulip server. Default value: False.
 """
-from __future__ import absolute_import
-from __future__ import print_function
 
 import os
 import ssl

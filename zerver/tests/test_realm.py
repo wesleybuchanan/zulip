@@ -1,22 +1,23 @@
-from __future__ import absolute_import
-from __future__ import print_function
 
+import datetime
 import ujson
 
 from django.http import HttpResponse
 from mock import patch
-from typing import Any, Dict, List, Text, Union
+from typing import Any, Dict, List, Text, Union, Mapping
 
 from zerver.lib.actions import (
     do_change_is_admin,
     do_set_realm_property,
     do_deactivate_realm,
+    do_deactivate_stream,
 )
 
+from zerver.lib.send_email import send_future_email
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.test_helpers import tornado_redirected_to_list
-from zerver.models import get_realm, Realm, UserProfile
-
+from zerver.lib.test_runner import slow
+from zerver.models import get_realm, Realm, UserProfile, ScheduledEmail, get_stream
 
 class RealmTest(ZulipTestCase):
     def assert_user_profile_cache_gets_new_name(self, user_profile, new_realm_name):
@@ -39,7 +40,7 @@ class RealmTest(ZulipTestCase):
         # type: () -> None
         realm = get_realm('zulip')
         new_name = u'Puliz'
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             do_set_realm_property(realm, 'name', new_name)
         event = events[0]['event']
@@ -54,7 +55,7 @@ class RealmTest(ZulipTestCase):
         # type: () -> None
         realm = get_realm('zulip')
         new_description = u'zulip dev group'
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             do_set_realm_property(realm, 'description', new_description)
         event = events[0]['event']
@@ -72,7 +73,7 @@ class RealmTest(ZulipTestCase):
         realm = get_realm('zulip')
         new_description = u'zulip dev group'
         data = dict(description=ujson.dumps(new_description))
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_patch('/json/realm', data)
             self.assert_json_success(result)
@@ -101,6 +102,20 @@ class RealmTest(ZulipTestCase):
         realm = get_realm('zulip')
         self.assertNotEqual(realm.description, new_description)
 
+    def test_realm_name_length(self):
+        # type: () -> None
+        new_name = u'A' * (Realm.MAX_REALM_NAME_LENGTH + 1)
+        data = dict(name=ujson.dumps(new_name))
+
+        # create an admin user
+        email = self.example_email("iago")
+        self.login(email)
+
+        result = self.client_patch('/json/realm', data)
+        self.assert_json_error(result, 'Realm name is too long.')
+        realm = get_realm('zulip')
+        self.assertNotEqual(realm.name, new_name)
+
     def test_admin_restrictions_for_changing_realm_name(self):
         # type: () -> None
         new_name = 'Mice will play while the cat is away'
@@ -121,8 +136,8 @@ class RealmTest(ZulipTestCase):
         email = user_profile.email
         self.login(email)
         do_set_realm_property(user_profile.realm, 'name_changes_disabled', True)
-        url = '/json/settings/change'
-        result = self.client_post(url, data)
+        url = '/json/settings'
+        result = self.client_patch(url, data)
         self.assertEqual(result.status_code, 200)
         # Since the setting fails silently, no message is returned
         self.assert_in_response("", result)
@@ -140,6 +155,14 @@ class RealmTest(ZulipTestCase):
         user = self.example_user('hamlet')
         self.assertTrue(user.realm.deactivated)
 
+    def test_do_deactivate_realm_clears_scheduled_jobs(self):
+        # type: () -> None
+        user = self.example_user('hamlet')
+        send_future_email('zerver/emails/followup_day1', to_user_id=user.id, delay=datetime.timedelta(hours=1))
+        self.assertEqual(ScheduledEmail.objects.count(), 1)
+        do_deactivate_realm(user.realm)
+        self.assertEqual(ScheduledEmail.objects.count(), 0)
+
     def test_do_deactivate_realm_on_deactived_realm(self):
         # type: () -> None
         """Ensure early exit is working in realm deactivation"""
@@ -151,6 +174,45 @@ class RealmTest(ZulipTestCase):
 
         do_deactivate_realm(realm)
         self.assertTrue(realm.deactivated)
+
+    def test_change_notifications_stream(self):
+        # type: () -> None
+        # We need an admin user.
+        email = 'iago@zulip.com'
+        self.login(email)
+
+        disabled_notif_stream_id = -1
+        req = dict(notifications_stream_id = ujson.dumps(disabled_notif_stream_id))
+        result = self.client_patch('/json/realm', req)
+        self.assert_json_success(result)
+        realm = get_realm('zulip')
+        self.assertEqual(realm.notifications_stream, None)
+
+        new_notif_stream_id = 4
+        req = dict(notifications_stream_id = ujson.dumps(new_notif_stream_id))
+        result = self.client_patch('/json/realm', req)
+        self.assert_json_success(result)
+        realm = get_realm('zulip')
+        self.assertEqual(realm.notifications_stream.id, new_notif_stream_id)
+
+        invalid_notif_stream_id = 1234
+        req = dict(notifications_stream_id = ujson.dumps(invalid_notif_stream_id))
+        result = self.client_patch('/json/realm', req)
+        self.assert_json_error(result, 'Invalid stream id')
+        realm = get_realm('zulip')
+        self.assertNotEqual(realm.notifications_stream.id, invalid_notif_stream_id)
+
+    def test_get_default_notifications_stream(self):
+        # type: () -> None
+        realm = get_realm("zulip")
+        verona = get_stream("verona", realm)
+        realm.notifications_stream_id = verona.id
+        realm.save()
+
+        notifications_stream = realm.get_notifications_stream()
+        self.assertEqual(notifications_stream.id, verona.id)
+        do_deactivate_stream(notifications_stream)
+        self.assertIsNone(realm.get_notifications_stream())
 
     def test_change_realm_default_language(self):
         # type: () -> None
@@ -197,7 +259,7 @@ class RealmAPITest(ZulipTestCase):
         # type: (str, Union[Text, int, bool]) -> Realm
         result = self.client_patch('/json/realm', {name: ujson.dumps(value)})
         self.assert_json_success(result)
-        return get_realm('zulip') # refresh data
+        return get_realm('zulip')  # refresh data
 
     def do_test_realm_update_api(self, name):
         # type: (str) -> None
@@ -208,24 +270,17 @@ class RealmAPITest(ZulipTestCase):
         assertion error.
         """
 
-        bool_tests = [False, True] # type: List[bool]
+        bool_tests = [False, True]  # type: List[bool]
         test_values = dict(
-            add_emoji_by_admins_only=bool_tests,
-            create_stream_by_admins_only=bool_tests,
             default_language=[u'de', u'en'],
             description=[u'Realm description', u'New description'],
-            email_changes_disabled=bool_tests,
-            invite_required=bool_tests,
-            invite_by_admins_only=bool_tests,
-            inline_image_preview=bool_tests,
-            inline_url_embed_preview=bool_tests,
             message_retention_days=[10, 20],
             name=[u'Zulip', u'New Name'],
-            name_changes_disabled=bool_tests,
-            restricted_to_domain=bool_tests,
             waiting_period_threshold=[10, 20],
-        ) # type: Dict[str, Any]
+        )  # type: Dict[str, Any]
         vals = test_values.get(name)
+        if Realm.property_types[name] is bool:
+            vals = bool_tests
         if vals is None:
             raise AssertionError('No test created for %s' % (name))
 
@@ -235,6 +290,7 @@ class RealmAPITest(ZulipTestCase):
         realm = self.update_with_api(name, vals[0])
         self.assertEqual(getattr(realm, name), vals[0])
 
+    @slow("Tests a dozen properties in a loop")
     def test_update_realm_properties(self):
         # type: () -> None
         for prop in Realm.property_types:

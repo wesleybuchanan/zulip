@@ -1,10 +1,13 @@
 $(function () {
     // NB: this file is included on multiple pages.  In each context,
     // some of the jQuery selectors below will return empty lists.
+    var password_field = $('#id_password, #id_new_password1');
 
     $.validator.addMethod('password_strength', function (value) {
-        return password_quality(value, undefined, $('#id_password, #id_new_password1'));
-    }, "Password is too weak.");
+        return common.password_quality(value, undefined, password_field);
+    }, function () {
+        return common.password_warning(password_field.val(), password_field);
+    });
 
     function highlight(class_to_add) {
         // Set a class on the enclosing control group.
@@ -35,17 +38,17 @@ $(function () {
         unhighlight: highlight('success'),
     });
 
-    $('#id_password, #id_new_password1').on('change keyup', function () {
+    password_field.on('change keyup', function () {
         // Update the password strength bar even if we aren't validating
         // the field yet.
-        password_quality($(this).val(), $('#pw_strength .bar'), $(this));
+        common.password_quality($(this).val(), $('#pw_strength .bar'), $(this));
     });
 
     $("#send_confirm").validate({
-        errorElement: "p",
+        errorElement: "div",
         errorPlacement: function (error) {
-            $('#errors').empty();
-            error.appendTo("#errors")
+            $('.alert-error').empty();
+            error.appendTo(".alert-error")
                  .addClass("text-error");
         },
         success: function () {
@@ -56,5 +59,22 @@ $(function () {
     $("#login_form").validate({
         errorClass: "text-error",
         wrapper: "div",
+    });
+
+    $(".register-page #email, .login-page-container #id_username").on('focusout keydown', function (e) {
+        // check if it is the "focusout" or if it is a keydown, then check if
+        // the keycode was the one for "enter" (13).
+        if (e.type === "focusout" || e.which === 13) {
+            $(this).val($.trim($(this).val()));
+        }
+    });
+
+    var show_subdomain_section = function (bool) {
+        var action = bool ? "hide" : "show";
+        $("#subdomain_section")[action]();
+    };
+
+    $("#realm_in_root_domain").change(function () {
+        show_subdomain_section($(this).is(":checked"));
     });
 });

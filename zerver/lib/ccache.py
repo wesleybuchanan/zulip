@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 from typing import Any, Dict, List, Optional, Text
 
 # This file is adapted from samples/shellinabox/ssh-krb-wrapper in
@@ -30,7 +29,6 @@ from typing import Any, Dict, List, Optional, Text
 from zerver.lib.str_utils import force_bytes
 import base64
 import struct
-import six
 
 # Some DER encoding stuff. Bleh. This is because the ccache contains a
 # DER-encoded krb5 Ticket structure, whereas Webathena deserializes
@@ -41,21 +39,21 @@ import six
 def der_encode_length(length):
     # type: (int) -> bytes
     if length <= 127:
-        return force_bytes(chr(length))
+        return struct.pack('!B', length)
     out = b""
     while length > 0:
-        out = force_bytes(chr(length & 0xff)) + out
+        out = struct.pack('!B', length & 0xff) + out
         length >>= 8
-    out = force_bytes(chr(len(out) | 0x80)) + out
+    out = struct.pack('!B', len(out) | 0x80) + out
     return out
 
 def der_encode_tlv(tag, value):
     # type: (int, bytes) -> bytes
-    return force_bytes(chr(tag)) + der_encode_length(len(value)) + value
+    return struct.pack('!B', tag) + der_encode_length(len(value)) + value
 
 def der_encode_integer_value(val):
     # type: (int) -> bytes
-    if not isinstance(val, six.integer_types):
+    if not isinstance(val, int):
         raise TypeError("int")
     # base 256, MSB first, two's complement, minimum number of octets
     # necessary. This has a number of annoying edge cases:
@@ -71,7 +69,7 @@ def der_encode_integer_value(val):
     # We can stop once sign-extension matches the remaining value.
     while val != sign:
         byte = val & 0xff
-        out = force_bytes(chr(byte)) + out
+        out = struct.pack('!B', byte) + out
         sign = -1 if byte & 0x80 == 0x80 else 0
         val >>= 8
     return out

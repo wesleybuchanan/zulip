@@ -15,8 +15,29 @@ set_global('emoji', {
         alien: '1f47d',
         smile: '1f604',
     },
-    realm_emojis: {
-        realm_emoji: 'whatever',
+    all_realm_emojis: {
+        realm_emoji: {
+            emoji_name: 'realm_emoji',
+            emoji_url: 'TBD',
+            deactivated: false,
+        },
+        inactive_realm_emoji: {
+            emoji_name: 'inactive_realm_emoji',
+            emoji_url: 'TBD',
+            deactivated: true,
+        },
+    },
+    active_realm_emojis: {
+        realm_emoji: {
+            emoji_name: 'realm_emoji',
+            emoji_url: 'TBD',
+        },
+    },
+    deactivated_realm_emojis: {
+        inactive_realm_emoji: {
+            emoji_name: 'inactive_realm_emoji',
+            emoji_url: 'TBD',
+        },
     },
 });
 
@@ -28,6 +49,12 @@ set_global('page_params', {user_id: 5});
 
 set_global('channel', {});
 set_global('templates', {});
+set_global('emoji_codes', {
+    name_to_codepoint: {
+        alien: '1f47d',
+        smile: '1f604',
+    },
+});
 set_global('emoji_picker', {
     hide_emoji_popover: function () {},
 });
@@ -56,13 +83,15 @@ people.add_in_realm(cali);
 var message = {
     id: 1001,
     reactions: [
-        {emoji_name: 'smile', user: {id: 5}},
-        {emoji_name: 'smile', user: {id: 6}},
-        {emoji_name: 'frown', user: {id: 7}},
+        {emoji_name: 'smile', user: {id: 5}, reaction_type: 'unicode_emoji', emoji_code: '1'},
+        {emoji_name: 'smile', user: {id: 6}, reaction_type: 'unicode_emoji', emoji_code: '1'},
+        {emoji_name: 'frown', user: {id: 7}, reaction_type: 'unicode_emoji', emoji_code: '2'},
+        {emoji_name: 'inactive_realm_emoji', user: {id: 5}, reaction_type: 'realm_emoji',
+         emoji_code: '1'},
 
         // add some bogus user_ids
-        {emoji_name: 'octopus', user: {id: 8888}},
-        {emoji_name: 'frown', user: {id: 9999}},
+        {emoji_name: 'octopus', user: {id: 8888}, reaction_type: 'unicode_emoji', emoji_code: '3'},
+        {emoji_name: 'frown', user: {id: 9999}, reaction_type: 'unicode_emoji', emoji_code: '2'},
     ],
 };
 
@@ -72,6 +101,45 @@ set_global('message_store', {
         return message;
     },
 });
+
+set_global('current_msg_list', {
+    selected_message: function () {
+        return { sent_by_me: true };
+    },
+    selected_row: function () {
+        return $('.selected-row');
+    },
+    selected_id: function () {
+        return 42;
+    },
+});
+
+(function test_open_reactions_popover() {
+    $('.selected-row').set_find_results('.actions_hover', $('.target-action'));
+    $('.selected-row').set_find_results('.reaction_button', $('.target-reaction'));
+
+    var called = false;
+    emoji_picker.toggle_emoji_popover = function (target, id) {
+        called = true;
+        assert.equal(id, 42);
+        assert.equal(target, $('.target-reaction')[0]);
+    };
+
+    assert(reactions.open_reactions_popover());
+    assert(called);
+
+    current_msg_list.selected_message = function () { return { sent_by_me: false }; };
+
+    called = false;
+    emoji_picker.toggle_emoji_popover = function (target, id) {
+        called = true;
+        assert.equal(id, 42);
+        assert.equal(target, $('.target-action')[0]);
+    };
+
+    assert(reactions.open_reactions_popover());
+    assert(called);
+}());
 
 (function test_basics() {
     var result = reactions.get_message_reactions(message);
@@ -84,16 +152,35 @@ set_global('message_store', {
     var expected_result = [
       {
          emoji_name: 'frown',
-         emoji_name_css_class: 'frown-css',
+         reaction_type: 'unicode_emoji',
+         emoji_code: '2',
+         emoji_name_css_class: '2',
          count: 1,
+         user_ids: [7],
          title: 'Cali reacted with :frown:',
          emoji_alt_code: undefined,
          class: 'message_reaction',
       },
       {
+         emoji_name: 'inactive_realm_emoji',
+         reaction_type: 'realm_emoji',
+         emoji_code: '1',
+         emoji_name_css_class: '1',
+         count: 1,
+         user_ids: [5],
+         title: 'You (click to remove) reacted with :inactive_realm_emoji:',
+         emoji_alt_code: undefined,
+         is_realm_emoji: true,
+         url: 'TBD',
+         class: 'message_reaction reacted',
+      },
+      {
          emoji_name: 'smile',
-         emoji_name_css_class: 'smile-css',
+         reaction_type: 'unicode_emoji',
+         emoji_code: '1',
+         emoji_name_css_class: '1',
          count: 2,
+         user_ids: [5, 6],
          title: 'You (click to remove) and Bob van Roberts reacted with :smile:',
          emoji_alt_code: undefined,
          class: 'message_reaction reacted',
@@ -128,19 +215,40 @@ set_global('message_store', {
         assert.equal(args.url, '/json/messages/1001/emoji_reactions/alien');
     });
 
+    emoji_name = 'inactive_realm_emoji'; // Test removing a deactivated realm emoji.
+    global.with_stub(function (stub) {
+        global.channel.del = stub.f;
+        reactions.toggle_emoji_reaction(message_id, emoji_name);
+        var args = stub.get_args('args').args;
+        assert.equal(args.url, '/json/messages/1001/emoji_reactions/inactive_realm_emoji');
+    });
+
     emoji_name = 'unknown-emoji';
     reactions.toggle_emoji_reaction(message_id, emoji_name);
 }());
 
 (function test_set_reaction_count() {
-    var count_element = $('count-stub');
-    var reaction_element = $('reaction-stub');
+    var count_element = $.create('count-stub');
+    var reaction_element = $.create('reaction-stub');
 
-    reaction_element.add_child('.message_reaction_count', count_element);
+    reaction_element.set_find_results('.message_reaction_count', count_element);
 
     reactions.set_reaction_count(reaction_element, 5);
 
     assert.equal(count_element.html(), '5');
+}());
+
+(function test_get_reaction_section() {
+    var message_table = $.create('.message_table');
+    var message_row = $.create('some-message-row');
+    var message_reactions = $.create('our-reactions-section');
+
+    message_table.set_find_results("[zid='555']", message_row);
+    message_row.set_find_results('.message_reactions', message_reactions);
+
+    var section = reactions.get_reaction_section(555);
+
+    assert.equal(section, message_reactions);
 }());
 
 (function test_add_and_remove_reaction() {
@@ -153,12 +261,12 @@ set_global('message_store', {
         },
     };
 
-    var message_reactions = $('our-reactions');
-    var message_row = $('our-message-row');
-    var message_table = $('.message_table');
+    var message_reactions = $.create('our-reactions');
 
-    message_table.add_child("[zid='1001']", message_row);
-    message_row.add_child('.message_reactions', message_reactions);
+    reactions.get_reaction_section = function (message_id) {
+        assert.equal(message_id, 1001);
+        return message_reactions;
+    };
 
     message_reactions.find = function (selector) {
         assert.equal(selector, '.reaction_button');
@@ -172,13 +280,12 @@ set_global('message_store', {
         assert.equal(data.class, 'message_reaction reacted');
         assert(!data.is_realm_emoji);
         assert.equal(data.message_id, 1001);
-        assert.equal(data.user.user_id, alice.user_id);
         assert.equal(data.title, 'You (click to remove) reacted with :8ball:');
-        return 'new-reaction-html-stub';
+        return '<new reaction html>';
     };
 
     var insert_called;
-    $('new-reaction-html-stub').insertBefore = function (element) {
+    $('<new reaction html>').insertBefore = function (element) {
         assert.equal(element, 'reaction-button-stub');
         insert_called = true;
     };
@@ -198,9 +305,9 @@ set_global('message_store', {
         },
     };
 
-    var count_element = $('count-element');
-    var reaction_element = $('reaction-element');
-    reaction_element.add_child('.message_reaction_count', count_element);
+    var count_element = $.create('count-element');
+    var reaction_element = $.create('reaction-element');
+    reaction_element.set_find_results('.message_reaction_count', count_element);
 
     var title_set;
     reaction_element.prop = function (prop_name, value) {
@@ -235,7 +342,7 @@ set_global('message_store', {
     assert.equal(count_element.html(), '1');
 
     var current_emojis = reactions.get_emojis_used_by_user_for_message_id(1001);
-    assert.deepEqual(current_emojis, ['smile', '8ball']);
+    assert.deepEqual(current_emojis, ['smile', 'inactive_realm_emoji', '8ball']);
 
     // Next, remove Alice's reaction, which exercises removing the
     // emoji icon.
@@ -248,7 +355,7 @@ set_global('message_store', {
     assert(removed);
 
     current_emojis = reactions.get_emojis_used_by_user_for_message_id(1001);
-    assert.deepEqual(current_emojis, ['smile']);
+    assert.deepEqual(current_emojis, ['smile', 'inactive_realm_emoji']);
 
 
     // Now add Cali's realm_emoji reaction.
@@ -265,7 +372,7 @@ set_global('message_store', {
         assert.equal(data.class, 'message_reaction');
         assert(data.is_realm_emoji);
         template_called = true;
-        return 'new-reaction-html-stub';
+        return '<new reaction html>';
     };
 
     message_reactions.find = function (selector) {
@@ -308,26 +415,149 @@ set_global('message_store', {
 
 }());
 
-(function test_initialize() {
-    var my_event = {
-        old_id: 5,
-        new_id: 99,
+(function test_with_view_stubs() {
+    // This function tests reaction events by mocking out calls to
+    // the view.
+
+    var message = {
+        id: 2001,
+        reactions: [],
     };
 
-    var new_attr;
-
-    $(".message_reactions[data-message-id='5']").attr = function (sel, value) {
-        assert.equal(sel, 'data-message-id');
-        new_attr = value;
+    message_store.get = function () {
+        return message;
     };
 
-    $(document).on = function (event_name, f) {
-        assert.equal(event_name, 'message_id_changed');
-        f(my_event);
+    function test_view_calls(test_params) {
+        var calls = [];
+
+        function add_call_func(name) {
+            return function (opts) {
+                calls.push({
+                    name: name,
+                    opts: opts,
+                });
+            };
+        }
+
+        reactions.view = {
+            insert_new_reaction: add_call_func('insert_new_reaction'),
+            update_existing_reaction: add_call_func('update_existing_reaction'),
+            remove_reaction: add_call_func('remove_reaction'),
+        };
+
+        test_params.run_code();
+
+        assert.deepEqual(calls, test_params.expected_view_calls);
+    }
+
+    var alice_8ball_event = {
+        message_id: 2001,
+        emoji_name: '8ball',
+        user: {
+            user_id: alice.user_id,
+        },
     };
 
-    reactions.initialize();
-    assert.equal(new_attr, 99);
+    var bob_8ball_event = {
+        message_id: 2001,
+        emoji_name: '8ball',
+        user: {
+            user_id: bob.user_id,
+        },
+    };
+
+    var cali_airplane_event = {
+        message_id: 2001,
+        emoji_name: 'airplane',
+        user: {
+            user_id: cali.user_id,
+        },
+    };
+
+    test_view_calls({
+        run_code: function () {
+            reactions.add_reaction(alice_8ball_event);
+        },
+        expected_view_calls: [
+            {
+                name: 'insert_new_reaction',
+                opts: {
+                    message_id: 2001,
+                    emoji_name: '8ball',
+                    user_id: alice.user_id,
+                },
+            },
+        ],
+    });
+
+    test_view_calls({
+        run_code: function () {
+            reactions.add_reaction(bob_8ball_event);
+        },
+        expected_view_calls: [
+            {
+                name: 'update_existing_reaction',
+                opts: {
+                    message_id: 2001,
+                    emoji_name: '8ball',
+                    user_id: bob.user_id,
+                    user_list: [alice.user_id, bob.user_id],
+                },
+            },
+        ],
+    });
+
+    test_view_calls({
+        run_code: function () {
+            reactions.add_reaction(cali_airplane_event);
+        },
+        expected_view_calls: [
+            {
+                name: 'insert_new_reaction',
+                opts: {
+                    message_id: 2001,
+                    emoji_name: 'airplane',
+                    user_id: cali.user_id,
+                },
+            },
+        ],
+    });
+
+    test_view_calls({
+        run_code: function () {
+            reactions.remove_reaction(bob_8ball_event);
+        },
+        expected_view_calls: [
+            {
+                name: 'remove_reaction',
+                opts: {
+                    message_id: 2001,
+                    emoji_name: '8ball',
+                    user_id: bob.user_id,
+                    user_list: [alice.user_id],
+                },
+            },
+        ],
+    });
+
+    test_view_calls({
+        run_code: function () {
+            reactions.remove_reaction(alice_8ball_event);
+        },
+        expected_view_calls: [
+            {
+                name: 'remove_reaction',
+                opts: {
+                    message_id: 2001,
+                    emoji_name: '8ball',
+                    user_id: alice.user_id,
+                    user_list: [],
+                },
+            },
+        ],
+    });
+
 }());
 
 (function test_error_handling() {

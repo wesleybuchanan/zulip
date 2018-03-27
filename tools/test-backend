@@ -1,14 +1,14 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import print_function
-from __future__ import absolute_import
-from typing import List
+from typing import List, Any
 import glob
 import optparse
 import os
 import sys
 import subprocess
 import ujson
+import httplib2
+import requests
 
 # check for the venv
 from lib import sanity_check
@@ -23,52 +23,20 @@ target_fully_covered = {path for target in [
     'analytics/models.py',
     'analytics/tests/*.py',
     'analytics/views.py',
-    'zerver/context_processors.py',
-    'zerver/lib/alert_words.py',
-    'zerver/lib/attachments.py',
-    'zerver/lib/avatar.py',
-    'zerver/lib/avatar_hash.py',
-    'zerver/lib/context_managers.py',
-    'zerver/lib/domains.py',
-    'zerver/lib/emoji.py',
-    'zerver/lib/i18n.py',
-    'zerver/lib/mention.py',
-    'zerver/lib/message.py',
-    'zerver/lib/name_restrictions.py',
-    'zerver/lib/realm_icon.py',
-    'zerver/lib/retention.py',
-    'zerver/lib/streams.py',
-    'zerver/lib/users.py',
-    'zerver/lib/webhooks/*.py',
-    'zerver/logging_handlers.py',
-    # As a project, we require 100% test coverage in the views files.
-    'zerver/views/*.py',
+    # zerver/ and zerver/lib/ are important core files
+    'zerver/*.py',
+    'zerver/lib/*.py',
     # Test files should have 100% coverage; test code that isn't run
     # is likely a bug in the test.
     'zerver/tests/*.py',
+    # As a project, we require 100% test coverage in the views files.
+    'zerver/views/*.py',
+    'zproject/backends.py',
+    'confirmation/models.py',
+    'zerver/webhooks/*/*.py',
     # Once we have a nice negative tests system, we can add these:
     # 'zerver/webhooks/*/*.py',
     # 'zerver/webhooks/*/*/*.py',
-    'zproject/backends.py',
-    # Uncovered but in exclude list and we'd like to have included soon
-    'confirmation/models.py',
-    'zerver/decorator.py',
-    'zerver/lib/actions.py',
-    'zerver/lib/events.py',
-    'zerver/lib/bugdown/__init__.py',
-    'zerver/lib/events.py',
-    'zerver/lib/integrations.py',
-    'zerver/lib/message.py',
-    'zerver/lib/narrow.py',
-    'zerver/lib/notifications.py',
-    'zerver/lib/request.py',
-    'zerver/lib/response.py',
-    'zerver/lib/sessions.py',
-    'zerver/lib/test_helpers.py',
-    'zerver/lib/test_classes.py',
-    'zerver/lib/upload.py',
-    'zerver/lib/validator.py',
-    'zerver/models.py',
 ] for path in glob.glob(target)}
 
 not_yet_fully_covered = {
@@ -81,14 +49,91 @@ not_yet_fully_covered = {
     # Major lib files should have 100% coverage
     'confirmation/models.py',
     'zerver/decorator.py',
+    'zerver/forms.py',
     'zerver/lib/actions.py',
+    'zerver/lib/addressee.py',
     'zerver/lib/bugdown/__init__.py',
+    'zerver/lib/cache.py',
+    'zerver/lib/cache_helpers.py',
+    'zerver/lib/create_user.py',
+    'zerver/lib/exceptions.py',
     'zerver/lib/i18n.py',
+    'zerver/lib/management.py',
     'zerver/lib/message.py',
     'zerver/lib/notifications.py',
-    'zerver/lib/push_notifications.py',
+    'zerver/lib/rest.py',
+    'zerver/lib/send_email.py',
+    'zerver/lib/soft_deactivation.py',
     'zerver/lib/upload.py',
     'zerver/models.py',
+    # Other lib files that ideally would coverage, but aren't sorted
+    'zerver/__init__.py',
+    'zerver/apps.py',
+    'zerver/filters.py',
+    'zerver/middleware.py',
+    'zerver/storage.py',
+    'zerver/lib/bot_lib.py',
+    'zerver/lib/camo.py',
+    'zerver/lib/db.py',
+    'zerver/lib/debug.py',
+    'zerver/lib/digest.py',
+    'zerver/lib/email_mirror.py',
+    'zerver/lib/error_notify.py',
+    'zerver/lib/export.py',
+    'zerver/lib/feedback.py',
+    'zerver/lib/fix_unreads.py',
+    'zerver/lib/hotspots.py',
+    'zerver/lib/html_diff.py',
+    'zerver/lib/initial_password.py',
+    'zerver/lib/logging_util.py',
+    'zerver/lib/migrate.py',
+    'zerver/lib/outgoing_webhook.py',
+    'zerver/lib/parallel.py',
+    'zerver/lib/profile.py',
+    'zerver/lib/queue.py',
+    'zerver/lib/rate_limiter.py',
+    'zerver/lib/sqlalchemy_utils.py',
+    'zerver/lib/str_utils.py',
+    'zerver/lib/stream_recipient.py',
+    'zerver/lib/tex.py',
+    'zerver/lib/timeout.py',
+    'zerver/lib/unminify.py',
+    'zerver/lib/user_agent.py',
+    'zerver/lib/utils.py',
+    # Low priority for coverage
+    'zerver/lib/bulk_create.py',
+    'zerver/lib/ccache.py',
+    'zerver/lib/generate_test_data.py',
+    'zerver/lib/initial_password',
+    'zerver/lib/statistics.py',
+    'zerver/lib/test_fixtures.py',
+    'zerver/lib/test_runner.py',
+    # Webhook integrations with incomplete coverage
+    'zerver/webhooks/basecamp/view.py',
+    'zerver/webhooks/beanstalk/view.py',
+    'zerver/webhooks/bitbucket2/view.py',
+    'zerver/webhooks/freshdesk/view.py',
+    'zerver/webhooks/github/view.py',
+    'zerver/webhooks/github_webhook/view.py',
+    'zerver/webhooks/gitlab/view.py',
+    'zerver/webhooks/gogs/view.py',
+    'zerver/webhooks/greenhouse/view.py',
+    'zerver/webhooks/hellosign/view.py',
+    'zerver/webhooks/ifttt/view.py',
+    'zerver/webhooks/jira/view.py',
+    'zerver/webhooks/librato/view.py',
+    'zerver/webhooks/newrelic/view.py',
+    'zerver/webhooks/pingdom/view.py',
+    'zerver/webhooks/pivotal/view.py',
+    'zerver/webhooks/semaphore/view.py',
+    'zerver/webhooks/solano/view.py',
+    'zerver/webhooks/stripe/view.py',
+    'zerver/webhooks/taiga/view.py',
+    'zerver/webhooks/teamcity/view.py',
+    'zerver/webhooks/transifex/view.py',
+    'zerver/webhooks/travis/view.py',
+    'zerver/webhooks/updown/view.py',
+    'zerver/webhooks/zapier/view.py',
 }
 
 enforce_fully_covered = sorted(target_fully_covered - not_yet_fully_covered)
@@ -110,7 +155,21 @@ def write_failed_tests(failed_tests):
         with open(FAILED_TEST_PATH, 'w') as f:
             ujson.dump(failed_tests, f)
 
+def block_internet():
+    # type: () -> None
+    # We are blocking internet currently by assuming mostly any test would use
+    # httplib2 to access internet.
+    def internet_guard(*args, **kwargs):
+        # type: (*Any, **Any) -> None
+        raise Exception("Outgoing network requests are not allowed in the Zulip tests. "
+                        "More details and advice are available here:"
+                        "https://zulip.readthedocs.io/en/latest/testing.html#internet-access-inside-test-suits")
+
+    httplib2.Http.request = internet_guard
+    requests.request = internet_guard
+
 if __name__ == "__main__":
+    block_internet()
     TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
     os.chdir(os.path.dirname(TOOLS_DIR))
     sys.path.insert(0, os.path.dirname(TOOLS_DIR))
@@ -210,6 +269,9 @@ if __name__ == "__main__":
         failed_tests = get_failed_tests()
         if failed_tests:
             args = failed_tests
+    if len(args) > 0:
+        # If we passed a specific set of tests, run in serial mode.
+        options.processes = 1
 
     # to transform forward slashes '/' present in the argument into dots '.'
     for suite in args:
@@ -236,7 +298,7 @@ if __name__ == "__main__":
             classname = suite.rsplit('.', 1)[0]
             rewrite_arguments(classname)
         elif suite[0].isupper():
-            rewrite_arguments(suite)
+            rewrite_arguments('class %s(' % (suite,))
 
     for suite in args:
         if suite.startswith('test'):
@@ -354,7 +416,10 @@ if __name__ == "__main__":
         prof.disable()
         prof.dump_stats("/tmp/profile.data")
         print("Profile data saved to /tmp/profile.data")
-        print("You can visualize it using e.g. `runsnake /tmp/profile.data`")
+        print("You can visualize it using e.g. `snakeviz /tmp/profile.data`")
+        print("Note: If you are using vagrant for development environment you will need to do:")
+        print("1.) `vagrant ssh -- -L 8080:127.0.0.1:8080`")
+        print("2.) `snakeviz -s /tmp/profile.data`")
 
     if options.report_slow_tests:
         from zerver.lib.test_runner import report_slow_tests

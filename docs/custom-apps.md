@@ -16,7 +16,7 @@ with the following goals in mind:
 - Simple custom apps should be simple to write and deploy.
 - Custom app authors should be able to easily distribute their work.
 - Zulip should provide deployment support for mature, general-purpose bots,
-ideally either within organizations (a Zulip admin can vet her own
+ideally either within organizations (a Zulip admin can vet their own
 custom apps and easily deploy them across upgrade cycles)
 or across organizations (custom apps get distributed with the Zulip
 tarball).
@@ -307,7 +307,7 @@ We want to make it easier to deploy **Zulip Readers** on
 Zulip hardware.  The following document talks about how we want to enable this
 from a code structuring standpoint:
 
-[Writing contrib bots](https://github.com/zulip/zulip/blob/master/api/bots/readme.md)
+[Writing contrib bots](https://github.com/zulip/python-zulip-api/blob/master/zulip_bots/README.md)
 
 This document, on the other hand, is more about designing the Zulip backend
 system to support eventual deployment of reader apps on the Zulip server.

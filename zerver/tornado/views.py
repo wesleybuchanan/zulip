@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 
 from django.utils.translation import ugettext as _
 from django.http import HttpRequest, HttpResponse
@@ -13,6 +12,7 @@ from zerver.lib.response import json_success, json_error
 from zerver.lib.validator import check_bool, check_list, check_string
 from zerver.tornado.event_queue import get_client_descriptor, \
     process_notification, fetch_events
+from zerver.tornado.exceptions import BadEventQueueIdError
 from django.core.handlers.base import BaseHandler
 
 from typing import Union, Optional, Iterable, Sequence, List, Text
@@ -30,7 +30,7 @@ def cleanup_event_queue(request, user_profile, queue_id=REQ()):
     # type: (HttpRequest, UserProfile, Text) -> HttpResponse
     client = get_client_descriptor(str(queue_id))
     if client is None:
-        return json_error(_("Bad event queue id: %s") % (queue_id,))
+        raise BadEventQueueIdError(queue_id)
     if user_profile.id != client.user_profile_id:
         return json_error(_("You are not authorized to access this queue"))
     request._log_data['extra'] = "[%s]" % (queue_id,)
@@ -87,5 +87,5 @@ def get_events_backend(request, user_profile, handler,
         handler._request = request
         return RespondAsynchronously
     if result["type"] == "error":
-        return json_error(result["message"])
+        raise result["exception"]
     return json_success(result["response"])

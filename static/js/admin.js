@@ -8,6 +8,8 @@ exports.show_or_hide_menu_item = function () {
         item.find("span").text(i18n.t("Manage organization"));
     } else {
         item.find("span").text(i18n.t("Organization settings"));
+        $(".organization-box [data-name='organization-profile']")
+            .find("input, textarea, button, select").attr("disabled", true);
         $(".organization-box [data-name='organization-settings']")
             .find("input, textarea, button, select").attr("disabled", true);
         $(".organization-box [data-name='organization-permissions']")
@@ -38,16 +40,20 @@ function _setup_page() {
         realm_name_changes_disabled: page_params.realm_name_changes_disabled,
         realm_email_changes_disabled: page_params.realm_email_changes_disabled,
         realm_add_emoji_by_admins_only: page_params.realm_add_emoji_by_admins_only,
+        can_admin_emojis: page_params.is_admin || !page_params.realm_add_emoji_by_admins_only,
         realm_allow_message_editing: page_params.realm_allow_message_editing,
         realm_message_content_edit_limit_minutes:
             Math.ceil(page_params.realm_message_content_edit_limit_seconds / 60),
         realm_message_retention_days: page_params.realm_message_retention_days,
+        realm_allow_edit_history: page_params.realm_allow_edit_history,
         language_list: page_params.language_list,
         realm_default_language: page_params.realm_default_language,
         realm_waiting_period_threshold: page_params.realm_waiting_period_threshold,
+        realm_notifications_stream_id: page_params.realm_notifications_stream_id,
         is_admin: page_params.is_admin,
         realm_icon_source: page_params.realm_icon_source,
         realm_icon_url: page_params.realm_icon_url,
+        realm_mandatory_topics: page_params.realm_mandatory_topics,
     };
 
     var admin_tab = templates.render('admin_tab', options);
@@ -63,7 +69,7 @@ function _setup_page() {
         var hash_sequence = window.location.hash.split(/\//);
         if (/#*(organization)/.test(hash_sequence[0])) {
             tab = hash_sequence[1];
-            return tab || "organization-settings";
+            return tab || "organization-profile";
         }
         return tab;
     }());
@@ -83,7 +89,7 @@ exports.launch_page = function (tab) {
     var $active_tab = $("#settings_overlay_container li[data-section='" + tab + "']");
 
     if ($active_tab.hasClass("admin")) {
-        $(".sidebar .ind-tab[data-tab-key='organization']").click();
+        components.toggle.lookup("settings-toggle").goto("organization", { dont_switch_tab: true });
     }
 
     overlays.open_settings();

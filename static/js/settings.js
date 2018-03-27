@@ -1,8 +1,7 @@
 var settings = (function () {
 
 var exports = {};
-var map = {};
-var map_initialized = false;
+var map;
 
 $("body").ready(function () {
     var $sidebar = $(".form-sidebar");
@@ -43,12 +42,27 @@ $("body").ready(function () {
     });
 
     $("body").on("click", "[data-sidebar-form-close]", close_sidebar);
+
+    $("#settings_overlay_container").click(function (e) {
+        if (!overlays.is_modal_open()) {
+            return;
+        }
+        if ($(e.target).closest(".modal").length > 0) {
+            return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        overlays.close_active_modal();
+    });
 });
 
 
 function _setup_page() {
+    ui.set_up_scrollbar($("#settings_page .sidebar.left"));
+    ui.set_up_scrollbar($("#settings_content"));
+
     // only run once -- if the map has not already been initialized.
-    if (!map_initialized) {
+    if (map === undefined) {
         map = {
             "your-account": i18n.t("Your account"),
             "display-settings": i18n.t("Display settings"),
@@ -58,6 +72,7 @@ function _setup_page() {
             "uploaded-files": i18n.t("Uploaded files"),
             "muted-topics": i18n.t("Muted topics"),
             "zulip-labs": i18n.t("Zulip labs"),
+            "organization-profile": i18n.t("Organization profile"),
             "organization-settings": i18n.t("Organization settings"),
             "organization-permissions": i18n.t("Organization permissions"),
             "emoji-settings": i18n.t("Emoji settings"),
@@ -88,7 +103,10 @@ function _setup_page() {
         full_name: people.my_full_name(),
         page_params: page_params,
         zuliprc: 'zuliprc',
+        flaskbotrc: 'flaskbotrc',
         timezones: moment.tz.names(),
+        upload_quota: attachments_ui.bytes_to_size(page_params.upload_quota),
+        total_uploads_size: attachments_ui.bytes_to_size(page_params.total_uploads_size),
     });
 
     $(".settings-box").html(settings_tab);
@@ -110,7 +128,7 @@ exports.launch_page = function (tab) {
     var $active_tab = $("#settings_overlay_container li[data-section='" + tab + "']");
 
     if (!$active_tab.hasClass("admin")) {
-        $(".sidebar .ind-tab[data-tab-key='settings']").click();
+        components.toggle.lookup("settings-toggle").goto("settings", { dont_switch_tab: true });
     }
 
     overlays.open_settings();

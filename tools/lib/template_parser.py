@@ -1,8 +1,4 @@
-from __future__ import absolute_import
-from __future__ import print_function
 from typing import Callable, List, Optional
-from six.moves import range
-import re
 
 class TemplateParserException(Exception):
     def __init__(self, message):
@@ -208,7 +204,7 @@ def validate(fn=None, text=None, check_indent=True):
     def start_tag_matcher(start_token):
         # type: (Token) -> None
         state.depth += 1
-        start_tag = start_token.tag
+        start_tag = start_token.tag.strip('~')
         start_line = start_token.line
         start_col = start_token.col
 
@@ -217,7 +213,7 @@ def validate(fn=None, text=None, check_indent=True):
         def f(end_token):
             # type: (Token) -> None
 
-            end_tag = end_token.tag
+            end_tag = end_token.tag.strip('~')
             end_line = end_token.line
             end_col = end_token.col
 
@@ -289,6 +285,7 @@ def is_django_block_tag(tag):
         'blocktrans',
         'trans',
         'raw',
+        'with',
     ]
 
 def get_handlebars_tag(text, i):

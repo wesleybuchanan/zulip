@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
 from zerver.lib.alert_words import (
     add_user_alert_words,
@@ -113,27 +111,24 @@ class AlertWordTests(ZulipTestCase):
 
         result = self.client_get('/json/users/me/alert_words')
         self.assert_json_success(result)
-
-        data = ujson.loads(result.content)
-        self.assertEqual(data['alert_words'], [])
+        self.assertEqual(result.json()['alert_words'], [])
 
     def test_json_list_add(self):
         # type: () -> None
         self.login(self.example_email("hamlet"))
 
-        result = self.client_put('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one ', '\n two', 'three'])})
+        result = self.client_post('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one ', '\n two', 'three'])})
         self.assert_json_success(result)
 
         result = self.client_get('/json/users/me/alert_words')
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
-        self.assertEqual(data['alert_words'], ['one', 'two', 'three'])
+        self.assertEqual(result.json()['alert_words'], ['one', 'two', 'three'])
 
     def test_json_list_remove(self):
         # type: () -> None
         self.login(self.example_email("hamlet"))
 
-        result = self.client_put('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one', 'two', 'three'])})
+        result = self.client_post('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one', 'two', 'three'])})
         self.assert_json_success(result)
 
         result = self.client_delete('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one'])})
@@ -141,23 +136,7 @@ class AlertWordTests(ZulipTestCase):
 
         result = self.client_get('/json/users/me/alert_words')
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
-        self.assertEqual(data['alert_words'], ['two', 'three'])
-
-    def test_json_list_set(self):
-        # type: () -> None
-        self.login(self.example_email("hamlet"))
-
-        result = self.client_put('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one', 'two', 'three'])})
-        self.assert_json_success(result)
-
-        result = self.client_post('/json/users/me/alert_words', {'alert_words': ujson.dumps(['a', 'b', 'c'])})
-        self.assert_json_success(result)
-
-        result = self.client_get('/json/users/me/alert_words')
-        self.assert_json_success(result)
-        data = ujson.loads(result.content)
-        self.assertEqual(data['alert_words'], ['a', 'b', 'c'])
+        self.assertEqual(result.json()['alert_words'], ['two', 'three'])
 
     def message_does_alert(self, user_profile, message):
         # type: (UserProfile, Text) -> bool
@@ -171,13 +150,12 @@ class AlertWordTests(ZulipTestCase):
         self.login(self.example_email("hamlet"))
         user_profile_hamlet = self.example_user('hamlet')
 
-        result = self.client_put('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one', 'two', 'three'])})
+        result = self.client_post('/json/users/me/alert_words', {'alert_words': ujson.dumps(['one', 'two', 'three'])})
         self.assert_json_success(result)
 
         result = self.client_get('/json/users/me/alert_words')
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
-        self.assertEqual(data['alert_words'], ['one', 'two', 'three'])
+        self.assertEqual(result.json()['alert_words'], ['one', 'two', 'three'])
 
         # Alerts in the middle of messages work.
         self.assertTrue(self.message_does_alert(user_profile_hamlet, "Normal alert one time"))
@@ -204,7 +182,7 @@ class AlertWordTests(ZulipTestCase):
         me_email = user_profile.email
 
         self.login(me_email)
-        result = self.client_put('/json/users/me/alert_words', {'alert_words': ujson.dumps(['ALERT'])})
+        result = self.client_post('/json/users/me/alert_words', {'alert_words': ujson.dumps(['ALERT'])})
 
         content = 'this is an ALERT for you'
         self.send_message(me_email, "Denmark", Recipient.STREAM, content)

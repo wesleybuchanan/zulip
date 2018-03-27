@@ -10,8 +10,8 @@ using in Zulip:
 ```
 user_dict = {} # type: Dict[str, UserProfile]
 
-def get_user_profile_by_email(email):
-    # type: (str) -> UserProfile
+def get_user(email, realm):
+    # type: (str, Realm) -> UserProfile
     ... # Actual code of the function here
 ```
 
@@ -28,7 +28,7 @@ You can learn more about it at:
 * [Using mypy with Python 2 code](http://mypy.readthedocs.io/en/latest/python2.html)
 
 The mypy type checker is run automatically as part of Zulip's Travis
-CI testing process in the 'static-analysis' build.
+CI testing process in the `backend` build.
 
 ## `type_debug.py`
 
@@ -73,15 +73,18 @@ So `{1: 'a', 2: 'b', 3: 'c'}` will be printed as `{int: str, ...}`.
 Zulip is hoping to reach 100% of the codebase annotated with mypy
 static types, and then enforce that it stays that way.  Our current
 coverage is shown in
-[Coveralls](https://coveralls.io/github/zulip/zulip).
+[Codecov](https://codecov.io/gh/zulip/zulip).
 
 ## Installing mypy
 
 If you installed Zulip's development environment correctly, mypy
 should already be installed inside the Python 3 virtualenv at
-`zulip-py3-venv` (mypy only supports Python 3).  If it isn't installed
-(e.g. because you haven't reprovisioned recently), you can run
-`tools/install-mypy` to install it.
+`zulip-py3-venv` (mypy only supports Python 3).
+
+If you'd like to install just the version of `mypy` that we're using
+(useful if e.g. you want `mypy` installed on your laptop outside the
+Vagrant guest), you can do that with `pip install -r
+requirements/mypy.txt`.
 
 ## Running mypy on Zulip's code locally
 
@@ -106,7 +109,7 @@ test.py:200: error: Incompatible types in assignment (expression has type "str",
 
 If you need help interpreting or debugging mypy errors, please feel
 free to mention @sharmaeklavya2 or @timabbott on your pull request (or
-email zulip-devel@googlegroups.com) to get help; we'd love to both
+ask in [chat.zulip.org](https://chat.zulip.org)) to get help; we'd love to both
 build a great troubleshooting guide in this doc and also help
 contribute improvements to error messages upstream.
 

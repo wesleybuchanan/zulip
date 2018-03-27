@@ -105,7 +105,7 @@ function render(template_name, args) {
     html += render("admin-realm-domains-list", args);
     html += "</table>";
 
-    var button = $(html).find('.btn');
+    var button = $(html).find('.button');
     var domain = $(html).find('.domain');
     var row = button.closest('tr');
     var subdomains_checkbox = row.find('.allow-subdomains');
@@ -117,6 +117,28 @@ function render(template_name, args) {
     assert.equal(subdomains_checkbox.prop('checked'), true);
 
     global.write_handlebars_output("admin-realm-domains-list", html);
+}());
+
+(function admin_realm_dropdown_stream_list() {
+    var html = "<ul>";
+    var args = {
+        stream: {
+            name: "Italy",
+            subscriber_count: 9,
+            stream_id: 18,
+        },
+    };
+    html += render("admin-realm-dropdown-stream-list", args);
+    html += "</ul>";
+
+    var link = $(html).find("a");
+    var list_item = $(html).find("li");
+
+    assert.equal(link.text().trim(), "Italy");
+    assert(list_item.hasClass("stream_name"));
+    assert.equal(list_item.attr("data-stream-id"), "18");
+
+    global.write_handlebars_output("admin-realm-dropdown-stream-list", html);
 }());
 
 (function admin_default_streams_list() {
@@ -298,37 +320,47 @@ function render(template_name, args) {
 (function alert_word_settings_item() {
     var html = '<ul id="alert-words">';
     var words = ['lunch', 'support'];
+    var args;
     _.each(words, function (word) {
-        var args = {
+        args = {
             word: word,
         };
         html += render('alert_word_settings_item', args);
     });
+    args = {
+        word: '',
+        editing: true,
+    };
+    html += render('alert_word_settings_item', args);
     html += "</ul>";
     global.write_handlebars_output("alert_word_settings_item", html);
+
     var li = $(html).find("li.alert-word-item:first");
+    var value = li.find('.value');
+    var button = li.find('button');
     assert.equal(li.attr('data-word'),'lunch');
+    assert.equal(value.length, 1);
+    assert.equal(value.text(), 'lunch');
+    assert.equal(button.attr('title'), 'Delete alert word');
+    assert.equal(button.attr('data-word'),'lunch');
+
+    var title = $(html).find('.new-alert-word-section-title');
+    var textbox = $(html).find('#create_alert_word_name');
+    button = $(html).find('#create_alert_word_button');
+    assert.equal(title.length, 1);
+    assert.equal(title.text().trim(), 'Add a new alert word');
+    assert.equal(textbox.length, 1);
+    assert.equal(textbox.attr('maxlength'), 100);
+    assert.equal(textbox.attr('placeholder'), 'Alert word');
+    assert.equal(textbox.attr('class'), 'required');
+    assert.equal(button.length, 1);
+    assert.equal(button.text().trim(), 'Add alert word');
+
 }());
 
 (function announce_stream_docs() {
     var html = render('announce_stream_docs');
     global.write_handlebars_output("announce_stream_docs", html);
-}());
-
-(function attachment_settings_item() {
-    var html = '<ul id="attachments">';
-    var attachments = [
-        {messages: [], id: 42, name: "foo.txt"},
-        {messages: [], id: 43, name: "bar.txt"},
-    ];
-    _.each(attachments, function (attachment) {
-        var args = {attachment: attachment};
-        html += render('attachment-item', args);
-    });
-    html += "</ul>";
-    global.write_handlebars_output("attachment-item", html);
-    var li = $(html).find("li.attachment-item:first");
-    assert.equal(li.attr('data-attachment'), 42);
 }());
 
 (function bankruptcy_modal() {
@@ -472,6 +504,11 @@ function render(template_name, args) {
     assert.equal(a.text(), "Narrow to here");
 }());
 
+(function dev_env_email_access() {
+    var html = render('dev_env_email_access');
+    global.write_handlebars_output("dev_env_email_access", html);
+}());
+
 (function draft_table_body() {
     var args = {
         drafts: [
@@ -522,23 +559,109 @@ function render(template_name, args) {
     assert.equal(li.text(), 'The email will be forwarded to this stream');
 }());
 
+(function emoji_popover() {
+    var args = {
+        class: "emoji-info-popover",
+    };
+    var html = "<div>";
+    html += render('emoji_popover', args);
+    html += "</div>";
+    var popover = $(html).find(".popover");
+    assert(popover.hasClass("emoji-info-popover"));
+    global.write_handlebars_output("emoji_popover", html);
+}());
+
 (function emoji_popover_content() {
     var args = {
         search: 'Search',
         message_id: 1,
-        emojis: [{
-            name: '100',
-            css_class: '100',
-        }],
+        emoji_categories: [
+            {
+                name: 'Test',
+                emojis: [
+                    {
+                        has_reacted: false,
+                        is_realm_emoji: false,
+                        name: '100',
+                        css_class: '100',
+                    },
+                ],
+            },
+            {
+                name: 'Test1',
+                emojis: [
+                    {
+                        has_reacted: false,
+                        is_realm_emoji: true,
+                        name: 'zulip',
+                        url: 'zulip',
+                    },
+                ],
+            },
+        ],
     };
 
     var html = '<div style="height: 250px">';
     html += render('emoji_popover_content', args);
     html += "</div>";
     // test to make sure the first emoji is present in the popover
-    var emoji_key = $(html).find(".emoji-100").attr('title');
-    assert.equal(emoji_key, ':100:');
+    var first_emoji = $(html).find(".emoji-100");
+    assert.equal(first_emoji.length, 1);
+
+    var categories = $(html).find(".emoji-popover-tab-item");
+    assert.equal(categories.length, 2);
+
+    var category_1 = $(html).find(".emoji-popover-tab-item[data-tab-name = 'Test']");
+    assert(category_1.hasClass("active"));
+
     global.write_handlebars_output("emoji_popover_content", html);
+}());
+
+(function emoji_popover_search_results() {
+    var args = {
+        message_id: 1,
+        search_results: [
+            {
+                has_reacted: false,
+                is_realm_emoji: false,
+                name: 'test-1',
+                css_class: 'test-1',
+            },
+            {
+                has_reacted: true,
+                is_realm_emoji: false,
+                name: 'test-2',
+                css_class: 'test-2',
+            },
+        ],
+    };
+    var html = "<div>";
+    html += render("emoji_popover_search_results", args);
+    html += "</div>";
+    global.write_handlebars_output("emoji_popover_search_results", html);
+    var used_emoji = $(html).find(".emoji-test-2").parent();
+    assert(used_emoji.hasClass("reaction"));
+    assert(used_emoji.hasClass("reacted"));
+}());
+
+(function emoji_showcase() {
+    var args = {
+        emoji_dict: {
+            name: "thumbs_up",
+            is_realm_emoji: false,
+            css_class: "1f44d",
+            has_reacted: false,
+        },
+    };
+    var html = render("emoji_showcase", args);
+    var emoji_div = $(html).find(".emoji");
+    var canonical_name = $(html).find(".emoji-canonical-name");
+
+    assert.equal(emoji_div.length, 1);
+    assert(emoji_div.hasClass("emoji-1f44d"));
+    assert.equal(canonical_name.text(), "thumbs_up");
+    assert.equal(canonical_name.attr("title"), "thumbs_up");
+    global.write_handlebars_output("emoji_showcase", html);
 }());
 
 (function group_pms() {
@@ -557,6 +680,24 @@ function render(template_name, args) {
 
     var a = $(html).find("a:first");
     assert.equal(a.text(), 'Alice and Bob');
+}());
+
+(function hotspot_overlay() {
+    var args = {
+        title: 'Start a new conversation',
+        name: 'intro_compose',
+        description: 'Click the "New topic" button to start a new conversation.',
+    };
+
+    var html = render('hotspot_overlay', args);
+    global.write_handlebars_output("hotspot_overlay", html);
+
+    assert.equal($(html).attr('id'), 'hotspot_intro_compose_overlay');
+    assert.equal($(html).find('.hotspot-title').text(), 'Start a new conversation');
+    assert.equal(
+        $(html).find('.hotspot-description').text(),
+        'Click the "New topic" button to start a new conversation.'
+    );
 }());
 
 (function invite_subscription() {
@@ -587,6 +728,7 @@ function render(template_name, args) {
             content: 'This is message one.',
             last_edit_timestr: '11:00',
             starred: true,
+            starred_status: "Unstar",
         },
     };
 
@@ -601,7 +743,7 @@ function render(template_name, args) {
     assert.equal(first_message_text, "This is message one.");
 
     var starred_title = first_message.find(".star").attr("title");
-    assert.equal(starred_title, "Unstar this message");
+    assert.equal(starred_title, "Unstar this message (*)");
 }());
 
 (function message_edit_form() {
@@ -648,7 +790,7 @@ function render(template_name, args) {
             is_stream: true,
             message_ids: [1, 2],
             message_containers: messages,
-            show_date: '"<span id="timerender82">Jan&nbsp;07</span>"',
+            show_date: '"<span class="timerender82">Jan&nbsp;07</span>"',
             show_date_separator: true,
             subject: 'two messages',
             match_subject: '<span class="highlight">two</span> messages',
@@ -675,7 +817,10 @@ function render(template_name, args) {
         content: "Let's go to lunch!",
         edit_history: [
             {
-                body_to_render: "<p>Let's go to <span class='highlight_text_replaced'>dinner</span>!</p>",
+                body_to_render: "<p>Let's go to " +
+                                    "<span class='highlight_text_deleted'>lunch</span>" +
+                                    "<span class='highlight_text_inserted'>dinner</span>" +
+                                "!</p>",
                 timestamp: 1468132659,
                 edited_by: 'Alice',
                 posted_or_edited: "Edited by",
@@ -688,7 +833,7 @@ function render(template_name, args) {
     global.write_test_output("message_edit_history.handlebars", html);
     var edited_message = $(html).find("div.messagebox-content");
     assert.equal(edited_message.text().trim(),
-                "1468132659\n                Let's go to dinner!\n                Edited by Alice");
+                "1468132659\n                Let's go to lunchdinner!\n                Edited by Alice");
 }());
 
 (function message_reaction() {
@@ -704,6 +849,13 @@ function render(template_name, args) {
 
     global.write_handlebars_output("message_reaction", html);
     assert($(html).find(".message_reaction").has(".emoji .emoji-smile"));
+}());
+
+(function more_topics() {
+    var html = render('more_topics');
+    global.write_handlebars_output("more_topics", html);
+
+    assert($(html).hasClass('show-more-topics'));
 }());
 
 (function new_stream_users() {
@@ -753,6 +905,7 @@ function render(template_name, args) {
 (function settings_tab() {
     var page_param_checkbox_options = {
         enable_stream_desktop_notifications: true,
+        enable_stream_push_notifications: true,
         enable_stream_sounds: true, enable_desktop_notifications: true,
         enable_sounds: true, enable_offline_email_notifications: true,
         enable_offline_push_notifications: true, enable_online_push_notifications: true,
@@ -765,6 +918,7 @@ function render(template_name, args) {
     });
 
     var checkbox_ids = ["enable_stream_desktop_notifications",
+                        "enable_stream_push_notifications",
                         "enable_stream_sounds", "enable_desktop_notifications",
                         "enable_sounds", "enable_offline_push_notifications",
                         "enable_online_push_notifications",
@@ -790,6 +944,21 @@ function render(template_name, args) {
     // All checkboxes should be unchecked.
     _.each(checkbox_ids, function (checkbox) {
         assert.equal($(html).find("#" + checkbox).is(":checked"), false);
+    });
+
+    // Check if enable_desktop_notifications setting disables subsetting too.
+    var parent_elem = $('#pm_content_in_desktop_notifications_label').wrap("<div></div>");
+
+    $('#enable_desktop_notifications').prop('checked', false).triggerHandler('change');
+    $('#enable_desktop_notifications').change(function () {
+        assert(parent_elem.hasClass('control-label-disabled'));
+        assert.equal($('#pm_content_in_desktop_notifications').attr('disabled'), 'disabled');
+    });
+
+    $('#enable_desktop_notifications').prop('checked', true).triggerHandler('change');
+    $('#enable_desktop_notifications').change(function () {
+        assert(!parent_elem.hasClass('control-label-disabled'));
+        assert.equal($('#pm_content_in_desktop_notifications').attr('disabled'), undefined);
     });
 
 }());
@@ -881,6 +1050,14 @@ function render(template_name, args) {
     assert.equal($(html).find(".stream-privacy").children("*").attr("class"), "hashtag");
 }());
 
+(function subscription_invites_warning_modal() {
+    var html = render('subscription_invites_warning_modal');
+
+    global.write_handlebars_output("subscription_invites_warning_modal", html);
+
+    var button = $(html).find(".close-invites-warning-modal").last();
+    assert.equal(button.text(), 'Go back');
+}());
 
 (function subscription_settings() {
     var sub = {
@@ -1014,7 +1191,7 @@ function render(template_name, args) {
 
     global.write_handlebars_output("topic_list_item", html);
 
-    assert.equal($(html).attr('data-name'), 'lunch');
+    assert.equal($(html).attr('data-topic-name'), 'lunch');
 }());
 
 
@@ -1033,24 +1210,22 @@ function render(template_name, args) {
 
 }());
 
-(function tutorial() {
-    var tutorials = [
-        'tutorial_home',
-        'tutorial_message',
-        'tutorial_reply',
-        'tutorial_stream',
-        'tutorial_subject',
-        'tutorial_title',
-    ];
-    var html = '';
-    _.each(tutorials, function (tutorial) {
-        var args = {
-            placement: 'left',
-            title: 'Title',
-        };
-        html = render(tutorial, args);
-        global.write_handlebars_output(tutorial, html);
-    });
+(function typeahead_list_item() {
+    var args = {
+        primary: 'primary-text',
+        secondary: 'secondary-text',
+        img_src: 'https://zulip.org',
+        is_emoji: true,
+        has_image: true,
+        has_secondary: true,
+    };
+
+    var html = '<div>' + render('typeahead_list_item', args) + '</div>';
+    global.write_handlebars_output('typeahead_list_item', html);
+
+    assert.equal($(html).find('.emoji').attr('src'), 'https://zulip.org');
+    assert.equal($(html).find('strong').text().trim(), 'primary-text');
+    assert.equal($(html).find('small').text().trim(), 'secondary-text');
 }());
 
 (function typing_notifications() {
@@ -1095,8 +1270,8 @@ function render(template_name, args) {
     var html = render('user_info_popover_content', args);
     global.write_handlebars_output("user_info_popover_content", html);
 
-    var a = $(html).find("a.compose_private_message");
-    assert.equal(a.text().trim(), 'Send private message');
+    var a = $(html).find("a.narrow_to_private_messages");
+    assert.equal(a.text().trim(), 'View private messages');
 }());
 
 (function user_info_popover_title() {
@@ -1104,7 +1279,32 @@ function render(template_name, args) {
     global.write_handlebars_output("user_info_popover_title", html);
 
     html = '<div>' + html + '</div>';
-    assert($(html).find('.popover-avatar').css('background-image'), "url(avatar/hamlet@zulip.com)");
+    assert.equal($(html).find('.popover-avatar').css('background-image'), "url(avatar/hamlet@zulip.com)");
+}());
+
+(function uploaded_files_list_popover() {
+    var args = {
+        attachment: {
+            name: "file_name.txt",
+            create_time: "Apr 12 04:18 AM",
+            messages: [
+                {
+                    id: "1",
+                },
+                {
+                    id: "2",
+                },
+            ],
+            size: 1234,
+            path_id: "2/65/6wITdgsd63hdskjuFqEeEy7_r/file_name.txt",
+        },
+    };
+
+    var html = render('uploaded_files_list', args);
+    assert.equal($(html).find('.ind-message').attr("href"), "/#narrow/id/1");
+    assert.equal($(html).find('#download_attachment').attr("href"),
+                 "/user_uploads/2/65/6wITdgsd63hdskjuFqEeEy7_r/file_name.txt");
+
 }());
 
 (function user_presence_rows() {

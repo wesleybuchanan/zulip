@@ -3,20 +3,19 @@
 
 {% block customhead %}
     {{ super() }}
-    {{ minified_js('signup')|safe }}
+    {{ render_bundle('signup') }}
 {% endblock %}
 
 {% block portico_content %}
 
-<div class="bg-image"></div>
 
 
 {% if password_auth_enabled %}
 <script type="text/javascript">
 {% if email %}
-autofocus('#id_password');
+common.autofocus('#id_password');
 {% else %}
-autofocus('#id_username');
+common.autofocus('#id_username');
 {% endif %}
 </script>
 {% endif %}
@@ -74,19 +73,24 @@ autofocus('#id_username');
 
                     <!-- .no-validation is for removing the red star in CSS -->
                     <div class="input-box no-validation">
-                        <input id="id_username" type="email" name="username" class="email required"
+                        <input id="id_username" type="{% if not require_email_format_usernames %}text{% else %}email{% endif %}"
+                               name="username" class="{% if require_email_format_usernames %}email {% endif %}required"
                             {% if email %} value="{{ email }}" {% else %} value="" {% endif %}
                             maxlength="72" required />
-                        <label for="id_username">{{ _('Email') }}</label>
-                        <div class="required"></div>
-                        <img class="valid" src="/static/images/checkbox-valid.svg" alt="{{ _('Valid') }}" />
+                        <label for="id_username">
+                            {% if not require_email_format_usernames and email_auth_enabled %}
+                                {{ _('Email or username') }}
+                            {% elif not require_email_format_usernames %}
+                                {{ _('Username') }}
+                            {% else %}
+                                {{ _('Email') }}
+                            {% endif %}
+                        </label>
                     </div>
 
                     <div class="input-box no-validation">
                         <input id="id_password" name="password" class="required" type="password" required />
                         <label for="id_password" class="control-label">{{ _('Password') }}</label>
-                        <div class="required"></div>
-                        <img class="valid" src="/static/images/checkbox-valid.svg" alt="{{ _('Valid') }}" />
                     </div>
 
                     {% if form.errors %}
@@ -97,7 +101,7 @@ autofocus('#id_username');
                     </div>
                     {% endif %}
 
-                    {% if email %}
+                    {% if already_registered %}
                     <div class="alert">
                         {{ _("You've already registered with this email address. Please sign in below.") }}
                     </div>
@@ -120,24 +124,24 @@ autofocus('#id_username');
 
                 {% if google_auth_enabled %}
                 <div class="login-google">
-                    <a href="{{ url('zerver.views.auth.start_google_oauth2') }}">
-                        <button class="login-google-button">{{ _('Sign in with Google') }}</button>
-                    </a>
+                    <form class="form-inline" action="{{ url('zerver.views.auth.start_google_oauth2') }}" method="get">
+                        <button class="login-google-button full-width">{{ _('Sign in with Google') }}</button>
+                    </form>
                 </div>
                 {% endif %}
 
                 {% if github_auth_enabled %}
-                <div class="login-github">
-                    <a href="{{ url('login-social', args=('github',)) }}" class="github-wrapper">
-                        <button class="login-github-button github">
-                            <span>{{ _('Sign in with GitHub') }}</span>
-                        </button>
-                    </a>
+                 <div class="login-github">
+                    <form class="form-inline github-wrapper" action="{{ url('login-social', args=('github',)) }}" method="get">
+                        <button class="login-github-button github">{{ _('Sign in with GitHub') }}</button>
+                    </form>
                 </div>
                 {% endif %}
 
                 <div class="actions">
+                    {% if email_auth_enabled %}
                     <a class="forgot-password" href="/accounts/password/reset/">Forgot your password?</a>
+                    {% endif %}
                     {% if not register_link_disabled %}
                     <a class="register-link float-right" href="/register/">Register</a>
                     {% endif %}

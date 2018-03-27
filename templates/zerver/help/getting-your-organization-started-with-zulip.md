@@ -1,7 +1,7 @@
 # Getting your organization started with Zulip
 
 This comprehensive guide explains in detail everything that the
-administrator of new Zulip organizations needs ot know to get off to a
+administrator of a new Zulip organization needs to know to get off to a
 great start with Zulip.
 
 ## Configure your Zulip organization
@@ -14,9 +14,11 @@ to match your organization’s needs.
   up Zulip for your company, you can restrict new users to those from
   your company’s email domain.  You can also allow new users to join
   without being explicitly invited.
-- Add an organization icon and description for Zulip to customize your
-  login/registration pages as well as how your organization appears in
-  the desktop and mobile apps.
+
+- Add an organization [icon](/help/change-your-organizations-avatar)
+and [description](change-your-organizations-description) for Zulip to
+customize your login/registration pages as well as how your
+organization appears in the desktop and mobile apps.
 
 ## Create streams
 
@@ -26,8 +28,8 @@ happen in your organization. Streams are similar to chat rooms, email
 lists, or channels in IRC or Slack, in that they determine who
 receives a message. A few important notes:
 
-- Zulip streams are lightweight; in a large community, it’s normal and
-  reasonable to be subscribed to several dozen streams.
+- For small teams, it's often good to start with a small number of streams,
+  and let the number of streams grow organically.
 - You can use any character in stream names, including spaces and
   characters from non-Latin alphabets.
 - You can
@@ -70,6 +72,11 @@ effectively.
 - Topics really shine for asynchronous communication.
 - When starting a new conversation, use a new topic, just like you
   would when starting an email thread.
+- In the left sidebar, Zulip will by default show the 5 most recent
+  topics in a stream as well as any topics with unread messages.  You
+  don't need to do anything to "archive" old topics -- they will
+  naturally disappear from recent topics when other topics replace
+  them as the most recent.
 
 ## Familiarize yourself with Zulip’s featureset
 
@@ -90,6 +97,9 @@ what they're looking for.
 
 ## Invite users and onboard your community
 
+- If you wish to delete messages before starting onboarding, hover over a
+  message and click on the 'message actions' menu on the far right, then select
+  'delete message'.
 - Use the “#zulip” stream to share tips on how to use Zulip
   effectively.
 - If you have an existing chat tool, make sure everyone knows that the
@@ -111,8 +121,8 @@ in stages is great advice.
 
 Zulip integrates directly with dozens of products, including all major
 version control and issue tracking tools, and indirectly with hundreds
-more through [Zapier](/integrations#zapier) and
-[IFTTT](/integrations#ifttt).  Set up notifications for the products
+more through [Hubot](/integrations/doc/hubot), [Zapier](/integrations/doc/zapier),
+and [IFTTT](/integrations/doc/ifttt).  Set up notifications for the products
 you use!  A few recommendations:
 
 - A product’s logo is a great choice of avatar for an integration with
@@ -125,7 +135,7 @@ you use!  A few recommendations:
 
 ## Bonus things to setup
 
-- [Link to your Zulip instance from](/help/join-zulip-chat-badge) your
+- [Link to your Zulip instance](/help/join-zulip-chat-badge) from your
   GitHub or wiki page with a nice badge.
 - [Automatically linkify](/help/add-a-custom-linkification-filter)
   issue numbers and commit IDs.

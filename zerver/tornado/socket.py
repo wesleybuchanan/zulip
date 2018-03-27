@@ -1,9 +1,9 @@
-from __future__ import absolute_import
 
 from typing import Any, Dict, Mapping, Optional, Text, Union
 
 from django.conf import settings
 from django.utils.timezone import now as timezone_now
+from django.utils.translation import ugettext as _
 from django.contrib.sessions.models import Session as djSession
 try:
     from django.middleware.csrf import _compare_salted_tokens
@@ -30,6 +30,7 @@ from zerver.middleware import record_request_start_data, record_request_stop_dat
 from zerver.lib.redis_utils import get_redis_client
 from zerver.lib.sessions import get_session_user
 from zerver.tornado.event_queue import get_client_descriptor
+from zerver.tornado.exceptions import BadEventQueueIdError
 
 logger = logging.getLogger('zulip.socket')
 
@@ -45,14 +46,14 @@ def get_user_profile(session_id):
         return None
 
     try:
-        return UserProfile.objects.get(pk=get_session_user(djsession))
+        return get_user_profile_by_id(get_session_user(djsession))
     except (UserProfile.DoesNotExist, KeyError):
         return None
 
-connections = dict() # type: Dict[Union[int, str], SocketConnection]
+connections = dict()  # type: Dict[Union[int, str], SocketConnection]
 
 def get_connection(id):
-    # type: (Union[int, str]) -> SocketConnection
+    # type: (Union[int, str]) -> Optional[SocketConnection]
     return connections.get(id)
 
 def register_connection(id, conn):
@@ -66,6 +67,7 @@ def register_connection(id, conn):
 
 def deregister_connection(conn):
     # type: (SocketConnection) -> None
+    assert conn.client_id is not None
     del connections[conn.client_id]
 
 redis_client = get_redis_client()
@@ -74,11 +76,6 @@ def req_redis_key(req_id):
     # type: (Text) -> Text
     return u'socket_req_status:%s' % (req_id,)
 
-class SocketAuthError(Exception):
-    def __init__(self, msg):
-        # type: (str) -> None
-        self.msg = msg
-
 class CloseErrorInfo(object):
     def __init__(self, status_code, err_msg):
         # type: (int, str) -> None
@@ -86,7 +83,7 @@ class CloseErrorInfo(object):
         self.err_msg = err_msg
 
 class SocketConnection(sockjs.tornado.SockJSConnection):
-    client_id = None # type: Optional[Union[int, str]]
+    client_id = None  # type: Optional[Union[int, str]]
 
     def on_open(self, info):
         # type: (ConnectionInfo) -> None
@@ -97,7 +94,7 @@ class SocketConnection(sockjs.tornado.SockJSConnection):
 
         self.authenticated = False
         self.session.user_profile = None
-        self.close_info = None # type: CloseErrorInfo
+        self.close_info = None  # type: Optional[CloseErrorInfo]
         self.did_close = False
 
         try:
@@ -124,27 +121,32 @@ class SocketConnection(sockjs.tornado.SockJSConnection):
         # type: (Dict[str, Any]) -> None
         if self.authenticated:
             self.session.send_message({'req_id': msg['req_id'], 'type': 'response',
-                                       'response': {'result': 'error', 'msg': 'Already authenticated'}})
+                                       'response': {'result': 'error',
+                                                    'msg': 'Already authenticated'}})
             return
 
         user_profile = get_user_profile(self.browser_session_id)
         if user_profile is None:
-            raise SocketAuthError('Unknown or missing session')
+            raise JsonableError(_('Unknown or missing session'))
         self.session.user_profile = user_profile
 
+        if 'csrf_token' not in msg['request']:
+            # Debugging code to help with understanding #6961
+            logging.error("Invalid websockets auth request: %s" % (msg['request'],))
+            raise JsonableError(_('CSRF token entry missing from request'))
         if not _compare_salted_tokens(msg['request']['csrf_token'], self.csrf_token):
-            raise SocketAuthError('CSRF token does not match that in cookie')
+            raise JsonableError(_('CSRF token does not match that in cookie'))
 
         if 'queue_id' not in msg['request']:
-            raise SocketAuthError("Missing 'queue_id' argument")
+            raise JsonableError(_("Missing 'queue_id' argument"))
 
         queue_id = msg['request']['queue_id']
         client = get_client_descriptor(queue_id)
         if client is None:
-            raise SocketAuthError('Bad event queue id: %s' % (queue_id,))
+            raise BadEventQueueIdError(queue_id)
 
         if user_profile.id != client.user_profile_id:
-            raise SocketAuthError("You are not the owner of the queue with id '%s'" % (queue_id,))
+            raise JsonableError(_("You are not the owner of the queue with id '%s'") % (queue_id,))
 
         self.authenticated = True
         register_connection(queue_id, self)
@@ -154,14 +156,17 @@ class SocketConnection(sockjs.tornado.SockJSConnection):
 
         status_inquiries = msg['request'].get('status_inquiries')
         if status_inquiries is not None:
-            results = {}
+            results = {}  # type: Dict[str, Dict[str, str]]
             for inquiry in status_inquiries:
-                status = redis_client.hgetall(req_redis_key(inquiry))
+                status = redis_client.hgetall(req_redis_key(inquiry))  # type: Dict[bytes, bytes]
                 if len(status) == 0:
-                    status['status'] = 'not_received'
-                if 'response' in status:
-                    status['response'] = ujson.loads(status['response'])
-                results[str(inquiry)] = status
+                    result = {'status': 'not_received'}
+                elif b'response' not in status:
+                    result = {'status': status[b'status'].decode('utf-8')}
+                else:
+                    result = {'status': status[b'status'].decode('utf-8'),
+                              'response': ujson.loads(status[b'response'])}
+                results[str(inquiry)] = result
             response['response']['status_inquiries'] = results
 
         self.session.send_message(response)
@@ -191,8 +196,8 @@ class SocketConnection(sockjs.tornado.SockJSConnection):
                                remote_ip=self.session.conn_info.ip,
                                email=self.session.user_profile.email,
                                client_name='?')
-            except SocketAuthError as e:
-                response = {'result': 'error', 'msg': e.msg}
+            except JsonableError as e:
+                response = e.to_json()
                 self.session.send_message({'req_id': msg['req_id'], 'type': 'response',
                                            'response': response})
                 write_log_line(log_data, path='/socket/auth', method='SOCKET',
@@ -251,7 +256,7 @@ def fake_message_sender(event):
     # type: (Dict[str, Any]) -> None
     """This function is used only for Casper and backend tests, where
     rabbitmq is disabled"""
-    log_data = dict() # type: Dict[str, Any]
+    log_data = dict()  # type: Dict[str, Any]
     record_request_start_data(log_data)
 
     req = event['request']

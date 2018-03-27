@@ -16,7 +16,7 @@ from tornado.websocket import websocket_connect, WebSocketClientConnection
 from six.moves.urllib.parse import urlparse, urlunparse, urljoin
 from six.moves.http_cookies import SimpleCookie
 
-from zerver.models import UserProfile
+from zerver.models import get_system_bot
 
 from typing import Any, Callable, Dict, Generator, Iterable, Optional
 
@@ -27,7 +27,7 @@ class WebsocketClient(object):
         # type: (str, str, str, Callable, bool, **Any) -> None
         self.validate_ssl = validate_ssl
         self.auth_email = sender_email
-        self.user_profile = UserProfile.objects.filter(email=self.auth_email).first()
+        self.user_profile = get_system_bot(sender_email)
         self.request_id_number = 0
         self.parsed_host_url = urlparse(host_url)
         self.sockjs_url = sockjs_url
@@ -38,7 +38,7 @@ class WebsocketClient(object):
         self.run_on_start = run_on_start
         self.run_kwargs = run_kwargs
         self.scheme_dict = {'http': 'ws', 'https': 'wss'}
-        self.ws = None # type: Optional[WebSocketClientConnection]
+        self.ws = None  # type: Optional[WebSocketClientConnection]
 
     def _login(self):
         # type: () -> Dict[str,str]
@@ -48,7 +48,7 @@ class WebsocketClient(object):
         auth_backend = settings.AUTHENTICATION_BACKENDS[0]
         session_auth_hash = self.user_profile.get_session_auth_hash()
         engine = import_module(settings.SESSION_ENGINE)
-        session = engine.SessionStore() # type: ignore # import_module
+        session = engine.SessionStore()  # type: ignore # import_module
         session[SESSION_KEY] = self.user_profile._meta.pk.value_to_string(self.user_profile)
         session[BACKEND_SESSION_KEY] = auth_backend
         session[HASH_SESSION_KEY] = session_auth_hash

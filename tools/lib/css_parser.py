@@ -1,6 +1,3 @@
-from __future__ import absolute_import
-from __future__ import print_function
-from six.moves import range
 from typing import Callable, List, Tuple, Union
 
 ####### Helpers
@@ -73,7 +70,7 @@ def get_whitespace_and_comments(tokens, i, end, line=None):
 
 
 def parse_sections(tokens, start, end):
-    # type: (List[Token], int, int) -> CssSectionList
+    # type: (List[Token], int, int) -> 'CssSectionList'
     i = start
     sections = []
     while i < end:
@@ -103,7 +100,7 @@ def parse_sections(tokens, start, end):
     return section_list
 
 def parse_section(tokens, start, end, pre_fluff, post_fluff):
-    # type: (List[Token], int, int, str, str) -> Union[CssNestedSection, CssSection]
+    # type: (List[Token], int, int, str, str) -> Union['CssNestedSection', 'CssSection']
     assert not ws(tokens[start].s)
     assert tokens[end-1].s == '}'  # caller should strip trailing fluff
 
@@ -132,7 +129,7 @@ def parse_section(tokens, start, end, pre_fluff, post_fluff):
         return section
 
 def parse_selectors_section(tokens, start, end):
-    # type: (List[Token], int, int) -> Tuple[int, CssSelectorList]
+    # type: (List[Token], int, int) -> Tuple[int, 'CssSelectorList']
     start, pre_fluff = get_whitespace_and_comments(tokens, start, end)
     assert pre_fluff == ''
     i = start
@@ -145,7 +142,7 @@ def parse_selectors_section(tokens, start, end):
     return i, selector_list
 
 def parse_selectors(tokens, start, end):
-    # type: (List[Token], int, int) -> CssSelectorList
+    # type: (List[Token], int, int) -> 'CssSelectorList'
     i = start
     selectors = []
     while i < end:
@@ -192,7 +189,7 @@ def parse_selector(tokens, start, end):
     return selector
 
 def parse_declaration_block(tokens, start, end):
-    # type: (List[Token], int, int) -> CssDeclarationBlock
+    # type: (List[Token], int, int) -> 'CssDeclarationBlock'
     assert tokens[start].s == '{'  # caller should strip leading fluff
     assert tokens[end-1].s == '}'  # caller should strip trailing fluff
     i = start + 1
@@ -214,7 +211,7 @@ def parse_declaration_block(tokens, start, end):
     return declaration_block
 
 def parse_declaration(tokens, start, end):
-    # type: (List[Token], int, int) -> CssDeclaration
+    # type: (List[Token], int, int) -> 'CssDeclaration'
     i, pre_fluff = get_whitespace_and_comments(tokens, start, end)
 
     if (i >= end) or (tokens[i].s == '}'):
@@ -243,7 +240,7 @@ def parse_declaration(tokens, start, end):
     return declaration
 
 def parse_value(tokens, start, end):
-    # type: (List[Token], int, int) -> CssValue
+    # type: (List[Token], int, int) -> 'CssValue'
     i, pre_fluff = get_whitespace_and_comments(tokens, start, end)
     if i < end:
         value = tokens[i]
@@ -355,7 +352,7 @@ def handle_postfluff(post_fluff, indent=False, space_after_first_line=False):
 
 class CssSectionList(object):
     def __init__(self, tokens, sections):
-        # type: (List[Token], List[Union[CssNestedSection, CssSection]]) -> None
+        # type: (List[Token], List[Union['CssNestedSection', 'CssSection']]) -> None
         self.tokens = tokens
         self.sections = sections
 
@@ -366,7 +363,7 @@ class CssSectionList(object):
 
 class CssNestedSection(object):
     def __init__(self, tokens, selector_list, section_list, pre_fluff, post_fluff):
-        # type: (List[Token], CssSelectorList, CssSectionList, str, str) -> None
+        # type: (List[Token], 'CssSelectorList', CssSectionList, str, str) -> None
         self.tokens = tokens
         self.selector_list = selector_list
         self.section_list = section_list
@@ -393,7 +390,7 @@ class CssNestedSection(object):
 
 class CssSection(object):
     def __init__(self, tokens, selector_list, declaration_block, pre_fluff, post_fluff):
-        # type: (List[Token], CssSelectorList, CssDeclarationBlock, str, str) -> None
+        # type: (List[Token], 'CssSelectorList', 'CssDeclarationBlock', str, str) -> None
         self.tokens = tokens
         self.selector_list = selector_list
         self.declaration_block = declaration_block
@@ -412,7 +409,7 @@ class CssSection(object):
 
 class CssSelectorList(object):
     def __init__(self, tokens, selectors):
-        # type: (List[Token], List[CssSelector]) -> None
+        # type: (List[Token], List['CssSelector']) -> None
         self.tokens = tokens
         self.selectors = selectors
 
@@ -435,7 +432,7 @@ class CssSelector(object):
 
 class CssDeclarationBlock(object):
     def __init__(self, tokens, declarations):
-        # type: (List[Token], List[CssDeclaration]) -> None
+        # type: (List[Token], List['CssDeclaration']) -> None
         self.tokens = tokens
         self.declarations = declarations
 
@@ -449,7 +446,7 @@ class CssDeclarationBlock(object):
 
 class CssDeclaration(object):
     def __init__(self, tokens, pre_fluff, post_fluff, css_property, css_value, semicolon):
-        # type: (List[Token], str, str, str, CssValue, bool) -> None
+        # type: (List[Token], str, str, str, 'CssValue', bool) -> None
         self.tokens = tokens
         self.pre_fluff = pre_fluff
         self.post_fluff = post_fluff

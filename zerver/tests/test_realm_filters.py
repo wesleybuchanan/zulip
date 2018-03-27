@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 from zerver.lib.actions import get_realm, do_add_realm_filter
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.models import RealmFilter
-import ujson
-
 
 class RealmFilterTest(ZulipTestCase):
 
@@ -21,8 +18,7 @@ class RealmFilterTest(ZulipTestCase):
         result = self.client_get("/json/realm/filters")
         self.assert_json_success(result)
         self.assertEqual(200, result.status_code)
-        content = ujson.loads(result.content)
-        self.assertEqual(len(content["filters"]), 1)
+        self.assertEqual(len(result.json()["filters"]), 1)
 
     def test_create(self):
         # type: () -> None
@@ -42,6 +38,11 @@ class RealmFilterTest(ZulipTestCase):
 
         data['pattern'] = 'ZUL-(?P<id>\d+)'
         data['url_format_string'] = '$fgfg'
+        result = self.client_post("/json/realm/filters", info=data)
+        self.assert_json_error(result, 'Enter a valid URL.')
+
+        data['pattern'] = 'ZUL-(?P<id>\d+)'
+        data['url_format_string'] = 'https://realm.com/my_realm_filter/'
         result = self.client_post("/json/realm/filters", info=data)
         self.assert_json_error(result, 'URL format string must be in the following format: `https://example.com/%(\\w+)s`')
 

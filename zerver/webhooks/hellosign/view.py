@@ -1,6 +1,5 @@
-from __future__ import absolute_import
 from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
 
@@ -48,14 +47,8 @@ def api_hellosign_webhook(request, user_profile,
                           stream=REQ(default='hellosign'),
                           topic=REQ(default=None)):
     # type: (HttpRequest, UserProfile, Dict[str, Dict[str, Any]], text_type, text_type) -> HttpResponse
-    try:
-        model_payload = ready_payload(payload['signature_request']['signatures'],
-                                      payload)
-    except KeyError as e:
-        return json_error(_("Missing key {} in JSON").format(str(e)))
-
+    model_payload = ready_payload(payload['signature_request']['signatures'], payload)
     body = format_body(payload['signature_request']['signatures'], model_payload)
     topic = topic or model_payload['contract_title']
-    check_send_message(user_profile, request.client, 'stream', [stream],
-                       topic, body)
+    check_send_stream_message(user_profile, request.client, stream, topic, body)
     return json_success()

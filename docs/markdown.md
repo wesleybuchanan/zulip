@@ -18,27 +18,54 @@ sender of a message, and they are (ideally) identical to the backend
 rendering.
 
 The JavaScript markdown implementation has a function,
-`markdown.contains_bugdown`, that is used to check whether a message
+`markdown.contains_backend_only_syntax`, that is used to check whether a message
 contains any syntax that needs to be rendered to HTML on the backend.
-If `markdown.contains_bugdown` returns true, the frontend simply won't
+If `markdown.contains_backend_only_syntax` returns true, the frontend simply won't
 echo the message for the sender until it receives the rendered HTML
-from the backend.  If there is a bug where `markdown.contains_bugdown`
+from the backend.  If there is a bug where `markdown.contains_backend_only_syntax`
 returns false incorrectly, the frontend will discover this when the
 backend returns the newly sent message, and will update the HTML based
 on the authoritative backend rendering (which would cause a change in
 the rendering that is visible only to the sender shortly after a
 message is sent).  As a result, we try to make sure that
-`markdown.contains_bugdown` is always correct.
+`markdown.contains_backend_only_syntax` is always correct.
 
 ## Testing
 
 The Python-Markdown implementation is tested by
 `zerver/tests/test_bugdown.py`, and the marked.js implementation and
-`markdown.contains_bugdown` are tested by
-`frontend_tests/node_tests/markdown.js`.  A shared set of fixed test data
-("test fixtures") is present in `zerver/fixtures/bugdown-data.json`,
-and is automatically used by both test suites; as a result, it the
-preferred place to add new tests for Zulip's markdown system.
+`markdown.contains_backend_only_syntax` are tested by
+`frontend_tests/node_tests/markdown.js`.
+
+A shared set of fixed test data ("test fixtures") is present in
+`zerver/fixtures/markdown_test_cases.json`, and is automatically used
+by both test suites; as a result, it is the preferred place to add new
+tests for Zulip's markdown system.  Some important notes on reading
+this file:
+
+* `expected_output` is the expected output for the backend markdown
+  processor.
+* When the frontend processor doesn't support a feature and it should
+  just be rendered on the backend, we set `backend_only_rendering` to
+  `true` in the fixtures; this will automatically verify that
+  `markdown.contains_backend_only_syntax` rejects the syntax, ensuring
+  it will be rendered only by the backend processor.
+* When the two processors disagree, we set `expected_marked_output` in
+  the fixtures; this will ensure that the syntax stays that way.  If
+  the differenes are important (i.e. not just whitespace), we should
+  also open an issue on GitHub to track the problem.
+* When those above settings are not in use, we set
+  `bugdown_matches_marked` to `false`.  `bugdown_matches_marked` is
+  the predescessor to the more descriptive `backend_only_rendering`
+  and `expected_marked_output` fields, and when `false`, should be
+  replaced be one of those.  We plan to eliminate it once we're out of
+  cases where it is `false`.
+* For mobile push notifications, we need a text version of the
+  rendered content, since the APNS and GCM push notification systems
+  don't support richer markup.  Mostly, this involves stripping HTML,
+  but there's some syntax we take special care with.  Tests for what
+  this plain-text version of content should be are stored in the
+  `text_content` field.
 
 If you're going to manually test some changes in the frontend Markdown
 implementation, the easiest way to do this is as follows:
@@ -59,10 +86,10 @@ places:
 
 * The backend markdown processor (`zerver/lib/bugdown/__init__.py`).
 * The frontend markdown processor (`static/js/markdown.js` and sometimes
-  `static/third/marked/lib/marked.js`), or `markdown.contains_bugdown` if
+  `static/third/marked/lib/marked.js`), or `markdown.contains_backend_only_syntax` if
   your changes won't be supported in the frontend processor.
 * If desired, the typeahead logic in `static/js/composebox_typeahead.js`.
-* The test suite, probably via adding entries to `zerver/fixtures/bugdown-data.json`.
+* The test suite, probably via adding entries to `zerver/fixtures/markdown_test_cases.json`.
 * The in-app markdown documentation (`templates/zerver/markdown_help.html`).
 * The list of changes to markdown at the end of this document.
 

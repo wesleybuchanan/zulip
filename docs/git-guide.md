@@ -37,14 +37,14 @@ with these details in mind:
 
 - We provide **many tools to help you submit quality code.** These include
   [linters][zulip-rtd-lint-tools], [tests][zulip-rtd-testing], continuous
-  integration with [TravisCI][travis-ci], and [mypy][zulip-rtd-mypy].
+  integration with [Travis CI][travis-ci], and [mypy][zulip-rtd-mypy].
 
 - We use [zulipbot][zulip-rtd-zulipbot-usage] to manage our issues and
 pull requests to create a better GitHub workflow for contributors.
 
 Finally, take a quick look at [Zulip-specific Git scripts][self-zulip-tools],
 install the [Zulip developer environment][zulip-rtd-dev-overview], and then
-[configure your fork for use with TravisCI][self-travisci].
+[configure your fork for use with Travis CI][self-travisci].
 
 ***
 
@@ -62,17 +62,26 @@ can skip this section. Otherwise, read on!
 If you're not already using Git, you might need to [install][gitbook-install]
 and [configure][gitbook-setup] it.
 
+**If you are using Windows 10, make sure you [are running Git BASH as an
+administrator][git-bash-admin] at all times.**
+
 You'll also need a GitHub account, which you can sign up for
-[here][github-join]. We also recommend you create an ssh key if you don't
-already have one and [add it to your GitHub account][github-help-add-ssh-key].
+[here][github-join].
 
-If you plan on using Git from the command line, the following tips can make
-your experience better:
+We highly recommend you create an ssh key if you don't already have
+one and [add it to your GitHub account][github-help-add-ssh-key].  If
+you don't, you'll have to type your GitHub username and password every
+time you interact with GitHub, which is usually several times a day.
 
+We also highly recommend the following:
+
+- [Configure Git][gitbook-config] with your name and email and
+  [aliases][gitbook-aliases] for commands you'll use often.  We
+  recommend using your full name (not just your first name), since
+  that's what we'll use to give credit to your work in places like the
+  Zulip release notes.
 - Install the command auto-completion and/or git-prompt plugins available for
   [Bash][gitbook-other-envs-bash] and [Zsh][gitbook-other-envs-zsh].
-- [Configure Git][gitbook-config] with your user details and
-  [aliases][gitbook-aliases] for commands you'll use often.
 
 ### Get a graphical client
 
@@ -194,7 +203,7 @@ current state of the index and advancing HEAD to point at the new
 A fast-forward is a special type of merge where you have a revision
 and you are "merging" another branch's changes that happen to be a
 descendant of what you have. In such these cases, you do not make a
-new mergecommit but instead just update to his revision. This will
+new mergecommit but instead just update to their revision. This will
 happen frequently on a remote-tracking branch of a remote
 repository.
 
@@ -333,11 +342,23 @@ first-time contributors][zulip-rtd-dev-first-time].
 
 This step is optional, but recommended.
 
-Zulip Server is configured to use [Travis CI][travis-ci] to test and create
-builds upon each new commit and pull request. Travis CI is free for open source
-projects and it's easy to configure for your own fork of Zulip. After doing so,
-TravisCI will run tests for new refs you push to GitHub and email you the
-outcome (you can also view the results in the web interface).
+The Zulip Server project is configured to use [Travis CI][travis-ci]
+to test and create builds upon each new commit and pull
+request. Travis CI is free for open source projects and it's easy to
+configure for your own fork of Zulip. After doing so, Travis CI will
+run tests for new refs you push to GitHub and email you the outcome
+(you can also view the results in the web interface).
+
+Running Travis CI against your fork can help save both you and the
+Zulip maintainers time by making it easy to test a change fully before
+submitting a pull request.  We generally recommend a worfklow where as
+you make changes, you use a fast edit-refresh cycle running individual
+tests locally until your changes work.  But then once you've gotten
+the tests you'd expect to be relevant to your changes working, push a
+branch to Travis CI to run the full test suite before you create a
+pull request.  While you wait for Travis CI to run, you can start
+working on your next task.  When the tests finish, you can create a
+pull request that you already know passes the tests.
 
 First, sign in to [Travis CI][travis-ci] with your GitHub account and authorize
 Travis CI to access your GitHub account and repositories. Once you've done
@@ -781,20 +802,29 @@ complicated rebase.
 
 ## Create a pull request
 
-When you're ready for feedback, submit a pull request. At Zulip we recommend
-submitting work-in-progress pull requests early and often. This allows you to
-get feedback and help with your bugfix or feature. Prefix work-in-progress pull
-requests with **[WIP]**.
-
-Pull requests are a feature specific to GitHub. They provide a simpler,
-web-based way to submit your work (often called "patches") to a project. It's
-called a *pull request* because you're asking the project to *pull changes*
+When you're ready for feedback, submit a pull request. Pull requests
+are a feature specific to GitHub. They provide a simple, web-based way
+to submit your work (often called "patches") to a project. It's called
+a *pull request* because you're asking the project to *pull changes*
 from your fork.
 
-If you're unfamiliar with how to create a pull request, checkout GitHub's
-documentation on [creating a pull request from a
-fork][github-help-create-pr-fork]. You might also find GitHub's article [about
-pull requests][github-help-about-pr] helpful.
+If you're unfamiliar with how to create a pull request, you can check
+out GitHub's documentation on
+[creating a pull request from a fork][github-help-create-pr-fork]. You
+might also find GitHub's article
+[about pull requests][github-help-about-pr] helpful. That all said,
+the tutorial below will walk you through the process.
+
+### Work in progress pull requests
+
+In the Zulip project, we encourage submitting work-in-progress pull
+requests early and often. This allows you to share your code to make
+it easier to get feedback and help with your changes. Prefix the
+titles of work-in-progress pull requests with **[WIP]**, which in our
+project means that you don't think your pull request is ready to be
+merged (e.g. it might not work or pass tests).  This sets expectations
+correctly for any feedback from other developers, and prevents your
+work from being merged before you're confident in it.
 
 ### Step 1: Update your branch with git rebase
 
@@ -879,8 +909,16 @@ You'll see the *Open a pull request* page:
 
 ![images-create-pr]
 
-Provide a **title** and first comment for your pull request. When ready, click
-the green **Create pull request** to submit the pull request.
+Provide a **title** and first comment for your pull request. Remember to prefix
+your pull request title with [WIP] if it is a [work-in-progress][wip-prs].
+
+If your pull request has an effect on the visuals of a component, you might want
+to include a screenshot of this change or a GIF of the interaction in your first
+comment. This will allow reviewers to comment on your changes without having to
+checkout your branch; you can find a list of tools you can use for this over
+[here][screenshots-gifs].
+
+When ready, click the green **Create pull request** to submit the pull request.
 
 Note: **Pull request titles are different from commit messages.** Commit
 messages can be edited with `git commit --amend`, `git rebase -i`, etc., while
@@ -922,7 +960,12 @@ the branch anything you want, but using both the username and branch name will
 help you keep things organized.
 
 ```
-$ git checkout -b <username>-<branchname>
+$ git checkout -b <username>/<branchname>
+```
+
+You can choose to rename the branch if you prefer:
+```
+git checkout -b <custombranchname> <username>/<branchname>
 ```
 
 ### Checkout a pull request locally
@@ -946,6 +989,13 @@ $ git checkout BRANCHNAME
 ```
 
 Now you work on this branch as you would any other.
+
+Note: you can use the scripts provided in the tools/ directory to fetch pull
+requests. You can read more about what they do [here][tools-PR].
+```
+tools/fetch-rebase-pull-request <PR-number>
+tools/fetch-pull-request <PR-number>
+```
 
 ## Review changes
 
@@ -1027,7 +1077,7 @@ working on a feature or bugfix. In order for Git to merge your changes and the
 changes that have occurred on zulip/upstream since you first started your work,
 it must perform a three-way merge and create a merge commit.
 
-Merge commits aren't bad, however, Zulip don't use them. Instead Zulip uses a
+Merge commits aren't bad, however, Zulip doesn't use them. Instead Zulip uses a
 forked-repo, rebase-oriented workflow.
 
 A merge commit is usually created when you've run `git pull` or `git merge`.
@@ -1087,9 +1137,9 @@ keep any changes that are in your working directory or that you have committed,
 use `git reset --merge <commit>` instead.
 
 You can also use the relative reflog `HEAD@{1}` instead of the commit hash,
-just keep in mind this changes as you run git commands.
+just keep in mind that this changes as you run git commands.
 
-Now when I look at the git reflog, I see the tip of my branch is pointing to my
+Now when you look at the output of `git reflog`, you should see that the tip of your branch points to your
 last commit `13bea0e` before the merge:
 
 ```
@@ -1207,6 +1257,16 @@ To fix, open all the files with conflicts in your editor and decide which edits
 should be applied. Git uses standard conflict-resolution (`<<<<<<<`, `=======`,
 and `>>>>>>>`) markers to indicate where in files there are conflicts.
 
+Tip: You can see recent changes made to a file by running the following
+commands:
+```
+git fetch upstream
+git log -p upstream/master -- /path/to/file
+```
+You can use this to compare the changes that you have made to a file with the
+ones in upstream, helping you avoid undoing changes from a previous commit when
+you are rebasing.
+
 Once you've done that, save the file(s), stage them with `git add` and then
 continue the rebase with `git rebase --continue`:
 
@@ -1296,6 +1356,10 @@ $ ls -l .git/hooks
 pre-commit -> ../../tools/pre-commit
 ```
 
+### Set up Travis CI integration
+
+You might also wish to [configure your fork for use with Travis CI][self-travisci].
+
 ### Reset to pull request
 
 `tools/reset-to-pull-request` is a short-cut for [checking out a pull request
@@ -1335,8 +1399,7 @@ HEAD is now at 2bcd1d8 troubleshooting tip about provisioning
 request locally][self-fetch-pr] in its own branch and then updating it with any
 changes from upstream/master with `git rebase`.
 
-First, make sure you are working in branch `master`. Then run the script with
-the ID number of the pull request as the first argument.
+Run the script with the ID number of the pull request as the first argument.
 
 ```
 $ tools/fetch-rebase-pull-request 1913
@@ -1357,6 +1420,59 @@ HEAD is now at 99aa2bf Add provision.py fails issue in common erros
 Current branch review-1913 is up to date.
 ```
 
+### Fetch a pull request without rebasing
+
+`tools/fetch-pull-request` is a similar to `tools/fetch-rebase-pull-request`, but
+it does not rebase the pull request against upstream/master, thereby getting
+exactly the same repository state as the commit author had.
+
+Run the script with the ID number of the pull request as the first argument.
+
+```
+$ tools/fetch-pull-request 5156
++ git diff-index --quiet HEAD
++ request_id=5156
++ remote=upstream
++ git fetch upstream pull/5156/head
+From https://github.com/zulip/zulip
+ * branch            refs/pull/5156/head -> FETCH_HEAD
++ git checkout -B review-original-5156
+Switched to a new branch 'review-original-5156'
++ git reset --hard FETCH_HEAD
+HEAD is now at 5a1e982 tools: Update clean-branches to clean review branches.
+```
+
+### Delete unimportant branches
+
+`tools/clean-branches` is a shell script that removes branches that are either:
+
+1. Local branches that are ancestors of origin/master.
+2. Branches in origin that are ancestors of origin/master and named like `$USER-*`.
+3. Review branches created by `tools/fetch-rebase-pull-request` and `tools/fetch-pull-request`.
+
+First, make sure you are working in branch `master`. Then run the script without any
+arguments for default behavior. Since removing review branches can inadvertently remove any
+feature branches whose names are like `review-*`, it is not done by default. To
+use it, run `tools/clean-branches --reviews`.
+
+```
+$ tools/clean-branches --reviews
+Deleting local branch review-original-5156 (was 5a1e982)
+```
+
+### Merge conflict on yarn.lock file
+
+If there is a merge conflict on yarn.lock, yarn should be run to
+regenerate the file. *Important* don't delete the yarn.lock file. Checkout the
+latest one from origin/master so that yarn knows the previous asset versions.
+
+Run the following commands
+```
+git checkout origin/master -- yarn.lock
+yarn install
+git add yarn.lock
+git rebase --continue
+```
 
 [gitbook-rebase]: https://git-scm.com/book/en/v2/Git-Branching-Rebasing
 [gitbook-git-rebase]: https://git-scm.com/docs/git-rebase
@@ -1409,6 +1525,7 @@ Current branch review-1913 is up to date.
 [zulip-rtd-dev-first-time]: dev-env-first-time-contributors.html
 [zulip-rtd-zulipbot-usage]: zulipbot-usage.html
 [gitgui-tower]: https://www.git-tower.com/
+[git-bash-admin]: dev-env-first-time-contributors.html#running-git-bash-as-an-administrator
 [gitgui-fork]: https://git-fork.com/
 [gitgui-gitxdev]: https://rowanj.github.io/gitx/
 [gitgui-ghdesktop]: https://desktop.github.com/
@@ -1421,6 +1538,7 @@ Current branch review-1913 is up to date.
 [gitgui-gitk]: https://git-scm.com/docs/gitk
 [travis-ci]: https://travis-ci.org/
 [travis-ci-profile]: https://travis-ci.org/profile
+[screenshots-gifs]: screenshot-and-gif-software.html
 [self-setup]: git-guide.html#setup-git
 [self-how-git-is-different]: git-guide.html#how-git-is-different
 [self-git-terms]: git-guide.html#important-git-terms
@@ -1441,9 +1559,11 @@ Current branch review-1913 is up to date.
 [self-travisci]: git-guide.html#step-3-configure-travis-ci-continuous-integration
 [self-multiple-computers]: git-guide.html#working-from-multiple-computers
 [self-git-terms]: git-guide.html#important-git-terms
+[tools-PR]: #fetch-a-pull-request-and-rebase
 [images-gui-stage]: _images/zulip-gui-stage.gif
 [images-gui-hist]: _images/zulip-gui-hist-tower.png
 [images-create-pr]: images/zulip-open-pr.png
 [understanding-git]: http://web.mit.edu/nelhage/Public/git-slides-2009.pdf
 [edx-howto-rebase-pr]: https://github.com/edx/edx-platform/wiki/How-to-Rebase-a-Pull-Request
 [tig]: http://jonas.nitro.dk/tig/
+[wip-prs]: #work-in-progress-pull-requests

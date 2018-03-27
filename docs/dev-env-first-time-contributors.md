@@ -11,16 +11,17 @@ all related services will run.
 
 Contents:
 * [Requirements](#requirements)
+* [Step 0: Set up Git & GitHub](#step-0-set-up-git-github)
 * [Step 1: Install Prerequisites](#step-1-install-prerequisites)
 * [Step 2: Get Zulip code](#step-2-get-zulip-code)
 * [Step 3: Start the development environment](#step-3-start-the-development-environment)
 * [Step 4: Developing](#step-4-developing)
-* [Troubleshooting & Common Errors](#troubleshooting-common-errors)
+* [Troubleshooting and Common Errors](#troubleshooting-and-common-errors)
 * [Specifying a proxy](#specifying-a-proxy)
 
 **If you encounter errors installing the Zulip development
 environment,** check
-[Troubleshooting & Common Errors](#troubleshooting-common-errors). If
+[Troubleshooting and Common Errors](#troubleshooting-and-common-errors). If
 that doesn't help, please visit
 [#provision help](https://chat.zulip.org/#narrow/stream/provision.20help)
 in the [Zulip development community server](chat-zulip-org.html) for
@@ -44,9 +45,11 @@ connection throughout the entire installation processes. (See [Specifying a
 proxy](#specifying-a-proxy) if you need a proxy to access the internet.)
 
 
-- **All**: 2GB available RAM, Active broadband internet connection.
-- **macOS**: macOS (10.11 El Capitan or 10.12 Sierra recommended), Git,
-  [VirtualBox][vbox-dl], [Vagrant][vagrant-dl-macos].
+- **All**: 2GB available RAM, Active broadband internet connection, [GitHub account][set-up-git].
+- **macOS**: macOS (10.11 El Capitan or 10.12 Sierra recommended),
+  Git, VirtualBox (version [5.1.8][vbox-dl-macos]
+  recommended -- we find it's more stable than more recent versions),
+  [Vagrant][vagrant-dl-macos].
 - **Ubuntu**: 14.04 64-bit or 16.04 64-bit, Git, [Vagrant][vagrant-dl-deb], lxc.
   - or **Debian**: 9.0 "stretch" 64-bit
 - **Windows**: Windows 64-bit (Win 10 recommended), hardware
@@ -56,6 +59,17 @@ proxy](#specifying-a-proxy) if you need a proxy to access the internet.)
 
 Don't see your system listed above? See [Advanced setup][install-advanced] for
 details about installing for other Linux and UNIX platforms.
+
+### Step 0: Set up Git & GitHub
+
+You can skip this step if you already have Git, GitHub, and SSH access
+to GitHub working on your machine.
+
+Follow our [Git Guide][set-up-git] in order to install Git, set up a
+GitHub account, create an SSH key to access code on GitHub
+efficiently, etc.  Be sure to create an ssh key and add it to your
+GitHub account using
+[these instructions](https://help.github.com/articles/generating-an-ssh-key/).
 
 ### Step 1: Install Prerequisites
 
@@ -69,7 +83,7 @@ Jump to:
 #### macOS
 
 1. Install [Vagrant][vagrant-dl-macos] (1.8.4-1.8.6, do not use 1.8.7).
-2. Install [VirtualBox][vbox-dl] (>= 5.1.8).
+2. Install [VirtualBox][vbox-dl-macos] (5.1.8).
 
 (For a non-free option, but better performance, you can also use [VMWare
 Fusion][vmware-fusion-dl] with the [VMWare Fusion Vagrant
@@ -190,10 +204,17 @@ sudo apt-get install build-essential git ruby lxc redir
 If you do, make sure to **install default required packages** along with
 **git**, **curl**, **openssh**, and **rsync** binaries.)
 
-After installing, you must run **Git BASH as an administrator**.
-
 Also, you must have hardware virtualization enabled (VT-X or AMD-V) in your
 computer's BIOS.
+
+#### Running Git BASH as an administrator
+
+It is important that you **always run Git BASH with administrator
+privileges** when working on Zulip code, as not doing so will cause
+errors in the development environment (such as symlink creation). You
+might wish to configure your Git BASH shortcut to always run with
+these privileges enabled (see this [guide][bash-admin-setup] for how
+to set this up).
 
 ##### Enable native symlinks
 
@@ -243,10 +264,6 @@ winsymlinks:native
 Now you are ready for [Step 2: Get Zulip Code.](#step-2-get-zulip-code)
 
 ### Step 2: Get Zulip Code
-
-If you haven't already created an ssh key and added it to your GitHub account,
-you should do that now by following [these
-instructions](https://help.github.com/articles/generating-an-ssh-key/).
 
 1. In your browser, visit <https://github.com/zulip/zulip>
    and click the `fork` button. You will need to be logged in to GitHub to
@@ -303,7 +320,8 @@ does the following:
 - runs the `tools/provision` script inside the virtual machine/container, which
   downloads all required dependencies, sets up the python environment for
   the Zulip development server, and initializes a default test
-  database.  We call this process "provisioning".
+  database.  We call this process "provisioning", and it is documented
+  in some detail in our [dependencies documentation](dependencies.html).
 
 You will need an active internet connection during the entire
 process. (See [Specifying a proxy](#specifying-a-proxy) if you need a
@@ -312,7 +330,7 @@ provisioning if your Internet connection is unreliable.  To retry, you
 can use `vagrant provision` (`vagrant up` will just boot the guest
 without provisioning after the first time).  Other common issues are
 documented in the
-[Troubleshooting & Common Errors](#troubleshooting-common-errors)
+[Troubleshooting and Common Errors](#troubleshooting-and-common-errors)
 section.  If that doesn't help, please visit
 [#provision help](https://chat.zulip.org/#narrow/stream/provision.20help)
 in the [Zulip development community server](chat-zulip-org.html) for
@@ -364,17 +382,14 @@ Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 4.4.0-21-generic x86_64)
 Congrats, you're now inside the Zulip development environment!
 
 You can confirm this by looking at the command prompt, which starts
-with `(zulip-venv)vagrant@`.  If it just starts with `vagrant@`, your
+with `(zulip-py3-venv)vagrant@`.  If it just starts with `vagrant@`, your
 provisioning failed and you should look at the
-[troubleshooting section](#troubleshooting-common-errors).
+[troubleshooting section](#troubleshooting-and-common-errors).
 
 Next, start the Zulip server:
 
 ```
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~
-$ cd zulip
-
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~/zulip
+(zulip-py3-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip
 $ ./tools/run-dev.py
 ```
 
@@ -444,10 +459,10 @@ restart itself or reload data appropriately when you make changes. So,
 to see your changes, all you usually have to do is reload your
 browser.  More details on how this works are available below.
 
-Don't forget to read through the [code style
-guidelines](code-style.html#general) for details about how to configure your
-editor for Zulip. For example, indentation should be set to 4 spaces rather
-than tabs.
+Zulip's whitespace rules are all enforced by linters, so be sure to
+run `tools/lint` often to make sure you're following our coding style
+(or use `tools/setup-git-repo` to run it on just the changed files
+automatically whenever you commit).
 
 #### Understanding run-dev.py debugging output
 
@@ -520,7 +535,7 @@ From the window where run-dev.py is running:
 2016-05-04 18:33:13,330 INFO     127.0.0.1       GET     200  92ms /register/ (unauth via ?)
 ^C
 KeyboardInterrupt
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~/zulip$ exit
+(zulip-py3-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip$ exit
 logout
 Connection to 127.0.0.1 closed.
 christie@win10 ~/zulip
@@ -556,10 +571,7 @@ christie@win10 ~/zulip
 $ vagrant up
 $ vagrant ssh
 
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~
-$ cd zulip
-
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~/zulip
+(zulip-py3-venv)vagrant@vagrant-ubuntu-trusty-64:/srv/zulip
 $ ./tools/run-dev.py
 ```
 
@@ -569,14 +581,15 @@ Next, read the following to learn more about developing for Zulip:
 
 * [Git & GitHub Guide][rtd-git-guide]
 * [Using the Development Environment][rtd-using-dev-env]
-* [Testing][rtd-testing]
+* [Testing][rtd-testing] (and [Configuring Travis CI][travis-ci] to
+run the full test suite against any branches you push to your fork,
+which can help you optimize your development workflow).
 
-### Troubleshooting & Common Errors
+### Troubleshooting and Common Errors
 
 Below you'll find a list of common errors and their solutions.  Most
-issues are resolved by just provisioning again (via
-`tools/provision.py` inside the Vagrant guest or equivalently `vagrant
-provision` from outside).
+issues are resolved by just provisioning again (by running `./tools/provision`
+inside the Vagrant guest or equivalently `vagrant provision` from outside).
 
 If these solutions aren't working for you or you encounter an issue not
 documented below, there are a few ways to get further help:
@@ -600,7 +613,7 @@ When reporting your issue, please include the following information:
 The output of `tools/diagnose` run inside the Vagrant guest is also
 usually helpful.
 
-#### Vagrant guest doesn't show (zulip-venv) at start of prompt
+#### Vagrant guest doesn't show (zulip-py3-venv) at start of prompt
 
 This is caused by provisioning failing to complete successfully.  You
 can see the errors in `var/log/provision.log`; it should end with
@@ -700,6 +713,19 @@ This is equivalent of running a halt followed by an up (aka rebooting
 the guest).  After this, you can do `vagrant provision` and `vagrant
 ssh`.
 
+#### ssh connection closed by remote host
+
+On running `vagrant ssh`, if you see the following error:
+
+```
+ssh_exchange_identification: Connection closed by remote host
+```
+
+It usually means the Vagrant guest is not running, which is usually
+solved by rebooting the Vagrant guest via `vagrant reload`.  See
+[Vagrant was unable to communicate with the guest machine](#vagrant-was-unable-to-communicate-with-the-guest-machine)
+for more details.
+
 #### os.symlink error
 
 If you receive the following error while running `vagrant up`:
@@ -779,6 +805,34 @@ If this is already enabled in your BIOS, double-check that you are running a
 For further information about troubleshooting vagrant timeout errors [see
 this post](http://stackoverflow.com/questions/22575261/vagrant-stuck-connection-timeout-retrying#22575302).
 
+#### Vagrant was unable to communicate with the guest machine
+
+If you see the following error when you run `vagrant up`:
+
+```
+Timed out while waiting for the machine to boot. This means that
+Vagrant was unable to communicate with the guest machine within
+the configured ("config.vm.boot_timeout" value) time period.
+
+If you look above, you should be able to see the error(s) that
+Vagrant had when attempting to connect to the machine. These errors
+are usually good hints as to what may be wrong.
+
+If you're using a custom box, make sure that networking is properly
+working and you're able to connect to the machine. It is a common
+problem that networking isn't setup properly in these boxes.
+Verify that authentication configurations are also setup properly,
+as well.
+
+If the box appears to be booting properly, you may want to increase
+the timeout ("config.vm.boot_timeout") value.
+```
+
+This has a range of possible causes, that usually amount to a bug in
+Virtualbox or Vagrant.  If you see this error, you usually can fix it
+by rebooting the guest via `vagrant reload` (or equivalently, `vagrant
+halt` followed by `vagrant up`):
+
 #### Vagrant up fails with subprocess.CalledProcessError
 
 The `vagrant up` command basically does the following:
@@ -805,13 +859,13 @@ environment to use it](#specifying-a-proxy).
 Once you've provisioned successfully, you'll get output like this:
 ```
 Zulip development environment setup succeeded!
-(zulip-venv) vagrant@vagrant-base-trusty-amd64:~/zulip$
+(zulip-py3-venv) vagrant@vagrant-base-trusty-amd64:~/zulip$
 ```
 
-If the `(zulip-venv)` part is missing, this is because your
+If the `(zulip-py3-venv)` part is missing, this is because your
 installation failed the first time before the Zulip virtualenv was
 created.  You can fix this by just closing the shell and running
-`vagrant ssh` again, or using `source /srv/zulip-venv/bin/activate`.
+`vagrant ssh` again, or using `source /srv/zulip-py3-venv/bin/activate`.
 
 Finally, if you encounter any issues that weren't caused by your
 Internet connection, please report them!  We try hard to keep Zulip
@@ -828,50 +882,23 @@ gigabytes of RAM, which is the minimum Zulip
 not, go to your VM settings and increase the RAM, then restart
 the VM.
 
-##### npm install errors
-
-The `tools/provision` script may encounter an error related to `npm install`
-that looks something like:
+##### yarn install warnings
 
 ```
-==> default: + npm install
-==> default: Traceback (most recent call last):
-==> default:   File "/srv/zulip/tools/provision", line 195, in <module>
-==> default:
-==> default: sys.exit(main())
-==> default:   File "/srv/zulip/tools/provision", line 191, in main
-==> default:
-==> default: run(["npm", "install"])
-==> default:   File "/srv/zulip/scripts/lib/zulip_tools.py", line 78, in run
-==> default:
-==> default: raise subprocess.CalledProcessError(rc, args)
-==> default: subprocess
-==> default: .
-==> default: CalledProcessError
-==> default: :
-==> default: Command '['npm', 'install']' returned non-zero exit status 34
-The SSH command responded with a non-zero exit status. Vagrant
-assumes that this means the command failed. The output for this command
-should be in the log above. Please read the output to determine what
-went wrong.
+$ yarn install
+yarn install v0.24.5
+[1/4] Resolving packages...
+[2/4] Fetching packages...
+warning fsevents@1.1.1: The platform "linux" is incompatible with this module.
+info "fsevents@1.1.1" is an optional dependency and failed compatibility check. Excluding it from installation.
+[3/4] Linking dependencies...
+[4/4] Building fresh packages...
+$ browserify node_modules/sockjs-client/lib/entry.js --standalone SockJS > node_modules/sockjs-client/sockjs.js
+Done in 23.50s.
 ```
 
-Usually this error is not fatal. Try connecting to the development
-environment and re-trying the command from withing the virtual
-machine:
-
-```
-christie@win10 ~/zulip
-$ vagrant ssh
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~
-$ cd zulip
-(zulip-venv)vagrant@vagrant-ubuntu-trusty-64:~/zulip
-$ npm install
-npm WARN optional Skipping failed optional dependency /chokidar/fsevents:
-npm WARN notsup Not compatible with your operating system or architecture: fsevents@1.0.12
-```
-
-These are just warnings so it is okay to proceed and start the Zulip server.
+These are warnings produced by spammy third party JavaScript packages.
+It is okay to proceed and start the Zulip server.
 
 #### vagrant-lxc errors
 
@@ -941,7 +968,7 @@ need to specify the proxy settings before running `Vagrant up`.
 First, install the Vagrant plugin `vagrant-proxyconf`:
 
 ```
-vagrant plugin install vagrant-proxyconf.
+vagrant plugin install vagrant-proxyconf
 ```
 
 Then create `~/.zulip-vagrant-config` and add the following lines to
@@ -956,6 +983,10 @@ NO_PROXY localhost,127.0.0.1,.example.com
 Now run `vagrant up` in your terminal to install the development
 server. If you ran `vagrant up` before and failed, you'll need to run
 `vagrant destroy` first to clean up the failed installation.
+
+**If you no longer want to use proxy with Vagrant, set values of HTTP_PROXY
+and HTTPS_PROXY to `""` in `~/.zulip-vagrant-config` file and
+restart Vagrant.**
 
 You can also change the port on the host machine that Vagrant uses by
 adding to your `~/.zulip-vagrant-config` file.  E.g. if you set:
@@ -986,6 +1017,7 @@ for the IP address that means any IP address can connect to your development ser
 [vagrant-dl-deb]: https://releases.hashicorp.com/vagrant/1.8.6/vagrant_1.8.6_x86_64.deb
 [vagrant-lxc]: https://github.com/fgrehm/vagrant-lxc
 [vbox-dl]: https://www.virtualbox.org/wiki/Downloads
+[vbox-dl-macos]: http://download.virtualbox.org/virtualbox/5.1.8/VirtualBox-5.1.8-111374-OSX.dmg
 [vmware-fusion-dl]: http://www.vmware.com/products/fusion.html
 [vagrant-vmware-fusion-dl]: https://www.vagrantup.com/vmware/
 [avoiding-sudo]: https://github.com/fgrehm/vagrant-lxc#avoiding-sudo-passwords
@@ -996,3 +1028,6 @@ for the IP address that means any IP address can connect to your development ser
 [rtd-using-dev-env]: using-dev-environment.html
 [rtd-dev-remote]: dev-remote.html
 [git-bash]: https://git-for-windows.github.io/
+[bash-admin-setup]: https://superuser.com/questions/1002262/run-applications-as-administrator-by-default-in-windows-10
+[set-up-git]: git-guide.html#set-up-git
+[travis-ci]: git-guide.html#step-3-configure-travis-ci-continuous-integration

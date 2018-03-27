@@ -6,8 +6,7 @@ Look at the surrounding code, or a similar part of the project, and try
 to do the same thing. If you think the other code has actively bad
 style, fix it (in a separate commit).
 
-When in doubt, send an email to <zulip-devel@googlegroups.com> with your
-question.
+When in doubt, ask in [chat.zulip.org](https://chat.zulip.org).
 
 ## Lint tools
 
@@ -93,7 +92,7 @@ object before the first thread wrote out its change.
 
 ### Using raw saves to update important model objects
 
-In most cases, we already have a function in zephyr/lib/actions.py with
+In most cases, we already have a function in zerver/lib/actions.py with
 a name like do\_activate\_user that will correctly handle lookups,
 caching, and notifying running browsers via the event system about your
 change. So please check whether such a function exists before writing
@@ -148,16 +147,9 @@ number without any explicit conversion.
 
 ### JavaScript var
 
-Always declare JavaScript variables using `var`:
-
-    var x = ...;
-
-In a function, `var` is necessary or else `x` will be a global variable.
-For variables declared at global scope, this has no effect, but we do it
-for consistency.
-
-JavaScript has function scope only, not block scope. This means that a
-`var` declaration inside a `for` or `if` acts the same as a `var`
+Always declare JavaScript variables using `var`.  JavaScript has
+function scope only, not block scope. This means that a `var`
+declaration inside a `for` or `if` acts the same as a `var`
 declaration at the beginning of the surrounding `function`. To avoid
 confusion, declare all variables at the top of a function.
 
@@ -168,22 +160,6 @@ Don't use it:
 [[2]](https://google.github.io/styleguide/javascriptguide.xml#for-in_loop),
 [[3]](http://www.jslint.com/help.html#forin)
 
-### jQuery global state
-
-Don't mess with jQuery global state once the app has loaded. Code like
-this is very dangerous:
-
-    $.ajaxSetup({ async: false });
-    $.get(...);
-    $.ajaxSetup({ async: true });
-
-jQuery and the browser are free to run other code while the request is
-pending, which could perform other Ajax requests with the altered
-settings.
-
-Instead, switch to the more general `$.ajax`\_ function, which can take
-options like `async`.
-
 ### Translation tags
 
 Remember to
@@ -193,11 +169,9 @@ messages).
 
 ### State and logs files
 
-Do not write state and logs files inside the current working directory
-in the production environment. This will not do what you expect, because the
-current working directory for the app changes every time we do a deploy.
-Instead, hardcode a path in settings.py -- see SERVER\_LOG\_PATH in
-settings.py for an example.
+When writing out state of log files, always declare the path in
+`ZULIP_PATHS` in `zproject/settings.py`, which will do the right thing
+in both development and production.
 
 ## JS array/object manipulation
 
@@ -231,52 +205,14 @@ with the exception of `_.any`, which we prefer over the less clear
 
 ## More arbitrary style things
 
-### General
+### Line length
 
-Indentation is four space characters for Python, JS, CSS, and shell
-scripts. Indentation is two space characters for HTML templates.
-
-We never use tabs anywhere in source code we write, but we have some
-third-party files which contain tabs.
-
-Keep third-party static files under the directory
-`zephyr/static/third/`, with one subdirectory per third-party project.
-
-We don't have an absolute hard limit on line length, but we should avoid
-extremely long lines. A general guideline is: refactor stuff to get it
-under 85 characters, unless that makes the code a lot uglier, in which
-case it's fine to go up to 120 or so.
-
-Whitespace guidelines:
-
--   Put one space (or more for alignment) around binary arithmetic and
-    equality operators.
--   Put one space around each part of the ternary operator.
--   Put one space between keywords like `if` and `while` and their
-    associated open paren.
--   Put one space between the closing paren for `if` and `while`-like
-    constructs and the opening curly brace. Put the curly brace on the
-    same line unless doing otherwise improves readability.
--   Put no space before or after the open paren for function calls and
-    no space before the close paren for function calls.
--   For the comma operator and colon operator in languages where it is
-    used for inline dictionaries, put no space before it and at least
-    one space after. Only use more than one space for alignment.
+We have an absolute hard limit on line length only for some files, but
+we should still avoid extremely long lines. A general guideline is:
+refactor stuff to get it under 85 characters, unless that makes the
+code a lot uglier, in which case it's fine to go up to 120 or so.
 
 ### JavaScript
-
-Don't use `==` and `!=` because these operators perform type coercions,
-which can mask bugs. Always use `===` and `!==`.
-
-End every statement with a semicolon.
-
-`if` statements with no braces are allowed, if the body is simple and
-its extent is abundantly clear from context and formatting.
-
-Anonymous functions should have spaces before and after the argument
-list:
-
-    var x = function (foo, bar) { // ...
 
 When calling a function with an anonymous function as an argument, use
 this style:
@@ -292,31 +228,24 @@ parenthesis for the outer call are together on the same line. This style
 isn't necessarily appropriate for calls with multiple anonymous
 functions or other arguments following them.
 
-Use
-
-    $(function () { ...
-
-rather than
-
-    $(document).ready(function () { ...
-
-and combine adjacent on-ready functions, if they are logically related.
+Combine adjacent on-ready functions, if they are logically related.
 
 The best way to build complicated DOM elements is a Mustache template
-like `zephyr/static/templates/message.handlebars`. For simpler things
+like `static/templates/message_reactions.handlebars`. For simpler things
 you can use jQuery DOM building APIs like so:
 
-    var new_tr = $('<tr />').attr('id', zephyr.id);
+    var new_tr = $('<tr />').attr('id', object.id);
 
-Passing a HTML string to jQuery is fine for simple hardcoded things:
+Passing a HTML string to jQuery is fine for simple hardcoded things
+that don't need internationalization:
 
-    foo.append('<p id="selected">foo</p>');
+    foo.append('<p id="selected">/</p>');
 
 but avoid programmatically building complicated strings.
 
 We used to favor attaching behaviors in templates like so:
 
-    <p onclick="select_zephyr({{id}})">
+    <p onclick="select_zerver({{id}})">
 
 but there are some reasons to prefer attaching events using jQuery code:
 
@@ -331,39 +260,22 @@ call a helper function instead.
 
 ### HTML / CSS
 
-Don't use the `style=` attribute. Instead, define logical classes and
-put your styles in external files such as `zulip.css`.
+Avoid using the `style=` attribute unless the styling is actually
+dynamic. Instead, define logical classes and put your styles in
+external CSS files such as `zulip.css`.
 
 Don't use the tag name in a selector unless you have to. In other words,
 use `.foo` instead of `span.foo`. We shouldn't have to care if the tag
 type changes in the future.
 
-Don't use inline event handlers (`onclick=`, etc. attributes). Instead,
-attach a jQuery event handler
-(`$('#foo').on('click', function () {...})`) when the DOM is ready
-(inside a `$(function () {...})` block).
-
-Use this format when you have the same block applying to multiple CSS
-styles (separate lines for each selector):
-
-    selector1,
-    selector2 {
-    };
-
 ### Python
 
--   Scripts should start with `#!/usr/bin/env python` and not
-    `#/usr/bin/python` (the right Python may not be installed in
-    `/usr/bin`) or `#/usr/bin/env python2.7` (bad for Python 3
-    compatibility).  Don't put a shebang line on a Python file unless
-    it's meaningful to run it as a script. (Some libraries can also be
-    run as scripts, e.g. to run a test suite.)
+-   Don't put a shebang line on a Python file unless it's meaningful to
+    run it as a script. (Some libraries can also be run as scripts, e.g.
+    to run a test suite.)
 -   Scripts should be executed directly (`./script.py`), so that the
     interpreter is implicitly found from the shebang line, rather than
     explicitly overridden (`python script.py`).
--   The first import in a file should be
-    `from __future__ import absolute_import`, per [PEP
-    328](http://docs.python.org/2/whatsnew/2.5.html#pep-328-absolute-and-relative-imports)
 -   Put all imports together at the top of the file, absent a compelling
     reason to do otherwise.
 -   Unpacking sequences doesn't require list brackets:
@@ -373,16 +285,6 @@ styles (separate lines for each selector):
 
 -   For string formatting, use `x % (y,)` rather than `x % y`, to avoid
     ambiguity if `y` happens to be a tuple.
--   When selecting by id, don't use `foo.pk` when you mean `foo.id`.
-    E.g.
-
-        recipient = Recipient(type_id=huddle.pk, type=Recipient.HUDDLE)
-
-    should be written as
-
-        recipient = Recipient(type_id=huddle.id, type=Recipient.HUDDLE)
-
-    in case we ever change the primary keys.
 
 ### Tests
 
@@ -390,6 +292,5 @@ All significant new features should come with tests. See testing.
 
 ### Third party code
 
-When adding new third-party packages to our codebase, please include
-"[third]" at the beginning of the commit message. You don't necessarily
-need to do this when patching third-party code that's already in tree.
+See [our docs on dependencies](dependencies.html) for discussion of
+rules about integrating third-party projects.

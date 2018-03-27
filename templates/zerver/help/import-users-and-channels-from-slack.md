@@ -8,7 +8,7 @@
 1. Generate a Slack API token using Slack's [test token generator](https://api.slack.com/docs/oauth-test-tokens)
    to import all of the necessary data.
 
-{!go-to-the.md!} [Your bots](/#settings/your-bots)
+{!go-to-the.md!} [Your Account](/#settings/your-account)
 {!settings.md!}
 
 3. Click on the **Show/change your API key** button.
@@ -41,4 +41,4 @@ If the users are not from the same organization, you should change your organiza
 {!go-to-the.md!} [Organization settings](/#administration/organization-settings)
 {!admin.md!}
 
-2. Disable the **New users restricted to the following domains** option.
+2. Disable the **Restrict new users to the following email domains** option.

@@ -1,7 +1,6 @@
-from __future__ import absolute_import
+# System documented in https://zulip.readthedocs.io/en/latest/logging.html
 
 import logging
-import six
 
 from collections import defaultdict
 from django.conf import settings
@@ -44,6 +43,7 @@ def email_browser_error(report):
 
     body = ("User: %(user_full_name)s <%(user_email)s> on %(deployment)s\n\n"
             "Message:\n%(message)s\n\nStacktrace:\n%(stacktrace)s\n\n"
+            "IP address: %(ip_address)s\n"
             "User agent: %(user_agent)s\n"
             "href: %(href)s\n"
             "Server path: %(server_path)s\n"
@@ -53,7 +53,7 @@ def email_browser_error(report):
     more_info = report['more_info']
     if more_info is not None:
         body += "\nAdditional information:"
-        for (key, value) in six.iteritems(more_info):
+        for (key, value) in more_info.items():
             body += "\n  %s: %s" % (key, value)
 
     body += "\n\nLog:\n%s" % (report['log'],)

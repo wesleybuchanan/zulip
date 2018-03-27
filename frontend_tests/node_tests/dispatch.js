@@ -3,26 +3,15 @@ var _ = global._;
 
 var noop = function () {};
 
-// The next section of cruft will go away when we can pull out
-// dispatcher from server_events.
-(function work_around_server_events_loading_issues() {
-    add_dependencies({
-        util: 'js/util.js',
-    });
-    set_global('document', {});
-    set_global('window', {
-        addEventListener: noop,
-    });
-    global.stub_out_jquery();
-}());
+set_global('document', 'document-stub');
+set_global('$', function () {
+    return {
+        trigger: noop,
+    };
+});
 
 // These dependencies are closer to the dispatcher, and they
 // apply to all tests.
-set_global('tutorial', {
-    is_running: function () {
-        return false;
-    },
-});
 set_global('home_msg_list', {
     rerender: noop,
     select_id: noop,
@@ -38,9 +27,22 @@ set_global('markdown', {
     set_realm_filters: noop,
 });
 
-// To support popovers object referenced in server_events.js
-add_dependencies({emoji_picker: 'js/emoji_picker.js'});
-add_dependencies({popovers: 'js/popovers.js'});
+set_global('notifications', {
+    redraw_title: noop,
+});
+
+set_global('settings_emoji', {
+    update_custom_emoji_ui: noop,
+});
+
+set_global('settings_org', {
+    reset_realm_default_language: noop,
+    toggle_allow_message_editing_pencil: noop,
+    toggle_email_change_display: noop,
+    toggle_name_change_display: noop,
+    update_message_retention_days: noop,
+    update_realm_description: noop,
+});
 
 // page_params is highly coupled to dispatching now
 set_global('page_params', {test_suite: false});
@@ -52,9 +54,6 @@ add_dependencies({alert_words: 'js/alert_words.js'});
 
 // contains the main event dispatching function
 add_dependencies({server_events_dispatch: 'js/server_events_dispatch.js'});
-
-// we also directly write to pointer
-set_global('pointer', {});
 
 // We access various msg_list object to rerender them
 set_global('current_msg_list', {rerender: noop});
@@ -72,27 +71,10 @@ set_global('blueslip', {
     },
 });
 
-var server_events = require('js/server_events.js');
+var sed = require('js/server_events_dispatch.js');
 
-// This also goes away if we can isolate the dispatcher.  We
-// have to call it after doing the require on server_events.js,
-// so that it can set a private variable for us that bypasses
-// code that queue up events and early-exits.
-server_events.home_view_loaded();
-
-// This jQuery shim can go away when we remove $.each from
-// server_events.js.  (It's a simple change that just
-// requires some manual testing.)
-$.each = function (data, f) {
-    _.each(data, function (value, key) {
-        f(key, value);
-    });
-};
-
-// Set up our dispatch function to point to _get_events_success
-// now.
 function dispatch(ev) {
-    server_events._get_events_success([ev]);
+    sed.dispatch_normal_event(ev);
 }
 
 
@@ -132,22 +114,9 @@ var event_fixtures = {
         hotspots: ['nice', 'chicken'],
     },
 
-    message: {
-        type: 'message',
-        message: {
-            content: 'hello',
-        },
-        flags: [],
-    },
-
     muted_topics: {
         type: 'muted_topics',
         muted_topics: [['devel', 'js'], ['lunch', 'burritos']],
-    },
-
-    pointer: {
-        type: 'pointer',
-        pointer: 999,
     },
 
     presence: {
@@ -321,14 +290,6 @@ var event_fixtures = {
         },
     },
 
-    referral: {
-        type: 'referral',
-        referrals: {
-            granted: 10,
-            used: 5,
-        },
-    },
-
     restart: {
         type: 'restart',
         immediate: true,
@@ -440,6 +401,12 @@ var event_fixtures = {
         setting: true,
     },
 
+    update_display_settings__high_contrast_mode: {
+        type: 'update_display_settings',
+        setting_name: 'high_contrast_mode',
+        setting: true,
+    },
+
     update_global_notifications: {
         type: 'update_global_notifications',
         notification_name: 'enable_stream_sounds',
@@ -475,8 +442,9 @@ function assert_same(actual, expected) {
 
 var with_overrides = global.with_overrides; // make lint happy
 
-with_overrides(function () {
+with_overrides(function (override) {
     // alert_words
+    override('alert_words_ui.render_alert_words_ui', noop);
     var event = event_fixtures.alert_words;
     dispatch(event);
     assert_same(global.alert_words.words, ['fire', 'lunch']);
@@ -487,29 +455,21 @@ with_overrides(function (override) {
     // default_streams
     var event = event_fixtures.default_streams;
     override('settings_streams.update_default_streams_table', noop);
-    dispatch(event);
-    assert_same(page_params.realm_default_streams, event.default_streams);
+    global.with_stub(function (stub) {
+        override('stream_data.set_realm_default_streams', stub.f);
+        dispatch(event);
+        var args = stub.get_args('realm_default_streams');
+        assert_same(args.realm_default_streams, event.default_streams);
+    });
 
 });
 
 with_overrides(function (override) {
     // hotspots
     var event = event_fixtures.hotspots;
-    override('hotspots.show', noop);
+    override('hotspots.load_new', noop);
     dispatch(event);
     assert_same(page_params.hotspots, event.hotspots);
-});
-
-with_overrides(function (override) {
-    // message
-    var event = event_fixtures.message;
-
-    global.with_stub(function (stub) {
-        override('message_events.insert_new_messages', stub.f);
-        dispatch(event);
-        var args = stub.get_args('messages');
-        assert_same(args.messages[0].content, event.message.content);
-    });
 });
 
 with_overrides(function (override) {
@@ -522,17 +482,6 @@ with_overrides(function (override) {
         var args = stub.get_args('muted_topics');
         assert_same(args.muted_topics, event.muted_topics);
     });
-});
-
-with_overrides(function () {
-    // pointer
-    var event = event_fixtures.pointer;
-    global.pointer.furthest_read = 0;
-    global.pointer.server_furthest_read = 0;
-    dispatch(event);
-    assert_same(global.pointer.furthest_read, event.pointer);
-    assert_same(global.pointer.server_furthest_read, event.pointer);
-
 });
 
 with_overrides(function (override) {
@@ -621,7 +570,7 @@ with_overrides(function (override) {
             var args = bot_stub.get_args('bot');
             assert_same(args.bot, event.bot);
 
-            args = admin_stub.get_args('update_user_id', 'update_bot_data');
+            admin_stub.get_args('update_user_id', 'update_bot_data');
         });
     });
 
@@ -634,7 +583,7 @@ with_overrides(function (override) {
             var args = bot_stub.get_args('email');
             assert_same(args.email, event.bot.email);
 
-            args = admin_stub.get_args('update_user_id', 'update_bot_data');
+            admin_stub.get_args('update_user_id', 'update_bot_data');
         });
     });
 
@@ -664,6 +613,7 @@ with_overrides(function (override) {
     global.with_stub(function (stub) {
         override('emoji.update_emojis', stub.f);
         override('settings_emoji.populate_emoji', noop);
+        override('emoji_picker.generate_emoji_picker_data', noop);
         dispatch(event);
         var args = stub.get_args('realm_emoji');
         assert_same(args.realm_emoji, event.realm_emoji);
@@ -721,18 +671,6 @@ with_overrides(function (override) {
         dispatch(event);
         var args = stub.get_args('person');
         assert_same(args.person, event.person);
-    });
-});
-
-with_overrides(function (override) {
-    // referral
-    var event = event_fixtures.referral;
-    global.with_stub(function (stub) {
-        override('referral.update_state', stub.f);
-        dispatch(event);
-        var args = stub.get_args('granted', 'used');
-        assert_same(args.granted, event.referrals.granted);
-        assert_same(args.used, event.referrals.used);
     });
 });
 
@@ -888,13 +826,12 @@ with_overrides(function (override) {
 with_overrides(function (override) {
     // update_message_flags__read
     var event = event_fixtures.update_message_flags__read;
-    override('unread_ops.mark_messages_as_read', noop);
 
     global.with_stub(function (stub) {
-        override('message_store.get', stub.f);
+        override('unread_ops.process_read_messages_event', stub.f);
         dispatch(event);
-        var args = stub.get_args('message_id');
-        assert_same(args.message_id, 999);
+        var args = stub.get_args('message_ids');
+        assert_same(args.message_ids, [999]);
     });
 });
 

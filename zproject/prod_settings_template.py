@@ -35,48 +35,58 @@ EXTERNAL_HOST = 'zulip.example.com'
 # Note that these should just be hostnames, without port numbers.
 ALLOWED_HOSTS = [EXTERNAL_HOST.split(":")[0]]
 
-# The email address for the person or team who maintain the Zulip
-# Voyager installation. Will also get support emails. (e.g. zulip-admin@example.com)
+# The email address for the person or team who maintains the Zulip
+# installation. Note that this is a public-facing email address; it may
+# appear on 404 pages, is used as the sender's address for many automated
+# emails, and is advertised as a support address. An email address like
+# support@example.com is totally reasonable, as is admin@example.com.
+# Do not put a display name; e.g. 'support@example.com', not
+# 'Zulip Support <support@example.com>'.
 ZULIP_ADMINISTRATOR = 'zulip-admin@example.com'
 
-# Configure the outgoing SMTP server below. You will need working
-# SMTP to complete the installation process, in addition to sending
-# email address confirmations, missed message notifications, onboarding
-# follow-ups, and other user needs. If you do not have an SMTP server
-# already, we recommend services intended for developers such as Mailgun.
+# Configure the outgoing Email (aka SMTP) server below. You will need
+# working SMTP to complete the installation process, in addition to
+# sending email address confirmations, missed message notifications,
+# onboarding follow-ups, and other user needs. If you do not have an
+# SMTP server already, we recommend services intended for developers
+# such as Mailgun.  Detailed documentation is available at:
+#
+#   https://zulip.readthedocs.io/en/latest/prod-email.html
 #
 # To configure SMTP, you will need to complete the following steps:
 #
 # (1) Fill out the outgoing email sending configuration below.
 #
 # (2) Put the SMTP password for EMAIL_HOST_USER in
-# /etc/zulip/zulip-secrets.conf as email_password.
+# /etc/zulip/zulip-secrets.conf as e.g.:
 #
-# If you are using a gmail account to send outgoing email, you
-# will likely need to read this Google support answer and configure
-# that account as "less secure":
-# https://support.google.com/accounts/answer/6010255
+#    email_password = abcd1234
 #
 # You can quickly test your sending email configuration using:
 #   su zulip
 #   /home/zulip/deployments/current/manage.py send_test_email username@example.com
 #
-# A common problem is hosting providers that block outgoing SMTP traffic.
-#
-# With the exception of reading EMAIL_HOST_PASSWORD from
-# email_password in the Zulip secrets file, Zulip uses Django's
-# standard EmailBackend, so if you're having issues, you may want to
-# search for documentation on using your email provider with Django.
+# A common problem is hosting provider firewalls that block outgoing SMTP traffic.
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_HOST_USER = ''
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-# The email From address to be used for automatically generated emails
-DEFAULT_FROM_EMAIL = "Zulip <zulip@example.com>"
-# The noreply address to be used as Reply-To for certain generated emails.
-# Messages sent to this address should not be delivered anywhere.
-NOREPLY_EMAIL_ADDRESS = "Zulip <noreply@example.com>"
 
+## OPTIONAL SETTINGS
+
+# The noreply address to be used as the sender for certain generated
+# emails.  Messages sent to this address could contain sensitive user
+# data and should not be delivered anywhere.  The default is
+# e.g. noreply@zulip.example.com (if EXTERNAL_HOST is
+# zulip.example.com).
+#NOREPLY_EMAIL_ADDRESS = 'noreply@example.com'
+
+# Many countries and bulk mailers require certain types of email to display
+# a physical mailing address to comply with anti-spam legislation.
+# Non-commercial and non-public-facing installations are unlikely to need
+# this setting.
+# The address should have no newlines.
+#PHYSICAL_ADDRESS = ''
 
 ### AUTHENTICATION SETTINGS
 #
@@ -84,21 +94,20 @@ NOREPLY_EMAIL_ADDRESS = "Zulip <noreply@example.com>"
 # See http://zulip.readthedocs.io/en/latest/prod-authentication-methods.html
 # for documentation on our authentication backends.
 AUTHENTICATION_BACKENDS = (
-    # 'zproject.backends.EmailAuthBackend', # Email and password; just requires SMTP setup
-    # 'zproject.backends.GoogleMobileOauth2Backend', # Google Apps, setup below
-    # 'zproject.backends.GitHubAuthBackend', # GitHub auth, setup below
-    # 'zproject.backends.ZulipLDAPAuthBackend', # LDAP, setup below
-    # 'zproject.backends.ZulipRemoteUserBackend', # Local SSO, setup docs on readthedocs
+    'zproject.backends.EmailAuthBackend',  # Email and password; just requires SMTP setup
+    # 'zproject.backends.GoogleMobileOauth2Backend',  # Google Apps, setup below
+    # 'zproject.backends.GitHubAuthBackend',  # GitHub auth, setup below
+    # 'zproject.backends.ZulipLDAPAuthBackend',  # LDAP, setup below
+    # 'zproject.backends.ZulipRemoteUserBackend',  # Local SSO, setup docs on readthedocs
 )
 
 # To enable Google authentication, you need to do the following:
 #
-# (1) Visit https://console.developers.google.com, setup an
-# Oauth2 client ID that allows redirects to
+# (1) Visit https://console.developers.google.com, click on Credentials on
+# the left sidebar and create a Oauth2 client ID
 # e.g. https://zulip.example.com/accounts/login/google/done/.
 #
-# (2) Then click into the APIs and Auth section (in the sidebar on the
-# left side of the page), APIs, then under "Social APIs" click on
+# (2) Go to the Library (left sidebar), then under "Social APIs" click on
 # "Google+ API" and click the button to enable the API.
 #
 # (3) put your client secret as "google_oauth2_client_secret" in
@@ -109,8 +118,8 @@ AUTHENTICATION_BACKENDS = (
 # To enable GitHub authentication, you will need to need to do the following:
 #
 # (1) Register an OAuth2 application with GitHub at one of:
-#   https://github.com/settings/applications
-#   https://github.com/organizations/ORGNAME/settings/applications
+#   https://github.com/settings/developers
+#   https://github.com/organizations/ORGNAME/settings/developers
 # Specify e.g. https://zulip.example.com/complete/github/ as the callback URL.
 #
 # (2) Put your "Client ID" as SOCIAL_AUTH_GITHUB_KEY below and your
@@ -130,36 +139,40 @@ AUTHENTICATION_BACKENDS = (
 # set this to your domain (e.g. if REMOTE_USER is "username" and the
 # corresponding email address is "username@example.com", set
 # SSO_APPEND_DOMAIN = "example.com")
-SSO_APPEND_DOMAIN = None # type: Optional[str]
+SSO_APPEND_DOMAIN = None  # type: Optional[str]
 
-
-### OPTIONAL SETTINGS
 
 # Support for mobile push notifications.  Setting controls whether
 # push notifications will be forwarded through a Zulip push
 # notification bouncer server to the mobile apps.  See
 # https://zulip.readthedocs.io/en/latest/prod-mobile-push-notifications.html
 # for information on how to sign up for and configure this.
-#PUSH_NOTIFICATION_BOUNCER_URL = https://push.zulipchat.com
+#PUSH_NOTIFICATION_BOUNCER_URL = 'https://push.zulipchat.com'
+
+# Whether to redact the content of push notifications.  This is less
+# usable, but avoids sending message content over the wire.  In the
+# future, we're likely to replace this with an end-to-end push
+# notification encryption feature.
+#PUSH_NOTIFICATION_REDACT_CONTENT = False
 
 # Controls whether session cookies expire when the browser closes
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # Session cookie expiry in seconds after the last page load
-SESSION_COOKIE_AGE = 60 * 60 * 24 * 7 * 2 # 2 weeks
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 7 * 2  # 2 weeks
 
 # Password strength requirements; learn about configuration at
 # http://zulip.readthedocs.io/en/latest/security-model.html.
 # PASSWORD_MIN_LENGTH = 6
-# PASSWORD_MIN_ZXCVBN_QUALITY = 0.5
+# PASSWORD_MIN_GUESSES = 10000
+
+# Controls whether Zulip sends "new login" email notifications.
+#SEND_LOGIN_EMAILS = True
 
 # Controls whether or not there is a feedback button in the UI.
 ENABLE_FEEDBACK = False
 
-# By default, the feedback button will submit feedback to the Zulip
-# developers.  If you set FEEDBACK_EMAIL to be an email address
-# (e.g. ZULIP_ADMINISTRATOR), feedback sent by your users will instead
-# be sent to that email address.
+# Feedback sent by your users will be sent to this email address.
 FEEDBACK_EMAIL = ZULIP_ADMINISTRATOR
 
 # Controls whether or not error reports (tracebacks) are emailed to the
@@ -168,9 +181,25 @@ FEEDBACK_EMAIL = ZULIP_ADMINISTRATOR
 # For frontend (JavaScript) tracebacks
 #BROWSER_ERROR_REPORTING = False
 
+# If True, each log message in the server logs will identify the
+# Python module where it came from.  Useful for tracking down a
+# mysterious log message, but a little verbose.
+#LOGGING_SHOW_MODULE = False
+
+# If True, each log message in the server logs will identify the
+# process ID.  Useful for correlating logs with information from
+# system-level monitoring tools.
+#LOGGING_SHOW_PID = False
+
 # Controls whether or not Zulip will provide inline image preview when
-# a link to an image is referenced in a message.
-INLINE_IMAGE_PREVIEW = True
+# a link to an image is referenced in a message.  Note: this feature
+# can also be disabled in a realm's organization settings.
+#INLINE_IMAGE_PREVIEW = True
+
+# Controls whether or not Zulip will provide inline previews of
+# websites that are referenced in links in messages.  Note: this feature
+# can also be disabled in a realm's organization settings.
+#INLINE_URL_EMBED_PREVIEW = False
 
 # Controls whether or not Zulip will parse links starting with
 # "file:///" as a hyperlink (useful if you have e.g. an NFS share).
@@ -184,7 +213,7 @@ ENABLE_FILE_LINKS = False
 # be the S3 access and secret keys that you want to use, and setting
 # the S3_AUTH_UPLOADS_BUCKET and S3_AVATAR_BUCKET to be the S3 buckets
 # you've created to store file uploads and user avatars, respectively.
-# Then restart Zulip (scripts/restart-zulip).
+# Then restart Zulip (scripts/restart-server).
 #
 # (2) Edit /etc/nginx/sites-available/zulip-enterprise to comment out
 # the nginx configuration for /user_uploads and /user_avatars (see
@@ -229,9 +258,12 @@ ENABLE_GRAVATAR = True
 #REMOTE_POSTGRES_HOST = 'dbserver.example.com'
 #REMOTE_POSTGRES_SSLMODE = 'require'
 
-# If you want to set custom TOS, set the path to your markdown file, and uncomment
-# the following line.
-# TERMS_OF_SERVICE = '/etc/zulip/terms.md'
+# If you want to set a Terms of Service for your server, set the path
+# to your markdown file, and uncomment the following line.
+#TERMS_OF_SERVICE = '/etc/zulip/terms.md'
+
+# Similarly if you want to set a Privacy Policy.
+#PRIVACY_POLICY = '/etc/zulip/privacy.md'
 
 ### TWITTER INTEGRATION
 
@@ -310,17 +342,22 @@ EMAIL_GATEWAY_IMAP_FOLDER = "INBOX"
 # * Fill in the LDAP configuration options below so that Zulip can
 # connect to your LDAP server
 #
-# * Setup the mapping between email addresses (used as login names in
-# Zulip) and LDAP usernames.  There are two supported ways to setup
-# the username mapping:
+# * Setup the mapping between LDAP attributes and Zulip.
+# There are three supported ways to setup the username and/or email mapping:
 #
-#   (A) If users' email addresses are in LDAP, set
+#   (A) If users' email addresses are in LDAP and used as username, set
 #       LDAP_APPEND_DOMAIN = None
 #       AUTH_LDAP_USER_SEARCH to lookup users by email address
 #
 #   (B) If LDAP only has usernames but email addresses are of the form
 #       username@example.com, you should set:
 #       LDAP_APPEND_DOMAIN = example.com and
+#       AUTH_LDAP_USER_SEARCH to lookup users by username
+#
+#   (C) If LDAP username are completely unrelated to email addresses,
+#       you should set:
+#       LDAP_EMAIL_ATTR = "email"
+#       LDAP_APPEND_DOMAIN = None
 #       AUTH_LDAP_USER_SEARCH to lookup users by username
 #
 # You can quickly test whether your configuration works by running:
@@ -360,7 +397,11 @@ AUTH_LDAP_USER_SEARCH = LDAPSearch("ou=users,dc=example,dc=com",
 
 # If the value of a user's "uid" (or similar) property is not their email
 # address, specify the domain to append here.
-LDAP_APPEND_DOMAIN = None # type: Optional[str]
+LDAP_APPEND_DOMAIN = None  # type: Optional[str]
+
+# If username and email are two different LDAP attributes, specify the
+# attribute to get the user's email address from LDAP here.
+LDAP_EMAIL_ATTR = None  # type: Optional[str]
 
 # This map defines how to populate attributes of a Zulip user from LDAP.
 AUTH_LDAP_USER_ATTR_MAP = {

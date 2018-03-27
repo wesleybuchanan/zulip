@@ -33,10 +33,15 @@ likely culprit.
 Static files include JavaScript, css, static assets (like emoji, avatars),
 and user uploads (if stored locally and not on S3).
 
+File not found errors (404) are served using a Django URL, so that we
+can use configuration variables (like whether the user is logged in)
+in the 404 error page.
+
 ```
 location /static/ {
     alias /home/zulip/prod-static/;
-    error_page 404 /static/html/404.html;
+    # Set a nonexistent path, so we just serve the nice Django 404 page.
+    error_page 404 /django_static_404.html;
 }
 ```
 
@@ -76,10 +81,12 @@ If we look in [zproject/urls.py](https://github.com/zulip/zulip/blob/master/zpro
 `i18n_urls`. These urls show up in the address bar of the browser, and
 serve HTML.
 
-For example, the `/hello` page (preview [here](https://zulip.com/hello/))
-gets translated in Chinese at `zh-cn/hello/` (preview [here](https://zulip.com/zh-cn/hello/)).
+For example, the `/features` page (preview
+[here](https://zulipchat.com/features/)) gets translated in Chinese at
+`zh-hans/features/` (preview
+[here](https://zulipchat.com/zh-hans/features/)).
 
-Note the `zh-cn` prefix--that url pattern gets added by `i18n_patterns`.
+Note the `zh-hans` prefix--that url pattern gets added by `i18n_patterns`.
 
 ## API endpoints use [REST](http://www.ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm)
 

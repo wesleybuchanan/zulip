@@ -19,6 +19,8 @@ var presence_descriptions = {
 exports.ACTIVE = "active";
 exports.IDLE = "idle";
 
+var meta = {};
+
 // When you start Zulip, has_focus should be true, but it might not be the
 // case after a server-initiated reload.
 exports.has_focus = document.hasFocus && document.hasFocus();
@@ -30,6 +32,26 @@ exports.has_focus = document.hasFocus && document.hasFocus();
 exports.new_user_input = true;
 
 var huddle_timestamps = new Dict();
+
+exports.update_scrollbar = (function () {
+    var $user_presences = $("#user_presences");
+    var $group_pms = $("#group-pms");
+
+    return {
+        users: function () {
+            if (!$user_presences.length) {
+                $user_presences = $("#user_presences");
+            }
+            ui.update_scrollbar($user_presences);
+        },
+        group_pms: function () {
+            if (!$group_pms.length) {
+                $group_pms = $("#group-pms");
+            }
+            ui.update_scrollbar($group_pms);
+        },
+    };
+}());
 
 function update_pm_count_in_dom(count_span, value_span, count) {
     var li = count_span.parent();
@@ -222,21 +244,13 @@ function focus_lost() {
 }
 
 function filter_user_ids(user_ids) {
-    var user_list = $(".user-list-filter");
-    if (user_list.length === 0) {
-        // We may have received an activity ping response after
-        // initiating a reload, in which case the user list may no
-        // longer be available.
-        // Return user list: useful for testing user list performance fix
+    var filter_text = exports.get_filter_text();
+
+    if (filter_text === '') {
         return user_ids;
     }
 
-    var search_term = user_list.expectOne().val().trim();
-    if (search_term === '') {
-        return user_ids;
-    }
-
-    var search_terms = search_term.toLowerCase().split(",");
+    var search_terms = filter_text.toLowerCase().split(",");
     search_terms = _.map(search_terms, function (s) {
         return s.trim();
     });
@@ -255,14 +269,6 @@ function matches_filter(user_id) {
     return (filter_user_ids([user_id]).length === 1);
 }
 
-function filter_and_sort(user_ids) {
-    user_ids = filter_user_ids(user_ids);
-    user_ids = sort_users(user_ids);
-    return user_ids;
-}
-
-exports._filter_and_sort = filter_and_sort;
-
 function get_num_unread(user_id) {
     if (unread.suppress_unread_counts) {
         return 0;
@@ -273,6 +279,12 @@ function get_num_unread(user_id) {
 function info_for(user_id) {
     var status = presence.get_status(user_id);
     var person = people.get_person_from_user_id(user_id);
+
+    // if the user is you or a bot, do not show in presence data.
+    if (person.is_bot || person.user_id === page_params.user_id) {
+        return;
+    }
+
     return {
         href: narrow.pm_with_uri(person.email),
         name: person.full_name,
@@ -280,7 +292,6 @@ function info_for(user_id) {
         num_unread: get_num_unread(user_id),
         type: status,
         type_desc: presence_descriptions[status],
-        mobile: presence.get_mobile(user_id),
     };
 }
 
@@ -315,6 +326,7 @@ exports.insert_user_into_list = function (user_id) {
     }
 
     insert();
+    exports.update_scrollbar.users();
 
     var elt = get_pm_list_item(user_id);
     compose_fade.update_one_user_row(elt);
@@ -325,9 +337,13 @@ exports.build_user_sidebar = function () {
         return;
     }
 
-    var user_ids = filter_and_sort(presence.get_user_ids());
+    var user_ids = exports.get_filtered_and_sorted_user_ids();
 
-    var user_info = _.map(user_ids, info_for);
+    var user_info = _.map(user_ids, info_for).filter(function (person) {
+        // filtered bots and yourself are set to "undefined" in the `info_for`
+        // function.
+        return typeof person !== "undefined";
+    });
     var html = templates.render('user_presence_rows', {users: user_info});
     $('#user_presences').html(html);
 
@@ -339,12 +355,7 @@ exports.build_user_sidebar = function () {
     return user_info; // for testing
 };
 
-function actually_update_users_for_search() {
-    exports.build_user_sidebar();
-    resize.resize_page_components();
-}
-
-var update_users_for_search = _.throttle(actually_update_users_for_search, 50);
+var update_users_for_search = _.throttle(exports.build_user_sidebar, 50);
 
 function show_huddles() {
     $('#group-pm-list').addClass("show");
@@ -385,10 +396,14 @@ exports.update_huddles = function () {
     });
 
     show_huddles();
+    exports.update_scrollbar.group_pms();
 };
 
-
 function focus_ping(want_redraw) {
+    if (reload.is_in_progress()) {
+        blueslip.log("Skipping querying presence because reload in progress");
+        return;
+    }
     channel.post({
         url: '/json/users/me/presence',
         data: {status: (exports.has_focus) ? exports.ACTIVE : exports.IDLE,
@@ -450,9 +465,14 @@ exports.initialize = function () {
                       page_params.initial_servertime);
     delete page_params.presences;
 
+    exports.set_user_list_filter();
+
     exports.build_user_sidebar();
     exports.update_huddles();
 
+    exports.set_user_list_filter_handlers();
+
+    $('#clear_search_people_button').on('click', exports.clear_search);
     // Let the server know we're here, but pass "false" for
     // want_redraw, since we just got all this info in page_params.
     focus_ping(false);
@@ -462,6 +482,9 @@ exports.initialize = function () {
     }
 
     setInterval(get_full_presence_list_update, ACTIVE_PING_INTERVAL_MS);
+
+    ui.set_up_scrollbar($("#user_presences"));
+    ui.set_up_scrollbar($("#group-pms"));
 };
 
 exports.set_user_status = function (email, info, server_time) {
@@ -494,7 +517,7 @@ function update_clear_search_button() {
 
     // Show button iff the search input is focused, or has non-empty contents
     if (focused || $('.user-list-filter').val()) {
-        $('#clear_search_people_button').removeAttr('disabled');
+        $('#clear_search_people_button').prop('disabled', false);
     } else {
         $('#clear_search_people_button').attr('disabled', 'disabled');
     }
@@ -537,7 +560,7 @@ function maybe_select_person(e) {
         e.stopPropagation();
 
         var topPerson = $('#user_presences li.user_sidebar_entry').first().attr('data-user-id');
-        var user_list = $(".user-list-filter");
+        var user_list = meta.$user_list_filter;
         var search_term = user_list.expectOne().val().trim();
         if ((topPerson !== undefined) && (search_term !== '')) {
             // undefined if there are no results
@@ -557,15 +580,49 @@ function focus_user_filter(e) {
     update_clear_search_button();
 }
 
-$(function () {
-    $(".user-list-filter").expectOne()
+exports.get_filtered_and_sorted_user_ids = function () {
+    var user_ids;
+
+    if (exports.get_filter_text()) {
+        // If there's a filter, select from all users, not just those
+        // recently active.
+        user_ids = filter_user_ids(people.get_realm_human_user_ids());
+    } else {
+        // From large realms, the user_ids in presence may exclude
+        // users who have been idle more than three weeks.  When the
+        // filter text is blank, we show only those recently active users.
+        user_ids = presence.get_user_ids();
+    }
+
+    return sort_users(user_ids);
+};
+
+exports.set_user_list_filter = function () {
+    meta.$user_list_filter = $(".user-list-filter");
+};
+
+exports.set_user_list_filter_handlers = function () {
+    meta.$user_list_filter.expectOne()
         .on('click', focus_user_filter)
         .on('input', update_users_for_search)
         .on('keydown', maybe_select_person)
         .on('blur', update_clear_search_button);
-    $('#clear_search_people_button').on('click', exports.clear_search);
-});
+};
 
+exports.get_filter_text = function () {
+    if (!meta.$user_list_filter) {
+        // This may be overly defensive, but there may be
+        // situations where get called before everything is
+        // fully intialized.  The empty string is a fine
+        // default here.
+        blueslip.warn('get_filter_text() is called before initialization');
+        return '';
+    }
+
+    var user_filter = meta.$user_list_filter.expectOne().val().trim();
+
+    return user_filter;
+};
 
 return exports;
 

@@ -18,13 +18,12 @@ etc. If no there's no meaningful emoji for certain event, the defaults are used:
 subject of US/task should be in bold.
 """
 
-from __future__ import absolute_import
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Text
 
 from django.utils.translation import ugettext as _
 from django.http import HttpRequest, HttpResponse
 
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
 from zerver.models import UserProfile
@@ -45,11 +44,26 @@ def api_taiga_webhook(request, user_profile, message=REQ(argument_type='body'),
         content_lines.append(generate_content(event) + '\n')
     content = "".join(sorted(content_lines))
 
-    check_send_message(user_profile, request.client, 'stream', [stream], topic, content)
+    check_send_stream_message(user_profile, request.client, stream, topic, content)
 
     return json_success()
 
 templates = {
+    'epic': {
+        'create': u':package: %(user)s created epic **%(subject)s**',
+        'set_assigned_to': u':busts_in_silhouette: %(user)s assigned epic **%(subject)s** to %(new)s.',
+        'unset_assigned_to': u':busts_in_silhouette: %(user)s unassigned epic **%(subject)s**',
+        'changed_assigned_to': u':busts_in_silhouette: %(user)s reassigned epic **%(subject)s**'
+        ' from %(old)s to %(new)s.',
+        'blocked': u':lock: %(user)s blocked epic **%(subject)s**',
+        'unblocked': u':unlock: %(user)s unblocked epic **%(subject)s**',
+        'changed_status': u':chart_increasing: %(user)s changed status of epic **%(subject)s**'
+        ' from %(old)s to %(new)s.',
+        'renamed': u':notebook: %(user)s renamed epic from **%(old)s** to **%(new)s**',
+        'description_diff': u':notebook: %(user)s updated description of epic **%(subject)s**',
+        'commented': u':thought_balloon: %(user)s commented on epic **%(subject)s**',
+        'delete': u':cross_mark: %(user)s deleted epic **%(subject)s**',
+    },
     'userstory': {
         'create': u':package: %(user)s created user story **%(subject)s**.',
         'set_assigned_to': u':busts_in_silhouette: %(user)s assigned user story **%(subject)s** to %(new)s.',
@@ -252,10 +266,7 @@ def parse_message(message):
 def generate_content(data):
     # type: (Mapping[str, Any]) -> str
     """ Gets the template string and formats it with parsed data. """
-    try:
-        return templates[data['type']][data['event']] % data['values']
-    except KeyError:
-        return json_error(_("Unknown message"))
+    return templates[data['type']][data['event']] % data['values']
 
 def get_owner_name(message):
     # type: (Mapping[str, Any]) -> str

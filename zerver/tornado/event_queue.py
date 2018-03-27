@@ -1,6 +1,5 @@
 # See http://zulip.readthedocs.io/en/latest/events-system.html for
 # high-level documentation on how this system works.
-from __future__ import absolute_import
 from typing import cast, AbstractSet, Any, Callable, Dict, List, \
     Mapping, MutableMapping, Optional, Iterable, Sequence, Set, Text, Union
 
@@ -33,8 +32,8 @@ from zerver.lib.queue import queue_json_publish
 from zerver.lib.request import JsonableError
 from zerver.lib.timestamp import timestamp_to_datetime
 from zerver.tornado.descriptors import clear_descriptor_by_handler_id, set_descriptor_by_handler_id
+from zerver.tornado.exceptions import BadEventQueueIdError
 import copy
-import six
 
 requests_client = requests.Session()
 for host in ['127.0.0.1', 'localhost']:
@@ -232,7 +231,7 @@ def compute_full_event_type(event):
 class EventQueue(object):
     def __init__(self, id):
         # type: (str) -> None
-        self.queue = deque()  # type: ignore # type signature should Deque[Dict[str, Any]] but we need https://github.com/python/mypy/pull/2845 to be merged
+        self.queue = deque()  # type: ignore # Should be Deque[Dict[str, Any]], but Deque isn't available in Python 3.4
         self.next_event_id = 0  # type: int
         self.id = id  # type: str
         self.virtual_events = {}  # type: Dict[str, Dict[str, Any]]
@@ -337,6 +336,16 @@ gc_hooks = []  # type: List[Callable[[int, ClientDescriptor, bool], None]]
 
 next_queue_id = 0
 
+def clear_client_event_queues_for_testing():
+    # type: () -> None
+    assert(settings.TEST_SUITE)
+    clients.clear()
+    user_clients.clear()
+    realm_clients_all_streams.clear()
+    gc_hooks.clear()
+    global next_queue_id
+    next_queue_id = 0
+
 def add_client_gc_hook(hook):
     # type: (Callable[[int, ClientDescriptor, bool], None]) -> None
     gc_hooks.append(hook)
@@ -400,7 +409,7 @@ def gc_event_queues():
     to_remove = set()  # type: Set[str]
     affected_users = set()  # type: Set[int]
     affected_realms = set()  # type: Set[int]
-    for (id, client) in six.iteritems(clients):
+    for (id, client) in clients.items():
         if client.idle(start):
             to_remove.add(id)
             affected_users.add(client.user_profile_id)
@@ -411,10 +420,11 @@ def gc_event_queues():
     # not have a current handler.
     do_gc_event_queues(to_remove, affected_users, affected_realms)
 
-    logging.info(('Tornado removed %d idle event queues owned by %d users in %.3fs.' +
-                  '  Now %d active queues, %s')
-                 % (len(to_remove), len(affected_users), time.time() - start,
-                    len(clients), handler_stats_string()))
+    if settings.PRODUCTION:
+        logging.info(('Tornado removed %d idle event queues owned by %d users in %.3fs.' +
+                      '  Now %d active queues, %s')
+                     % (len(to_remove), len(affected_users), time.time() - start,
+                        len(clients), handler_stats_string()))
     statsd.gauge('tornado.active_queues', len(clients))
     statsd.gauge('tornado.active_users', len(user_clients))
 
@@ -423,7 +433,7 @@ def dump_event_queues():
     start = time.time()
 
     with open(settings.JSON_PERSISTENT_QUEUE_FILENAME, "w") as stored_queues:
-        ujson.dump([(qid, client.to_dict()) for (qid, client) in six.iteritems(clients)],
+        ujson.dump([(qid, client.to_dict()) for (qid, client) in clients.items()],
                    stored_queues)
 
     logging.info('Tornado dumped %d event queues in %.3fs'
@@ -448,7 +458,7 @@ def load_event_queues():
     except (IOError, EOFError):
         pass
 
-    for client in six.itervalues(clients):
+    for client in clients.values():
         # Put code for migrations due to event queue data format changes here
 
         add_to_client_dicts(client)
@@ -461,7 +471,7 @@ def send_restart_events(immediate=False):
     event = dict(type='restart', server_generation=settings.SERVER_GENERATION)  # type: Dict[str, Any]
     if immediate:
         event['immediate'] = True
-    for client in six.itervalues(clients):
+    for client in clients.values():
         if client.accepts_event(event):
             client.add_event(event.copy())
 
@@ -471,8 +481,8 @@ def setup_event_queue():
         load_event_queues()
         atexit.register(dump_event_queues)
         # Make sure we dump event queues even if we exit via signal
-        signal.signal(signal.SIGTERM, lambda signum, stack: sys.exit(1))  # type: ignore # https://github.com/python/mypy/issues/2955
-        tornado.autoreload.add_reload_hook(dump_event_queues)  # type: ignore # TODO: Fix missing tornado.autoreload stub
+        signal.signal(signal.SIGTERM, lambda signum, stack: sys.exit(1))
+        tornado.autoreload.add_reload_hook(dump_event_queues)
 
     try:
         os.rename(settings.JSON_PERSISTENT_QUEUE_FILENAME, "/var/tmp/event_queues.json.last")
@@ -513,7 +523,7 @@ def fetch_events(query):
                 raise JsonableError(_("Missing 'last_event_id' argument"))
             client = get_client_descriptor(queue_id)
             if client is None:
-                raise JsonableError(_("Bad event queue id: %s") % (queue_id,))
+                raise BadEventQueueIdError(queue_id)
             if user_profile_id != client.user_profile_id:
                 raise JsonableError(_("You are not authorized to get events from this queue"))
             client.event_queue.prune(last_event_id)
@@ -539,10 +549,7 @@ def fetch_events(query):
             logging.info("Disconnected handler for queue %s (%s/%s)" % (queue_id, user_profile_email,
                                                                         client_type_name))
     except JsonableError as e:
-        if hasattr(e, 'to_json_error_msg') and callable(e.to_json_error_msg):
-            return dict(type="error", handler_id=handler_id,
-                        message=e.to_json_error_msg())
-        raise e
+        return dict(type="error", exception=e)
 
     client.connect_handler(handler_id, client_type_name)
     return dict(type="async")
@@ -618,73 +625,112 @@ def build_offline_notification(user_profile_id, message_id):
             "message_id": message_id,
             "timestamp": time.time()}
 
-def missedmessage_hook(user_profile_id, queue, last_for_client):
+def missedmessage_hook(user_profile_id, client, last_for_client):
     # type: (int, ClientDescriptor, bool) -> None
+    """The receiver_is_off_zulip logic used to determine whether a user
+    has no active client suffers from a somewhat fundamental race
+    condition.  If the client is no longer on the Internet,
+    receiver_is_off_zulip will still return true for
+    IDLE_EVENT_QUEUE_TIMEOUT_SECS, until the queue is
+    garbage-collected.  This would cause us to reliably miss
+    push/email notifying users for messages arriving during the
+    IDLE_EVENT_QUEUE_TIMEOUT_SECS after they suspend their laptop (for
+    example).  We address this by, when the queue is garbage-collected
+    at the end of those 10 minutes, checking to see if it's the last
+    one, and if so, potentially triggering notifications to the user
+    at that time, resulting in at most a IDLE_EVENT_QUEUE_TIMEOUT_SECS
+    delay in the arrival of their notifications.
+
+    As Zulip's APIs get more popular and the mobile apps start using
+    long-lived event queues for perf optimization, future versions of
+    this will likely need to replace checking `last_for_client` with
+    something more complicated, so that we only consider clients like
+    web browsers, not the mobile apps or random API scripts.
+    """
     # Only process missedmessage hook when the last queue for a
     # client has been garbage collected
     if not last_for_client:
         return
 
-    message_ids_to_notify = []  # type: List[Dict[str, Any]]
-    for event in queue.event_queue.contents():
-        if not event['type'] == 'message' or not event['flags']:
+    for event in client.event_queue.contents():
+        if event['type'] != 'message':
             continue
+        assert 'flags' in event
 
-        if 'mentioned' in event['flags'] and 'read' not in event['flags']:
-            notify_info = dict(message_id=event['message']['id'])
+        flags = event['flags']
+        mentioned = 'mentioned' in flags and 'read' not in flags
+        private_message = event['message']['type'] == 'private'
+        # stream_push_notify is set in process_message_event.
+        stream_push_notify = event.get('stream_push_notify', False)
 
-            if not event.get('push_notified', False):
-                notify_info['send_push'] = True
-            if not event.get('email_notified', False):
-                notify_info['send_email'] = True
-            message_ids_to_notify.append(notify_info)
+        stream_name = None
+        if not private_message:
+            stream_name = event['message']['display_recipient']
 
-    for notify_info in message_ids_to_notify:
-        msg_id = notify_info['message_id']
-        notice = build_offline_notification(user_profile_id, msg_id)
-        if notify_info.get('send_push', False):
-            queue_json_publish("missedmessage_mobile_notifications", notice, lambda notice: None)
-        if notify_info.get('send_email', False):
-            queue_json_publish("missedmessage_emails", notice, lambda notice: None)
+        # Since one is by definition idle, we don't need to check always_push_notify
+        always_push_notify = False
+        # Since we just GC'd the last event queue, the user is definitely idle.
+        idle = True
 
-def receiver_is_idle(user_profile_id, realm_presences):
-    # type: (int, Optional[Dict[int, Dict[Text, Dict[str, Any]]]]) -> bool
+        message_id = event['message']['id']
+        # Pass on the information on whether a push or email notification was already sent.
+        already_notified = dict(
+            push_notified = event.get("push_notified", False),
+            email_notified = event.get("email_notified", False),
+        )
+        maybe_enqueue_notifications(user_profile_id, message_id, private_message, mentioned,
+                                    stream_push_notify, stream_name, always_push_notify, idle,
+                                    already_notified)
+
+def receiver_is_off_zulip(user_profile_id):
+    # type: (int) -> bool
     # If a user has no message-receiving event queues, they've got no open zulip
     # session so we notify them
     all_client_descriptors = get_client_descriptors_for_user(user_profile_id)
     message_event_queues = [client for client in all_client_descriptors if client.accepts_messages()]
     off_zulip = len(message_event_queues) == 0
+    return off_zulip
 
-    # It's possible a recipient is not in the realm of a sender. We don't have
-    # presence information in this case (and it's hard to get without an additional
-    # db query) so we simply don't try to guess if this cross-realm recipient
-    # has been idle for too long
-    if realm_presences is None or user_profile_id not in realm_presences:
-        return off_zulip
+def maybe_enqueue_notifications(user_profile_id, message_id, private_message,
+                                mentioned, stream_push_notify, stream_name,
+                                always_push_notify, idle, already_notified):
+    # type: (int, int, bool, bool, bool, Optional[str], bool, bool, Dict[str, bool]) -> Dict[str, bool]
+    """This function has a complete unit test suite in
+    `test_enqueue_notifications` that should be expanded as we add
+    more features here."""
+    notified = dict()  # type: Dict[str, bool]
 
-    # We want to find the newest "active" presence entity and compare that to the
-    # activity expiry threshold.
-    user_presence = realm_presences[user_profile_id]
-    latest_active_timestamp = None
-    idle = False
+    if (idle or always_push_notify) and (private_message or mentioned or stream_push_notify):
+        notice = build_offline_notification(user_profile_id, message_id)
+        if private_message:
+            notice['trigger'] = 'private_message'
+        elif mentioned:
+            notice['trigger'] = 'mentioned'
+        elif stream_push_notify:
+            notice['trigger'] = 'stream_push_notify'
+        else:
+            raise AssertionError("Unknown notification trigger!")
+        notice['stream_name'] = stream_name
+        if not already_notified.get("push_notified"):
+            queue_json_publish("missedmessage_mobile_notifications", notice, lambda notice: None)
+            notified['push_notified'] = True
 
-    for client, status in six.iteritems(user_presence):
-        if (latest_active_timestamp is None or status['timestamp'] > latest_active_timestamp) and \
-                status['status'] == 'active':
-            latest_active_timestamp = status['timestamp']
+    # Send missed_message emails if a private message or a
+    # mention.  Eventually, we'll add settings to allow email
+    # notifications to match the model of push notifications
+    # above.
+    if idle and (private_message or mentioned):
+        # We require RabbitMQ to do this, as we can't call the email handler
+        # from the Tornado process. So if there's no rabbitmq support do nothing
+        if not already_notified.get("email_notified"):
+            queue_json_publish("missedmessage_emails", notice, lambda notice: None)
+            notified['email_notified'] = True
 
-    if latest_active_timestamp is None:
-        idle = True
-    else:
-        active_datetime = timestamp_to_datetime(latest_active_timestamp)
-        # 140 seconds is consistent with presence.js:OFFLINE_THRESHOLD_SECS
-        idle = timezone_now() - active_datetime > datetime.timedelta(seconds=140)
-
-    return off_zulip or idle
+    return notified
 
 def process_message_event(event_template, users):
     # type: (Mapping[str, Any], Iterable[Mapping[str, Any]]) -> None
-    realm_presences = {int(k): v for k, v in event_template['presences'].items()}  # type: Dict[int, Dict[Text, Dict[str, Any]]]
+    presence_idle_user_ids = set(event_template.get('presence_idle_user_ids', []))
     sender_queue_id = event_template.get('sender_queue_id', None)  # type: Optional[str]
     message_dict_markdown = event_template['message_dict_markdown']  # type: Dict[str, Any]
     message_dict_no_markdown = event_template['message_dict_no_markdown']  # type: Dict[str, Any]
@@ -714,26 +760,25 @@ def process_message_event(event_template, users):
             if sender_queue_id is not None and client.event_queue.id == sender_queue_id:
                 send_to_clients[client.event_queue.id]['is_sender'] = True
 
-        # If the recipient was offline and the message was a single or group PM to him
-        # or she was @-notified potentially notify more immediately
-        received_pm = message_type == "private" and user_profile_id != sender_id
-        mentioned = 'mentioned' in flags
-        idle = receiver_is_idle(user_profile_id, realm_presences)
-        always_push_notify = user_data.get('always_push_notify', False)
-        if (received_pm or mentioned) and (idle or always_push_notify):
-            notice = build_offline_notification(user_profile_id, message_id)
-            queue_json_publish("missedmessage_mobile_notifications", notice, lambda notice: None)
-            notified = dict(push_notified=True)  # type: Dict[str, bool]
-            # Don't send missed message emails if always_push_notify is True
-            if idle:
-                # We require RabbitMQ to do this, as we can't call the email handler
-                # from the Tornado process. So if there's no rabbitmq support do nothing
-                queue_json_publish("missedmessage_emails", notice, lambda notice: None)
-                notified['email_notified'] = True
+        # If the recipient was offline and the message was a single or group PM to them
+        # or they were @-notified potentially notify more immediately
+        private_message = message_type == "private" and user_profile_id != sender_id
+        mentioned = 'mentioned' in flags and 'read' not in flags
+        stream_push_notify = user_data.get('stream_push_notify', False)
 
-            extra_user_data[user_profile_id] = notified
+        # We first check if a message is potentially mentionable,
+        # since receiver_is_off_zulip is somewhat expensive.
+        if private_message or mentioned or stream_push_notify:
+            idle = receiver_is_off_zulip(user_profile_id) or (user_profile_id in presence_idle_user_ids)
+            always_push_notify = user_data.get('always_push_notify', False)
+            stream_name = event_template.get('stream_name')
+            result = maybe_enqueue_notifications(user_profile_id, message_id, private_message,
+                                                 mentioned, stream_push_notify, stream_name,
+                                                 always_push_notify, idle, {})
+            result['stream_push_notify'] = stream_push_notify
+            extra_user_data[user_profile_id] = result
 
-    for client_data in six.itervalues(send_to_clients):
+    for client_data in send_to_clients.values():
         client = client_data['client']
         flags = client_data['flags']
         is_sender = client_data.get('is_sender', False)  # type: bool
@@ -755,8 +800,6 @@ def process_message_event(event_template, users):
             message_dict = message_dict.copy()
             message_dict["invite_only_stream"] = True
 
-        if flags is not None:
-            message_dict['is_mentioned'] = 'mentioned' in flags
         user_event = dict(type='message', message=message_dict, flags=flags)  # type: Dict[str, Any]
         if extra_data is not None:
             user_event.update(extra_data)
@@ -795,16 +838,106 @@ def process_userdata_event(event_template, users):
             if client.accepts_event(user_event):
                 client.add_event(user_event)
 
+def process_message_update_event(event_template, users):
+    # type: (Mapping[str, Any], Iterable[Mapping[str, Any]]) -> None
+    prior_mention_user_ids = set(event_template.get('prior_mention_user_ids', []))
+    mention_user_ids = set(event_template.get('mention_user_ids', []))
+    presence_idle_user_ids = set(event_template.get('presence_idle_user_ids', []))
+    stream_push_user_ids = set(event_template.get('stream_push_user_ids', []))
+    push_notify_user_ids = set(event_template.get('push_notify_user_ids', []))
+
+    stream_name = event_template.get('stream_name')
+    message_id = event_template['message_id']
+
+    for user_data in users:
+        user_profile_id = user_data['id']
+        user_event = dict(event_template)  # shallow copy, but deep enough for our needs
+        for key in user_data.keys():
+            if key != "id":
+                user_event[key] = user_data[key]
+
+        maybe_enqueue_notifications_for_message_update(
+            user_profile_id=user_profile_id,
+            message_id=message_id,
+            stream_name=stream_name,
+            prior_mention_user_ids=prior_mention_user_ids,
+            mention_user_ids=mention_user_ids,
+            presence_idle_user_ids=presence_idle_user_ids,
+            stream_push_user_ids=stream_push_user_ids,
+            push_notify_user_ids=push_notify_user_ids,
+        )
+
+        for client in get_client_descriptors_for_user(user_profile_id):
+            if client.accepts_event(user_event):
+                client.add_event(user_event)
+
+def maybe_enqueue_notifications_for_message_update(user_profile_id,
+                                                   message_id,
+                                                   stream_name,
+                                                   prior_mention_user_ids,
+                                                   mention_user_ids,
+                                                   presence_idle_user_ids,
+                                                   stream_push_user_ids,
+                                                   push_notify_user_ids):
+    # type: (UserProfile, int, Text, Set[int], Set[int], Set[int], Set[int], Set[int]) -> None
+    private_message = (stream_name is None)
+
+    if private_message:
+        # We don't do offline notifications for PMs, because
+        # we already notified the user of the original message
+        return
+
+    if (user_profile_id in prior_mention_user_ids):
+        # Don't spam people with duplicate mentions.  This is
+        # especially important considering that most message
+        # edits are simple typo corrections.
+        return
+
+    stream_push_notify = (user_profile_id in stream_push_user_ids)
+
+    if stream_push_notify:
+        # Currently we assume that if this flag is set to True, then
+        # the user already was notified about the earlier message,
+        # so we short circuit.  We may handle this more rigorously
+        # in the future by looking at something like an AlreadyNotified
+        # model.
+        return
+
+    # We can have newly mentioned people in an updated message.
+    mentioned = (user_profile_id in mention_user_ids)
+
+    always_push_notify = user_profile_id in push_notify_user_ids
+
+    idle = (user_profile_id in presence_idle_user_ids) or \
+        receiver_is_off_zulip(user_profile_id)
+
+    maybe_enqueue_notifications(
+        user_profile_id=user_profile_id,
+        message_id=message_id,
+        private_message=private_message,
+        mentioned=mentioned,
+        stream_push_notify=stream_push_notify,
+        stream_name=stream_name,
+        always_push_notify=always_push_notify,
+        idle=idle,
+        already_notified={},
+    )
+
 def process_notification(notice):
     # type: (Mapping[str, Any]) -> None
     event = notice['event']  # type: Mapping[str, Any]
-    users = notice['users']  # type: Union[Iterable[int], Iterable[Mapping[str, Any]]]
-    if event['type'] in ["update_message", "delete_message"]:
-        process_userdata_event(event, cast(Iterable[Mapping[str, Any]], users))
-    elif event['type'] == "message":
+    users = notice['users']  # type: Union[List[int], List[Mapping[str, Any]]]
+    start_time = time.time()
+    if event['type'] == "message":
         process_message_event(event, cast(Iterable[Mapping[str, Any]], users))
+    elif event['type'] == "update_message":
+        process_message_update_event(event, cast(Iterable[Mapping[str, Any]], users))
+    elif event['type'] == "delete_message":
+        process_userdata_event(event, cast(Iterable[Mapping[str, Any]], users))
     else:
         process_event(event, cast(Iterable[int], users))
+    logging.debug("Tornado: Event %s for %s users took %sms" % (
+        event['type'], len(users), int(1000 * (time.time() - start_time))))
 
 # Runs in the Django process to send a notification to Tornado.
 #
@@ -821,7 +954,7 @@ def send_notification_http(data):
         process_notification(data)
 
 def send_notification(data):
-    # type: (Mapping[str, Any]) -> None
+    # type: (Dict[str, Any]) -> None
     queue_json_publish("notify_tornado", data, send_notification_http)
 
 def send_event(event, users):

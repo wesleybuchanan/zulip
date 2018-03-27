@@ -41,7 +41,7 @@ paths will be familiar to Django developers.
 
 ### HTML Templates
 
-See [our translating docs](translating.html) for details on Zulip's
+See [our docs](html-templates.html) for details on Zulip's
 templating systems.
 
 * `templates/zerver/` For [Jinja2](http://jinja.pocoo.org/) templates
@@ -61,7 +61,7 @@ templating systems.
 
 * `static/third/` Third-party JavaScript and CSS that has been vendored.
 
-* `node_modules/` Third-party JavaScript installed via `npm`.
+* `node_modules/` Third-party JavaScript installed via `yarn`.
 
 * `static/assets/` For assets not to be served to the web (e.g. the system to
                    generate our favicons).
@@ -85,7 +85,8 @@ templating systems.
 These are distinguished from scripts, below, by needing to run a
 Django context (i.e. with database access).
 
-* `zerver/management/commands/` Management commands one might run at a
+* `zerver/management/commands/`
+  [Management commands](management-commands.html) one might run at a
   production deployment site (e.g. scripts to change a value or
   deactivate a user properly).
 
@@ -119,15 +120,13 @@ Django context (i.e. with database access).
 
 ### API and Bots
 
-* `api/` Zulip's Python API bindings (released separately).
+* See the [Zulip API repository](https://github.com/zulip/python-zulip-api).
+  Zulip's Python API bindings, a number of Zulip integrations and
+  bots, and a framework for running and testing Zulip bots, used to be
+  developed in the main Zulip server repo but are now in their own repo.
 
-* `api/examples/` API examples.
-
-* `api/integrations/` Integrations distributed as part of the Zulip API bundle.
-
-* `api/bots/` Bots distributed as part of the Zulip API bundle.
-
-* `api/bots_api/` Framework for running and testing bots in `api/bots/`.
+* `templates/zerver/integrations/` (within `templates/zerver/`, above).
+  Documentation for these integrations.
 
 -------------------------------------------------------------------------
 

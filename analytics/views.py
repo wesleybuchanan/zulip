@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division
 
 from django.conf import settings
 from django.core import urlresolvers
@@ -21,7 +20,8 @@ from zerver.decorator import has_request_variables, REQ, require_server_admin, \
     zulip_login_required, to_non_negative_int, to_utc_datetime
 from zerver.lib.request import JsonableError
 from zerver.lib.response import json_success
-from zerver.lib.timestamp import ceiling_to_hour, ceiling_to_day, timestamp_to_datetime
+from zerver.lib.timestamp import ceiling_to_hour, ceiling_to_day, \
+    timestamp_to_datetime, convert_to_UTC
 from zerver.models import Realm, UserProfile, UserActivity, \
     UserActivityInterval, Client
 
@@ -84,6 +84,10 @@ def get_chart_data(request, user_profile, chart_name=REQ(),
 
     # Most likely someone using our API endpoint. The /stats page does not
     # pass a start or end in its requests.
+    if start is not None:
+        start = convert_to_UTC(start)
+    if end is not None:
+        end = convert_to_UTC(end)
     if start is not None and end is not None and start > end:
         raise JsonableError(_("Start time is later than end time. Start: %(start)s, End: %(end)s") %
                             {'start': start, 'end': end})
@@ -158,12 +162,14 @@ def client_label_map(name):
         return "Website"
     if name.startswith("desktop app"):
         return "Old desktop app"
+    if name == "ZulipElectron":
+        return "Desktop app"
     if name == "ZulipAndroid":
-        return "Android app"
+        return "Old Android app"
     if name == "ZulipiOS":
         return "Old iOS app"
     if name == "ZulipMobile":
-        return "New iOS app"
+        return "Mobile app"
     if name in ["ZulipPython", "API: Python"]:
         return "Python API"
     if name.startswith("Zulip") and name.endswith("Webhook"):
@@ -1064,14 +1070,11 @@ def get_realm_activity(request, realm_str):
     content = sent_messages_report(realm_str)
     data += [(page_title, content)]
 
-    realm_link = 'https://stats1.zulip.net:444/render/?from=-7days'
-    realm_link += '&target=stats.gauges.staging.users.active.%s.0_16hr' % (realm_str,)
-
     title = realm_str
     return render(
         request,
         'analytics/activity.html',
-        context=dict(data=data, realm_link=realm_link, title=title),
+        context=dict(data=data, realm_link=None, title=title),
     )
 
 @require_server_admin

@@ -1,6 +1,3 @@
-from __future__ import absolute_import
-from __future__ import print_function
-
 import unittest
 
 from tools.lib.pretty_print import pretty_print_html
@@ -362,6 +359,36 @@ GOOD_HTML13 = """
     <div>{{this.count}}</div>
 </div>
 """
+
+BAD_HTML14 = """
+<div>
+  {{#if this.code}}
+    <pre>Here goes some cool code.</pre>
+  {{else}}
+    <div>
+    content of first div
+    <div>
+    content of second div.
+    </div>
+    </div>
+  {{/if}}
+</div>
+"""
+
+GOOD_HTML14 = """
+<div>
+    {{#if this.code}}
+    <pre>Here goes some cool code.</pre>
+    {{else}}
+    <div>
+        content of first div
+        <div>
+            content of second div.
+        </div>
+    </div>
+    {{/if}}
+</div>
+"""
 class TestPrettyPrinter(unittest.TestCase):
     def compare(self, a, b):
         # type: (str, str) -> None
@@ -384,3 +411,4 @@ class TestPrettyPrinter(unittest.TestCase):
         self.compare(pretty_print_html(BAD_HTML11), GOOD_HTML11)
         self.compare(pretty_print_html(BAD_HTML12), GOOD_HTML12)
         self.compare(pretty_print_html(BAD_HTML13), GOOD_HTML13)
+        self.compare(pretty_print_html(BAD_HTML14), GOOD_HTML14)

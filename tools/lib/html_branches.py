@@ -1,6 +1,3 @@
-from __future__ import absolute_import
-from __future__ import print_function
-
 from typing import Dict, List, Optional, Set
 
 import re
@@ -25,7 +22,7 @@ class HtmlTreeBranch(object):
     """
 
     def __init__(self, tags, fn):
-        # type: (List[TagInfo], str) -> None
+        # type: (List['TagInfo'], Optional[str]) -> None
         self.tags = tags
         self.fn = fn
         self.line = tags[-1].token.line
@@ -63,8 +60,8 @@ class HtmlTreeBranch(object):
 
 
 class Node(object):
-    def __init__(self, token, parent):
-        # type: (Token, Node) -> None
+    def __init__(self, token, parent):  # FIXME parent parameter is not used!
+        # type: (Token, Optional[Node]) -> None
         self.token = token
         self.children = []  # type: List[Node]
         self.parent = None  # type: Optional[Node]
@@ -143,7 +140,7 @@ def split_for_id_and_class(element):
 
 
 def html_branches(text, fn=None):
-    # type: (str, str) -> List[HtmlTreeBranch]
+    # type: (str, Optional[str]) -> List[HtmlTreeBranch]
     tree = html_tag_tree(text)
     branches = []  # type: List[HtmlTreeBranch]
 
@@ -192,8 +189,8 @@ def html_tag_tree(text):
 
 
 def build_id_dict(templates):
-    # type: (List[str]) -> (Dict[str,List[str]])
-    template_id_dict = defaultdict(list)  # type: (Dict[str,List[str]])
+    # type: (List[str]) -> (Dict[str, List[str]])
+    template_id_dict = defaultdict(list)  # type: (Dict[str, List[str]])
 
     for fn in templates:
         text = open(fn).read()

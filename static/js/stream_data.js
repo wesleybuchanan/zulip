@@ -7,11 +7,8 @@ var exports = {};
 // Call clear_subscriptions() to initialize it.
 var stream_info;
 var subs_by_stream_id;
-var recent_topics = new Dict(); // stream_id -> array of objects
 
 var stream_ids_by_name = new Dict({fold_case: true});
-
-var defaults = {};
 
 exports.clear_subscriptions = function () {
     stream_info = new Dict({fold_case: true});
@@ -21,7 +18,7 @@ exports.clear_subscriptions = function () {
 exports.clear_subscriptions();
 
 exports.is_active = function (sub) {
-    return recent_topics.has(sub.stream_id) || sub.newly_subscribed;
+    return topic_data.stream_has_topics(sub.stream_id) || sub.newly_subscribed;
 };
 
 exports.rename_sub = function (sub, new_name) {
@@ -110,6 +107,18 @@ exports.delete_sub = function (stream_id) {
     stream_info.del(sub.name);
 };
 
+exports.get_non_default_stream_names = function () {
+    var subs = stream_info.values();
+    subs = _.reject(subs, function (sub) {
+        return exports.is_default_stream_id(sub.stream_id);
+    });
+    subs = _.reject(subs, function (sub) {
+        return sub.invite_only;
+    });
+    var names = _.pluck(subs, 'name');
+    return names;
+};
+
 exports.subscribed_subs = function () {
     return _.where(stream_info.values(), {subscribed: true});
 };
@@ -135,6 +144,18 @@ exports.get_colors = function () {
 exports.update_subscribers_count = function (sub) {
     var count = sub.subscribers.num_items();
     sub.subscriber_count = count;
+};
+
+exports.get_subscriber_count = function (stream_name) {
+    var sub = exports.get_sub_by_name(stream_name);
+    if (sub === undefined) {
+        blueslip.warn('We got a get_subscriber_count count call for a non-existent stream.');
+        return;
+    }
+    if (!sub.subscribers) {
+        return 0;
+    }
+    return sub.subscribers.num_items();
 };
 
 exports.render_stream_description = function (sub) {
@@ -213,8 +234,29 @@ exports.get_invite_only = function (stream_name) {
     return sub.invite_only;
 };
 
+var default_stream_ids = new Dict();
+
+exports.set_realm_default_streams = function (realm_default_streams) {
+    page_params.realm_default_streams = realm_default_streams;
+    default_stream_ids.clear();
+
+    realm_default_streams.forEach(function (stream) {
+        default_stream_ids.set(stream.stream_id, true);
+    });
+};
+
 exports.get_default_status = function (stream_name) {
-    return defaults.hasOwnProperty(stream_name);
+    var stream_id = exports.get_stream_id(stream_name);
+
+    if (!stream_id) {
+        return false;
+    }
+
+    return default_stream_ids.has(stream_id);
+};
+
+exports.is_default_stream_id = function (stream_id) {
+    return default_stream_ids.has(stream_id);
 };
 
 exports.get_name = function (stream_name) {
@@ -233,19 +275,21 @@ exports.get_name = function (stream_name) {
     return sub.name;
 };
 
-exports.set_subscribers = function (sub, user_ids) {
-    sub.subscribers = Dict.from_array(user_ids || []);
+exports.maybe_get_stream_name = function (stream_id) {
+    if (!stream_id) {
+        return;
+    }
+    var stream = exports.get_sub_by_id(stream_id);
+
+    if (!stream) {
+        return;
+    }
+
+    return stream.name;
 };
 
-exports.set_subscriber_emails = function (sub, emails) {
-    _.each(emails, function (email) {
-        var user_id = people.get_user_id(email);
-        if (!user_id) {
-            blueslip.error("We tried to set invalid subscriber: " + email);
-        } else {
-            sub.subscribers.set(user_id, true);
-        }
-    });
+exports.set_subscribers = function (sub, user_ids) {
+    sub.subscribers = Dict.from_array(user_ids || []);
 };
 
 exports.add_subscriber = function (stream_name, user_id) {
@@ -337,6 +381,7 @@ exports.create_sub_from_server_data = function (stream_name, attrs) {
         invite_only: false,
         desktop_notifications: page_params.enable_stream_desktop_notifications,
         audible_notifications: page_params.enable_stream_sounds,
+        push_notifications: page_params.enable_stream_push_notifications,
         description: '',
     });
 
@@ -368,44 +413,6 @@ exports.receives_audible_notifications = function (stream_name) {
     return sub.audible_notifications;
 };
 
-exports.process_message_for_recent_topics = function process_message_for_recent_topics(
-                                                message, remove_message) {
-    var current_timestamp = 0;
-    var count = 0;
-    var stream_id = message.stream_id;
-    var canon_subject = exports.canonicalized_name(message.subject);
-
-    var recents = recent_topics.get(stream_id) || [];
-
-    recents = _.filter(recents, function (item) {
-        var is_duplicate = (item.canon_subject.toLowerCase() === canon_subject.toLowerCase());
-        if (is_duplicate) {
-            current_timestamp = item.timestamp;
-            count = item.count;
-        }
-        return !is_duplicate;
-    });
-
-    if (remove_message !== undefined) {
-        count = count - 1;
-    } else {
-        count = count + 1;
-    }
-
-    if (count !== 0) {
-        recents.push({subject: message.subject,
-                      canon_subject: canon_subject,
-                      count: count,
-                      timestamp: Math.max(message.timestamp, current_timestamp)});
-    }
-
-    recents.sort(function (a, b) {
-        return b.timestamp - a.timestamp;
-    });
-
-    recent_topics.set(stream_id, recents);
-};
-
 exports.get_streams_for_settings_page = function () {
     // Build up our list of subscribed streams from the data we already have.
     var subscribed_rows = exports.subscribed_subs();
@@ -427,6 +434,19 @@ exports.get_streams_for_settings_page = function () {
     return all_subs;
 };
 
+exports.get_streams_for_admin = function () {
+    // Sort and combine all our streams.
+    function by_name(a,b) {
+        return util.strcmp(a.name, b.name);
+    }
+
+    var subs = stream_info.values();
+
+    subs.sort(by_name);
+
+    return subs;
+};
+
 exports.initialize_from_page_params = function () {
     function populate_subscriptions(subs, subscribed) {
         subs.forEach(function (sub) {
@@ -437,9 +457,7 @@ exports.initialize_from_page_params = function () {
         });
     }
 
-    page_params.realm_default_streams.forEach(function (stream) {
-        defaults[stream.name] = true;
-    });
+    exports.set_realm_default_streams(page_params.realm_default_streams);
 
     populate_subscriptions(page_params.subscriptions, true);
     populate_subscriptions(page_params.unsubscribed, false);
@@ -458,26 +476,6 @@ exports.initialize_from_page_params = function () {
     delete page_params.subscriptions;
     delete page_params.unsubscribed;
     delete page_params.never_subscribed;
-};
-
-exports.get_recent_topics_for_id = function (stream_id) {
-    return recent_topics.get(stream_id);
-};
-
-exports.get_recent_topics = function (stream_name) {
-    // TODO: deprecate this and have callers use
-    //       get_recent_topics_for_id
-    var stream_id = exports.get_stream_id(stream_name);
-    if (!stream_id) {
-        return [];
-    }
-
-    return recent_topics.get(stream_id);
-};
-
-exports.populate_stream_topics_for_tests = function (stream_map) {
-    // This is only used by tests.
-    recent_topics = Dict.from(stream_map);
 };
 
 exports.get_newbie_stream = function () {
@@ -500,6 +498,7 @@ exports.remove_default_stream = function (stream_id) {
             return stream.stream_id === stream_id;
         }
     );
+    default_stream_ids.del(stream_id);
 };
 
 return exports;

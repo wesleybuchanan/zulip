@@ -55,10 +55,6 @@ exports.process_message_for_recent_private_messages = function (message) {
 
     var user_ids_string = user_ids.join(',');
 
-    if (!user_ids_string) {
-        blueslip.warn('Unknown reply_to in message: ' + user_ids_string);
-        return;
-    }
     exports.insert_recent_private_message(user_ids_string, message.timestamp);
 };
 
@@ -94,20 +90,18 @@ exports.insert_recent_private_message = (function () {
     };
 }());
 
-exports.set_topic_edit_properties = function (message) {
-    message.always_visible_topic_edit = false;
-    message.on_hover_topic_edit = false;
-    if (!page_params.realm_allow_message_editing) {
-        return;
+exports.set_message_booleans = function (message, flags) {
+    function convert_flag(flag_name) {
+        return flags.indexOf(flag_name) >= 0;
     }
 
-    // Messages with no topics should always have an edit icon visible
-    // to encourage updating them. Admins can also edit any topic.
-    if (message.subject === compose.empty_topic_placeholder()) {
-        message.always_visible_topic_edit = true;
-    } else if (page_params.is_admin) {
-        message.on_hover_topic_edit = true;
-    }
+    message.unread = !convert_flag('read');
+    message.historical = convert_flag('historical');
+    message.starred = convert_flag('starred');
+    message.mentioned = convert_flag('mentioned') || convert_flag('wildcard_mentioned');
+    message.mentioned_me_directly =  convert_flag('mentioned');
+    message.collapsed = convert_flag('collapsed');
+    message.alerted = convert_flag('has_alert_word');
 };
 
 exports.add_message_metadata = function (message) {
@@ -125,15 +119,8 @@ exports.add_message_metadata = function (message) {
     message.sent_by_me = people.is_current_user(message.sender_email);
 
     message.flags = message.flags || [];
-    message.historical = (message.flags !== undefined &&
-                          message.flags.indexOf('historical') !== -1);
-    message.starred = message.flags.indexOf("starred") !== -1;
-    message.mentioned = message.flags.indexOf("mentioned") !== -1 ||
-                        message.flags.indexOf("wildcard_mentioned") !== -1;
-    message.mentioned_me_directly = message.flags.indexOf("mentioned") !== -1;
-    message.collapsed = message.flags.indexOf("collapsed") !== -1;
-    message.alerted = message.flags.indexOf("has_alert_word") !== -1;
-    message.is_me_message = message.flags.indexOf("is_me_message") !== -1;
+
+    exports.set_message_booleans(message, message.flags);
 
     people.extract_people_from_message(message);
 
@@ -150,8 +137,11 @@ exports.add_message_metadata = function (message) {
         composebox_typeahead.add_topic(message.stream, message.subject);
         message.reply_to = message.sender_email;
 
-        stream_data.process_message_for_recent_topics(message);
-        exports.set_topic_edit_properties(message);
+        topic_data.add_message({
+            stream_id: message.stream_id,
+            topic_name: message.subject,
+            message_id: message.id,
+        });
 
         recent_senders.process_message_for_senders(message);
         break;
@@ -176,39 +166,27 @@ exports.add_message_metadata = function (message) {
     return message;
 };
 
-exports.clear = function clear() {
-    this.stored_messages = {};
-};
+exports.reify_message_id = function (opts) {
+    var old_id = opts.old_id;
+    var new_id = opts.new_id;
+    if (pointer.furthest_read === old_id) {
+        pointer.furthest_read = new_id;
+    }
+    if (stored_messages[old_id]) {
+        stored_messages[new_id] = stored_messages[old_id];
+        delete stored_messages[old_id];
+    }
 
-util.execute_early(function () {
-    $(document).on('message_id_changed', function (event) {
-        var old_id = event.old_id;
-        var new_id = event.new_id;
-        if (pointer.furthest_read === old_id) {
-            pointer.furthest_read = new_id;
-        }
-        if (stored_messages[old_id]) {
-            stored_messages[new_id] = stored_messages[old_id];
-            delete stored_messages[old_id];
-        }
+    _.each([message_list.all, home_msg_list, message_list.narrowed], function (msg_list) {
+        if (msg_list !== undefined) {
+            msg_list.change_message_id(old_id, new_id);
 
-        // This handler cannot be in the MessageList constructor, which is the logical place
-        // If it's there, the event handler creates a closure with a reference to the message
-        // list itself. When narrowing, the old narrow message list is discarded and a new one
-        // created, but due to the closure, the old list is not garbage collected. This also leads
-        // to the old list receiving the change id events, and throwing errors as it does not
-        // have the messages that you would expect in its internal data structures.
-        _.each([message_list.all, home_msg_list, message_list.narrowed], function (msg_list) {
-            if (msg_list !== undefined) {
-                msg_list.change_message_id(old_id, new_id);
-
-                if (msg_list.view !== undefined) {
-                    msg_list.view.change_message_id(old_id, new_id);
-                }
+            if (msg_list.view !== undefined) {
+                msg_list.view.change_message_id(old_id, new_id);
             }
-        });
+        }
     });
-});
+};
 
 return exports;
 

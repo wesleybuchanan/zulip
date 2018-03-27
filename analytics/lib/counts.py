@@ -8,27 +8,18 @@ from analytics.models import InstallationCount, RealmCount, \
 from zerver.models import Realm, UserProfile, Message, Stream, \
     UserActivityInterval, RealmAuditLog, models
 from zerver.lib.timestamp import floor_to_day, floor_to_hour, ceiling_to_day, \
-    ceiling_to_hour
+    ceiling_to_hour, verify_UTC
 
 from typing import Any, Callable, Dict, List, Optional, Text, Tuple, Type, Union
 
 from collections import defaultdict, OrderedDict
 from datetime import timedelta, datetime
-import logging
+from zerver.lib.logging_util import create_logger
 import time
 
 ## Logging setup ##
 
-log_format = '%(asctime)s %(levelname)-8s %(message)s'
-logging.basicConfig(format=log_format)
-
-formatter = logging.Formatter(log_format)
-file_handler = logging.FileHandler(settings.ANALYTICS_LOG_PATH)
-file_handler.setFormatter(formatter)
-
-logger = logging.getLogger("zulip.management")
-logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
+logger = create_logger('zulip.management', settings.ANALYTICS_LOG_PATH, 'INFO')
 
 # You can't subtract timedelta.max from a datetime, so use this instead
 TIMEDELTA_MAX = timedelta(days=365*1000)
@@ -87,10 +78,9 @@ def process_count_stat(stat, fill_to_time):
     else:
         raise AssertionError("Unknown frequency: %s" % (stat.frequency,))
 
+    verify_UTC(fill_to_time)
     if floor_to_hour(fill_to_time) != fill_to_time:
         raise ValueError("fill_to_time must be on an hour boundary: %s" % (fill_to_time,))
-    if fill_to_time.tzinfo is None:
-        raise ValueError("fill_to_time must be timezone aware: %s" % (fill_to_time,))
 
     fill_state = FillState.objects.filter(property=stat.property).first()
     if fill_state is None:
@@ -240,6 +230,14 @@ def do_drop_all_analytics_tables():
     InstallationCount.objects.all().delete()
     FillState.objects.all().delete()
     Anomaly.objects.all().delete()
+
+def do_drop_single_stat(property):
+    # type: (str) -> None
+    UserCount.objects.filter(property=property).delete()
+    StreamCount.objects.filter(property=property).delete()
+    RealmCount.objects.filter(property=property).delete()
+    InstallationCount.objects.filter(property=property).delete()
+    FillState.objects.filter(property=property).delete()
 
 ## DataCollector-level operations ##
 

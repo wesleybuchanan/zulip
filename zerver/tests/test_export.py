@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
 from django.conf import settings
 from django.test import TestCase
@@ -10,7 +8,6 @@ import shutil
 import ujson
 
 from mock import patch, MagicMock
-from six.moves import range
 from typing import Any, Dict, List, Set
 
 from zerver.lib.actions import (

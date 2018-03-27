@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
 from typing import Any, Callable, Dict, Iterable, List, Tuple
 
@@ -52,7 +50,7 @@ class TestReport(ZulipTestCase):
 
         stats_mock = StatsMock(self.settings)
         with mock.patch('zerver.views.report.statsd', wraps=stats_mock):
-            result = self.client_post("/json/report_send_time", params)
+            result = self.client_post("/json/report/send_times", params)
         self.assert_json_success(result)
 
         expected_calls = [
@@ -77,7 +75,7 @@ class TestReport(ZulipTestCase):
 
         stats_mock = StatsMock(self.settings)
         with mock.patch('zerver.views.report.statsd', wraps=stats_mock):
-            result = self.client_post("/json/report_narrow_time", params)
+            result = self.client_post("/json/report/narrow_times", params)
         self.assert_json_success(result)
 
         expected_calls = [
@@ -99,7 +97,7 @@ class TestReport(ZulipTestCase):
 
         stats_mock = StatsMock(self.settings)
         with mock.patch('zerver.views.report.statsd', wraps=stats_mock):
-            result = self.client_post("/json/report_unnarrow_time", params)
+            result = self.client_post("/json/report/unnarrow_times", params)
         self.assert_json_success(result)
 
         expected_calls = [
@@ -121,7 +119,7 @@ class TestReport(ZulipTestCase):
             user_agent='agent',
             href='href',
             log='log',
-            more_info=dict(foo='bar'),
+            more_info=dict(foo='bar', draft_content="**draft**"),
         ))
 
         publish_mock = mock.patch('zerver.views.report.queue_json_publish')
@@ -130,18 +128,24 @@ class TestReport(ZulipTestCase):
             side_effect=KeyError('foo')
         )
         with publish_mock as m, subprocess_mock:
-            result = self.client_post("/json/report_error", params)
+            result = self.client_post("/json/report/error", params)
         self.assert_json_success(result)
 
         report = m.call_args[0][1]['report']
         for k in set(params) - set(['ui_message', 'more_info']):
             self.assertEqual(report[k], params[k])
 
-        self.assertEqual(report['more_info'], dict(foo='bar'))
+        self.assertEqual(report['more_info'], dict(foo='bar', draft_content="'**xxxxx**'"))
         self.assertEqual(report['user_email'], email)
 
+        # Teset with no more_info
+        del params['more_info']
+        with publish_mock as m, subprocess_mock:
+            result = self.client_post("/json/report/error", params)
+        self.assert_json_success(result)
+
         with self.settings(BROWSER_ERROR_REPORTING=False):
-            result = self.client_post("/json/report_error", params)
+            result = self.client_post("/json/report/error", params)
         self.assert_json_success(result)
 
         # If js_source_map is present, then the stack trace should be annotated.
@@ -150,7 +154,7 @@ class TestReport(ZulipTestCase):
         with \
                 self.settings(DEVELOPMENT=False, TEST_SUITE=False), \
                 mock.patch('zerver.lib.unminify.SourceMap.annotate_stacktrace') as annotate:
-            result = self.client_post("/json/report_error", params)
+            result = self.client_post("/json/report/error", params)
         self.assert_json_success(result)
         # fix_params (see above) adds quotes when JSON encoding.
         annotate.assert_called_once_with('"trace"')

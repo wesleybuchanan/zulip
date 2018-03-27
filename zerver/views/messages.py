@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 
 from django.utils.translation import ugettext as _
 from django.utils.timezone import now as timezone_now
@@ -6,22 +5,21 @@ from django.conf import settings
 from django.core import validators
 from django.core.exceptions import ValidationError
 from django.db import connection
-from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
-from typing import Dict, List, Set, Text
-from typing import Any, AnyStr, Callable, Iterable, Optional, Tuple, Union
-from zerver.lib.str_utils import force_bytes, force_text
+from typing import Dict, List, Set, Text, Any, AnyStr, Callable, Iterable, \
+    Optional, Tuple, Union
+from zerver.lib.str_utils import force_text
+from zerver.lib.exceptions import JsonableError, ErrorCode
 from zerver.lib.html_diff import highlight_html_differences
-
-from zerver.decorator import authenticated_api_view, authenticated_json_post_view, \
-    has_request_variables, REQ, JsonableError, \
-    to_non_negative_int
+from zerver.decorator import authenticated_json_post_view, has_request_variables, \
+    REQ, to_non_negative_int
 from django.utils.html import escape as escape_html
 from zerver.lib import bugdown
 from zerver.lib.actions import recipient_for_emails, do_update_message_flags, \
     compute_mit_user_fullname, compute_irc_user_fullname, compute_jabber_user_fullname, \
     create_mirror_user_if_needed, check_send_message, do_update_message, \
-    extract_recipients, truncate_body, render_incoming_message, do_delete_message
+    extract_recipients, truncate_body, render_incoming_message, do_delete_message, \
+    do_mark_all_as_read, do_mark_stream_messages_as_read, get_user_info_for_message_updates
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.cache import (
     generic_bulk_cached_fetch,
@@ -36,16 +34,16 @@ from zerver.lib.message import (
 )
 from zerver.lib.response import json_success, json_error
 from zerver.lib.sqlalchemy_utils import get_sqlalchemy_connection
+from zerver.lib.streams import access_stream_by_id, is_public_stream_by_name
 from zerver.lib.timestamp import datetime_to_timestamp
+from zerver.lib.topic_mutes import exclude_topic_mutes
 from zerver.lib.utils import statsd
 from zerver.lib.validator import \
     check_list, check_int, check_dict, check_string, check_bool
 from zerver.models import Message, UserProfile, Stream, Subscription, \
     Realm, RealmDomain, Recipient, UserMessage, bulk_get_recipients, get_recipient, \
-    get_user_profile_by_email, get_stream, \
-    parse_usermessage_flags, \
-    email_to_domain, get_realm, get_active_streams, \
-    bulk_get_streams, get_user_profile_by_id
+    get_stream, parse_usermessage_flags, email_to_domain, get_realm, get_active_streams, \
+    get_user_including_cross_realm
 
 from sqlalchemy import func
 from sqlalchemy.sql import select, join, column, literal_column, literal, and_, \
@@ -56,32 +54,67 @@ import ujson
 import datetime
 
 from six.moves import map
-import six
 
 LARGER_THAN_MAX_MESSAGE_ID = 10000000000000000
 
 class BadNarrowOperator(JsonableError):
-    def __init__(self, desc, status_code=400):
-        # type: (str, int) -> None
-        self.desc = desc
-        self.status_code = status_code
+    code = ErrorCode.BAD_NARROW
+    data_fields = ['desc']
 
-    def to_json_error_msg(self):
+    def __init__(self, desc):
+        # type: (str) -> None
+        self.desc = desc  # type: str
+
+    @staticmethod
+    def msg_format():
         # type: () -> str
-        return _('Invalid narrow operator: {}').format(self.desc)
+        return _('Invalid narrow operator: {desc}')
 
 Query = Any  # TODO: Should be Select, but sqlalchemy stubs are busted
 ConditionTransform = Any  # TODO: should be Callable[[ColumnElement], ColumnElement], but sqlalchemy stubs are busted
 
 # When you add a new operator to this, also update zerver/lib/narrow.py
 class NarrowBuilder(object):
+    '''
+    Build up a SQLAlchemy query to find messages matching a narrow.
+    '''
+
+    # This class has an important security invariant:
+    #
+    #   None of these methods ever *add* messages to a query's result.
+    #
+    # That is, the `add_term` method, and its helpers the `by_*` methods,
+    # are passed a Query object representing a query for messages; they may
+    # call some methods on it, and then they return a resulting Query
+    # object.  Things these methods may do to the queries they handle
+    # include
+    #  * add conditions to filter out rows (i.e., messages), with `query.where`
+    #  * add columns for more information on the same message, with `query.column`
+    #  * add a join for more information on the same message
+    #
+    # Things they may not do include
+    #  * anything that would pull in additional rows, or information on
+    #    other messages.
+
     def __init__(self, user_profile, msg_id_column):
         # type: (UserProfile, str) -> None
         self.user_profile = user_profile
         self.msg_id_column = msg_id_column
+        self.user_realm = user_profile.realm
 
     def add_term(self, query, term):
         # type: (Query, Dict[str, Any]) -> Query
+        """
+        Extend the given query to one narrowed by the given term, and return the result.
+
+        This method satisfies an important security property: the returned
+        query never includes a message that the given query didn't.  In
+        particular, if the given query will only find messages that a given
+        user can legitimately see, then so will the returned query.
+        """
+        # To maintain the security property, we hold all the `by_*`
+        # methods to the same criterion.  See the class's block comment
+        # for details.
 
         # We have to be careful here because we're letting users call a method
         # by name! The prefix 'by_' prevents it from colliding with builtin
@@ -124,6 +157,7 @@ class NarrowBuilder(object):
     def by_is(self, query, operand, maybe_negate):
         # type: (Query, str, ConditionTransform) -> Query
         if operand == 'private':
+            # The `.select_from` method extends the query with a join.
             query = query.select_from(join(query.froms[0], table("zerver_recipient"),
                                            column("recipient_id") ==
                                            literal_column("zerver_recipient.id")))
@@ -133,8 +167,16 @@ class NarrowBuilder(object):
         elif operand == 'starred':
             cond = column("flags").op("&")(UserMessage.flags.starred.mask) != 0
             return query.where(maybe_negate(cond))
-        elif operand == 'mentioned' or operand == 'alerted':
-            cond = column("flags").op("&")(UserMessage.flags.mentioned.mask) != 0
+        elif operand == 'unread':
+            cond = column("flags").op("&")(UserMessage.flags.read.mask) == 0
+            return query.where(maybe_negate(cond))
+        elif operand == 'mentioned':
+            cond1 = column("flags").op("&")(UserMessage.flags.mentioned.mask) != 0
+            cond2 = column("flags").op("&")(UserMessage.flags.wildcard_mentioned.mask) != 0
+            cond = or_(cond1, cond2)
+            return query.where(maybe_negate(cond))
+        elif operand == 'alerted':
+            cond = column("flags").op("&")(UserMessage.flags.has_alert_word.mask) != 0
             return query.where(maybe_negate(cond))
         raise BadNarrowOperator("unknown 'is' operand " + operand)
 
@@ -164,13 +206,24 @@ class NarrowBuilder(object):
     def by_stream(self, query, operand, maybe_negate):
         # type: (Query, str, ConditionTransform) -> Query
         try:
+            # Because you can see your own message history for
+            # private streams you are no longer subscribed to, we
+            # need get_stream, not access_stream, here.
             stream = get_stream(operand, self.user_profile.realm)
         except Stream.DoesNotExist:
             raise BadNarrowOperator('unknown stream ' + operand)
 
         if self.user_profile.realm.is_zephyr_mirror_realm:
-            # MIT users expect narrowing to "social" to also show messages to /^(un)*social(.d)*$/
-            # (unsocial, ununsocial, social.d, etc)
+            # MIT users expect narrowing to "social" to also show messages to
+            # /^(un)*social(.d)*$/ (unsocial, ununsocial, social.d, ...).
+
+            # In `ok_to_include_history`, we assume that a non-negated
+            # `stream` term for a public stream will limit the query to
+            # that specific stream.  So it would be a bug to hit this
+            # codepath after relying on this term there.  But all streams in
+            # a Zephyr realm are private, so that doesn't happen.
+            assert(not stream.is_public())
+
             m = re.search(r'^(?:un)*(.+?)(?:\.d)*$', stream.name, re.IGNORECASE)
             # Since the regex has a `.+` in it and "" is invalid as a
             # stream name, this will always match
@@ -237,7 +290,7 @@ class NarrowBuilder(object):
     def by_sender(self, query, operand, maybe_negate):
         # type: (Query, str, ConditionTransform) -> Query
         try:
-            sender = get_user_profile_by_email(operand)
+            sender = get_user_including_cross_realm(operand, self.user_realm)
         except UserProfile.DoesNotExist:
             raise BadNarrowOperator('unknown user ' + operand)
 
@@ -258,7 +311,8 @@ class NarrowBuilder(object):
         if ',' in operand:
             # Huddle
             try:
-                emails = [e.strip() for e in operand.split(',')]
+                # Ignore our own email if it is in this list
+                emails = [e.strip() for e in operand.split(',') if e.strip() != self.user_profile.email]
                 recipient = recipient_for_emails(emails, False,
                                                  self.user_profile, self.user_profile)
             except ValidationError:
@@ -276,7 +330,7 @@ class NarrowBuilder(object):
 
             # Personals with other user; include both directions.
             try:
-                narrow_profile = get_user_profile_by_email(operand)
+                narrow_profile = get_user_including_cross_realm(operand, self.user_realm)
             except UserProfile.DoesNotExist:
                 raise BadNarrowOperator('unknown user ' + operand)
 
@@ -290,7 +344,7 @@ class NarrowBuilder(object):
     def by_group_pm_with(self, query, operand, maybe_negate):
         # type: (Query, str, ConditionTransform) -> Query
         try:
-            narrow_profile = get_user_profile_by_email(operand)
+            narrow_profile = get_user_including_cross_realm(operand, self.user_realm)
         except UserProfile.DoesNotExist:
             raise BadNarrowOperator('unknown user ' + operand)
 
@@ -433,25 +487,6 @@ def narrow_parameter(json):
 
     return list(map(convert_term, data))
 
-def is_public_stream(stream_name, realm):
-    # type: (Text, Realm) -> bool
-    """
-    Determine whether a stream is public, so that
-    our caller can decide whether we can get
-    historical messages for a narrowing search.
-
-    Because of the way our search is currently structured,
-    we may be passed an invalid stream here.  We return
-    False in that situation, and subsequent code will do
-    validation and raise the appropriate JsonableError.
-    """
-    try:
-        stream = get_stream(stream_name, realm)
-    except Stream.DoesNotExist:
-        return False
-    return stream.is_public()
-
-
 def ok_to_include_history(narrow, realm):
     # type: (Optional[Iterable[Dict[str, Any]]], Realm) -> bool
 
@@ -469,7 +504,7 @@ def ok_to_include_history(narrow, realm):
     if narrow is not None:
         for term in narrow:
             if term['operator'] == "stream" and not term.get('negated', False):
-                if is_public_stream(term['operand'], realm):
+                if is_public_stream_by_name(term['operand'], realm):
                     include_history = True
         # Disable historical messages if the user is narrowing on anything
         # that's a property on the UserMessage table.  There cannot be
@@ -493,7 +528,18 @@ def exclude_muting_conditions(user_profile, narrow):
     conditions = []
     stream_name = get_stream_name_from_narrow(narrow)
 
-    if stream_name is None:
+    stream_id = None
+    if stream_name is not None:
+        try:
+            # Note that this code works around a lint rule that
+            # says we should use access_stream_by_name to get the
+            # stream.  It is okay here, because we are only using
+            # the stream id to exclude data, not to include results.
+            stream_id = get_stream(stream_name, user_profile.realm).id
+        except Stream.DoesNotExist:
+            pass
+
+    if stream_id is None:
         rows = Subscription.objects.filter(
             user_profile=user_profile,
             active=True,
@@ -506,31 +552,7 @@ def exclude_muting_conditions(user_profile, narrow):
             condition = not_(column("recipient_id").in_(muted_recipient_ids))
             conditions.append(condition)
 
-    muted_topics = ujson.loads(user_profile.muted_topics)
-    if muted_topics:
-        if stream_name is not None:
-            muted_topics = [m for m in muted_topics if m[0].lower() == stream_name]
-            if not muted_topics:
-                return conditions
-
-        muted_streams = bulk_get_streams(user_profile.realm,
-                                         [muted[0] for muted in muted_topics])
-        muted_recipients = bulk_get_recipients(Recipient.STREAM,
-                                               [stream.id for stream in six.itervalues(muted_streams)])
-        recipient_map = dict((s.name.lower(), muted_recipients[s.id].id)
-                             for s in six.itervalues(muted_streams))
-
-        muted_topics = [m for m in muted_topics if m[0].lower() in recipient_map]
-
-        if muted_topics:
-            def mute_cond(muted):
-                # type: (Tuple[str, str]) -> Selectable
-                stream_cond = column("recipient_id") == recipient_map[muted[0].lower()]
-                topic_cond = func.upper(column("subject")) == func.upper(muted[1])
-                return and_(stream_cond, topic_cond)
-
-            condition = not_(or_(*list(map(mute_cond, muted_topics))))
-            return conditions + [condition]
+    conditions = exclude_topic_mutes(conditions, user_profile, stream_id)
 
     return conditions
 
@@ -540,21 +562,29 @@ def get_messages_backend(request, user_profile,
                          num_before = REQ(converter=to_non_negative_int),
                          num_after = REQ(converter=to_non_negative_int),
                          narrow = REQ('narrow', converter=narrow_parameter, default=None),
-                         use_first_unread_anchor = REQ(default=False, converter=ujson.loads),
-                         apply_markdown=REQ(default=True,
-                                            converter=ujson.loads)):
-    # type: (HttpRequest, UserProfile, int, int, int, Optional[List[Dict[str, Any]]], bool, bool) -> HttpResponse
+                         use_first_unread_anchor = REQ(validator=check_bool, default=False),
+                         client_gravatar = REQ(validator=check_bool, default=False),
+                         apply_markdown = REQ(validator=check_bool, default=True)):
+    # type: (HttpRequest, UserProfile, int, int, int, Optional[List[Dict[str, Any]]], bool, bool, bool) -> HttpResponse
     include_history = ok_to_include_history(narrow, user_profile.realm)
 
     if include_history and not use_first_unread_anchor:
+        # The initial query in this case doesn't use `zerver_usermessage`,
+        # and isn't yet limited to messages the user is entitled to see!
+        #
+        # This is OK only because we've made sure this is a narrow that
+        # will cause us to limit the query appropriately later.
+        # See `ok_to_include_history` for details.
         query = select([column("id").label("message_id")], None, table("zerver_message"))
         inner_msg_id_col = literal_column("zerver_message.id")
     elif narrow is None and not use_first_unread_anchor:
+        # This is limited to messages the user received, as recorded in `zerver_usermessage`.
         query = select([column("message_id"), column("flags")],
                        column("user_profile_id") == literal(user_profile.id),
                        table("zerver_usermessage"))
         inner_msg_id_col = column("message_id")
     else:
+        # This is limited to messages the user received, as recorded in `zerver_usermessage`.
         # TODO: Don't do this join if we're not doing a search
         query = select([column("message_id"), column("flags")],
                        column("user_profile_id") == literal(user_profile.id),
@@ -579,7 +609,7 @@ def get_messages_backend(request, user_profile,
         # Build the query for the narrow
         num_extra_messages = 0
         builder = NarrowBuilder(user_profile, inner_msg_id_col)
-        search_term = None  # type: Optional[Dict[str, Any]]
+        search_term = {}  # type: Dict[str, Any]
         for term in narrow:
             if term['operator'] == 'search':
                 if not is_search:
@@ -711,7 +741,7 @@ def get_messages_backend(request, user_profile,
     id_fetcher = lambda row: row['id']
 
     message_dicts = generic_bulk_cached_fetch(lambda message_id: to_dict_cache_key_id(message_id, apply_markdown),
-                                              Message.get_raw_db_rows,
+                                              MessageDict.get_raw_db_rows,
                                               message_ids,
                                               id_fetcher=id_fetcher,
                                               cache_transformer=cache_transformer,
@@ -719,11 +749,18 @@ def get_messages_backend(request, user_profile,
                                               setter=stringify_message_dict)
 
     message_list = []
+
     for message_id in message_ids:
         msg_dict = message_dicts[message_id]
         msg_dict.update({"flags": user_message_flags[message_id]})
         msg_dict.update(search_fields.get(message_id, {}))
+        # Make sure that we never send message edit history to clients
+        # in realms with allow_edit_history disabled.
+        if "edit_history" in msg_dict and not user_profile.realm.allow_edit_history:
+            del msg_dict["edit_history"]
         message_list.append(msg_dict)
+
+    MessageDict.post_process_dicts(message_list, client_gravatar)
 
     statsd.incr('loaded_old_messages', len(message_list))
     ret = {'messages': message_list,
@@ -734,41 +771,65 @@ def get_messages_backend(request, user_profile,
 @has_request_variables
 def update_message_flags(request, user_profile,
                          messages=REQ(validator=check_list(check_int)),
-                         operation=REQ('op'), flag=REQ(),
-                         all=REQ(validator=check_bool, default=False),
-                         stream_name=REQ(default=None),
-                         topic_name=REQ(default=None)):
-    # type: (HttpRequest, UserProfile, List[int], Text, Text, bool, Optional[Text], Optional[Text]) -> HttpResponse
-    if all:
-        target_count_str = "all"
-    else:
-        target_count_str = str(len(messages))
-    log_data_str = "[%s %s/%s]" % (operation, flag, target_count_str)
-    request._log_data["extra"] = log_data_str
-    stream = None
-    if stream_name is not None:
-        try:
-            stream = get_stream(stream_name, user_profile.realm)
-        except Stream.DoesNotExist:
-            raise JsonableError(_('No such stream \'%s\'') % (stream_name,))
-        if topic_name:
-            topic_exists = UserMessage.objects.filter(user_profile=user_profile,
-                                                      message__recipient__type_id=stream.id,
-                                                      message__recipient__type=Recipient.STREAM,
-                                                      message__subject__iexact=topic_name).exists()
-            if not topic_exists:
-                raise JsonableError(_('No such topic \'%s\'') % (topic_name,))
-    count = do_update_message_flags(user_profile, operation, flag, messages,
-                                    all, stream, topic_name)
+                         operation=REQ('op'), flag=REQ()):
+    # type: (HttpRequest, UserProfile, List[int], Text, Text) -> HttpResponse
 
-    # If we succeed, update log data str with the actual count for how
-    # many messages were updated.
-    if count != len(messages):
-        log_data_str = "[%s %s/%s] actually %s" % (operation, flag, target_count_str, count)
+    count = do_update_message_flags(user_profile, operation, flag, messages)
+
+    target_count_str = str(len(messages))
+    log_data_str = "[%s %s/%s] actually %s" % (operation, flag, target_count_str, count)
     request._log_data["extra"] = log_data_str
 
     return json_success({'result': 'success',
                          'messages': messages,
+                         'msg': ''})
+
+@has_request_variables
+def mark_all_as_read(request, user_profile):
+    # type: (HttpRequest, UserProfile) -> HttpResponse
+    count = do_mark_all_as_read(user_profile)
+
+    log_data_str = "[%s updated]" % (count,)
+    request._log_data["extra"] = log_data_str
+
+    return json_success({'result': 'success',
+                         'msg': ''})
+
+@has_request_variables
+def mark_stream_as_read(request,
+                        user_profile,
+                        stream_id=REQ(validator=check_int)):
+    # type: (HttpRequest, UserProfile, int) -> HttpResponse
+    stream, recipient, sub = access_stream_by_id(user_profile, stream_id)
+    count = do_mark_stream_messages_as_read(user_profile, stream)
+
+    log_data_str = "[%s updated]" % (count,)
+    request._log_data["extra"] = log_data_str
+
+    return json_success({'result': 'success',
+                         'msg': ''})
+
+@has_request_variables
+def mark_topic_as_read(request,
+                       user_profile,
+                       stream_id=REQ(validator=check_int),
+                       topic_name=REQ()):
+    # type: (HttpRequest, UserProfile, int, Text) -> HttpResponse
+    stream, recipient, sub = access_stream_by_id(user_profile, stream_id)
+
+    if topic_name:
+        topic_exists = UserMessage.objects.filter(user_profile=user_profile,
+                                                  message__recipient=recipient,
+                                                  message__subject__iexact=topic_name).exists()
+        if not topic_exists:
+            raise JsonableError(_('No such topic \'%s\'') % (topic_name,))
+
+    count = do_mark_stream_messages_as_read(user_profile, stream, topic_name)
+
+    log_data_str = "[%s updated]" % (count,)
+    request._log_data["extra"] = log_data_str
+
+    return json_success({'result': 'success',
                          'msg': ''})
 
 def create_mirrored_message_users(request, user_profile, recipients):
@@ -804,7 +865,7 @@ def create_mirrored_message_users(request, user_profile, recipients):
     for email in referenced_users:
         create_mirror_user_if_needed(user_profile.realm, email, fullname_function)
 
-    sender = get_user_profile_by_email(sender_email)
+    sender = get_user_including_cross_realm(sender_email, user_profile.realm)
     return (True, sender)
 
 def same_realm_zephyr_user(user_profile, email):
@@ -960,7 +1021,8 @@ def fill_edit_history_entries(message_history, message):
             prev_rendered_content = entry['prev_rendered_content']
             entry['content_html_diff'] = highlight_html_differences(
                 prev_rendered_content,
-                entry['rendered_content'])
+                entry['rendered_content'],
+                message.id)
 
     message_history.append(dict(
         topic = prev_topic,
@@ -974,6 +1036,8 @@ def fill_edit_history_entries(message_history, message):
 def get_message_edit_history(request, user_profile,
                              message_id=REQ(converter=to_non_negative_int)):
     # type: (HttpRequest, UserProfile, int) -> HttpResponse
+    if not user_profile.realm.allow_edit_history:
+        return json_error(_("Message edit history is disabled in this organization"))
     message, ignored_user_message = access_message(user_profile, message_id)
 
     # Extract the message edit history from the message
@@ -1027,23 +1091,16 @@ def update_message_backend(request, user_profile,
             raise JsonableError(_("Topic can't be empty"))
     rendered_content = None
     links_for_embed = set()  # type: Set[Text]
+    prior_mention_user_ids = set()  # type: Set[int]
+    mention_user_ids = set()  # type: Set[int]
     if content is not None:
         content = content.strip()
         if content == "":
             content = "(deleted)"
         content = truncate_body(content)
 
-        # We exclude UserMessage.flags.historical rows since those
-        # users did not receive the message originally, and thus
-        # probably are not relevant for reprocessed alert_words,
-        # mentions and similar rendering features.  This may be a
-        # decision we change in the future.
-        ums = UserMessage.objects.filter(
-            message=message.id,
-            flags=~UserMessage.flags.historical)
-
-        message_users = UserProfile.objects.select_related().filter(
-            id__in={um.user_profile_id for um in ums})
+        user_info = get_user_info_for_message_updates(message.id)
+        prior_mention_user_ids = user_info['mention_user_ids']
 
         # We render the message using the current user's realm; since
         # the cross-realm bots never edit messages, this should be
@@ -1051,12 +1108,17 @@ def update_message_backend(request, user_profile,
         # Note: If rendering fails, the called code will raise a JsonableError.
         rendered_content = render_incoming_message(message,
                                                    content,
-                                                   message_users,
+                                                   user_info['message_user_ids'],
                                                    user_profile.realm)
         links_for_embed |= message.links_for_preview
 
+        mention_user_ids = message.mentions_user_ids
+
     number_changed = do_update_message(user_profile, message, subject,
-                                       propagate_mode, content, rendered_content)
+                                       propagate_mode, content, rendered_content,
+                                       prior_mention_user_ids,
+                                       mention_user_ids)
+
     # Include the number of messages changed in the logs
     request._log_data['extra'] = "[%s]" % (number_changed,)
     if links_for_embed and bugdown.url_embed_preview_enabled_for_realm(message):
@@ -1099,24 +1161,14 @@ def render_message_backend(request, user_profile, content=REQ()):
     rendered_content = render_markdown(message, content, realm=user_profile.realm)
     return json_success({"rendered": rendered_content})
 
-@authenticated_json_post_view
-def json_messages_in_narrow(request, user_profile):
-    # type: (HttpRequest, UserProfile) -> HttpResponse
-    return messages_in_narrow_backend(request, user_profile)
-
 @has_request_variables
 def messages_in_narrow_backend(request, user_profile,
                                msg_ids = REQ(validator=check_list(check_int)),
                                narrow = REQ(converter=narrow_parameter)):
     # type: (HttpRequest, UserProfile, List[int], Optional[List[Dict[str, Any]]]) -> HttpResponse
 
-    # Note that this function will only work on messages the user
-    # actually received
-
-    # TODO: We assume that the narrow is a search.  For now this works because
-    # the browser only ever calls this function for searches, since it can't
-    # apply that narrow operator itself.
-
+    # This query is limited to messages the user has access to because they
+    # actually received them, as reflected in `zerver_usermessage`.
     query = select([column("message_id"), column("subject"), column("rendered_content")],
                    and_(column("user_profile_id") == literal(user_profile.id),
                         column("message_id").in_(msg_ids)),
@@ -1134,8 +1186,19 @@ def messages_in_narrow_backend(request, user_profile,
 
     search_fields = dict()
     for row in query_result:
-        (message_id, subject, rendered_content, content_matches, subject_matches) = row
-        search_fields[message_id] = get_search_fields(rendered_content, subject,
-                                                      content_matches, subject_matches)
+        message_id = row['message_id']
+        subject = row['subject']
+        rendered_content = row['rendered_content']
+
+        if 'content_matches' in row:
+            content_matches = row['content_matches']
+            subject_matches = row['subject_matches']
+            search_fields[message_id] = get_search_fields(rendered_content, subject,
+                                                          content_matches, subject_matches)
+        else:
+            search_fields[message_id] = dict(
+                match_content=rendered_content,
+                match_subject=subject
+            )
 
     return json_success({"messages": search_fields})

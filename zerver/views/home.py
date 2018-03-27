@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 from typing import Any, List, Dict, Optional, Text
 
 from django.conf import settings
@@ -25,7 +24,8 @@ from zerver.lib.i18n import get_language_list, get_language_name, \
     get_language_list_for_templates
 from zerver.lib.push_notifications import num_push_devices_for_user
 from zerver.lib.streams import access_stream_by_name
-from zerver.lib.utils import statsd, get_subdomain
+from zerver.lib.subdomains import get_subdomain
+from zerver.lib.utils import statsd
 
 import calendar
 import datetime
@@ -58,26 +58,9 @@ def accounts_accept_terms(request):
                  'special_message_template': special_message_template},
     )
 
-def approximate_unread_count(user_profile):
-    # type: (UserProfile) -> int
-    not_in_home_view_recipients = [sub.recipient.id for sub in
-                                   Subscription.objects.filter(
-                                       user_profile=user_profile, in_home_view=False)]
-
-    # TODO: We may want to exclude muted messages from this count.
-    #       It was attempted in the past, but the original attempt
-    #       was broken.  When we re-architect muting, we may
-    #       want to to revisit this (see git issue #1019).
-    return UserMessage.objects.filter(
-        user_profile=user_profile, message_id__gt=user_profile.pointer).exclude(
-        message__recipient__type=Recipient.STREAM,
-        message__recipient__id__in=not_in_home_view_recipients).exclude(
-        flags=UserMessage.flags.read).count()
-
 def sent_time_in_epoch_seconds(user_message):
-    # type: (UserMessage) -> Optional[float]
-    # user_message is a UserMessage object.
-    if not user_message:
+    # type: (Optional[UserMessage]) -> Optional[float]
+    if user_message is None:
         return None
     # We have USE_TZ = True, so our datetime objects are timezone-aware.
     # Return the epoch seconds in UTC.
@@ -89,10 +72,10 @@ def home(request):
         response = render(request, 'zerver/handlebars_compilation_failed.html')
         response.status_code = 500
         return response
-    if not settings.SUBDOMAINS_HOMEPAGE:
+    if not settings.ROOT_DOMAIN_LANDING_PAGE:
         return home_real(request)
 
-    # If settings.SUBDOMAINS_HOMEPAGE, sends the user the landing
+    # If settings.ROOT_DOMAIN_LANDING_PAGE, sends the user the landing
     # page, not the login form, on the root domain
 
     subdomain = get_subdomain(request)
@@ -140,9 +123,8 @@ def home_real(request):
         user_profile.last_reminder = None
         user_profile.save(update_fields=["last_reminder"])
 
-    # Brand new users get the tutorial
-    needs_tutorial = settings.TUTORIAL_ENABLED and \
-        user_profile.tutorial_status != UserProfile.TUTORIAL_FINISHED
+    # Brand new users get narrowed to PM with welcome-bot
+    needs_tutorial = user_profile.tutorial_status == UserProfile.TUTORIAL_WAITING
 
     first_in_realm = realm_user_count(user_profile.realm) == 1
     # If you are the only person in the realm and you didn't invite
@@ -177,20 +159,18 @@ def home_real(request):
     url_lang = '/{}'.format(request.LANGUAGE_CODE)
     if not request.path.startswith(url_lang):
         translation.activate(default_language)
-
-    request.session[translation.LANGUAGE_SESSION_KEY] = default_language
+        request.session[translation.LANGUAGE_SESSION_KEY] = translation.get_language()
 
     # Pass parameters to the client-side JavaScript code.
     # These end up in a global JavaScript Object named 'page_params'.
     page_params = dict(
         # Server settings.
-        share_the_love        = settings.SHARE_THE_LOVE,
         development_environment = settings.DEVELOPMENT,
         debug_mode            = settings.DEBUG,
         test_suite            = settings.TEST_SUITE,
         poll_timeout          = settings.POLL_TIMEOUT,
         login_page            = settings.HOME_NOT_LOGGED_IN,
-        server_uri            = settings.SERVER_URI,
+        root_domain_uri       = settings.ROOT_DOMAIN_URI,
         maxfilesize           = settings.MAX_FILE_UPLOAD_SIZE,
         max_avatar_file_size  = settings.MAX_AVATAR_FILE_SIZE,
         server_generation     = settings.SERVER_GENERATION,
@@ -198,6 +178,8 @@ def home_real(request):
         save_stacktraces      = settings.SAVE_FRONTEND_STACKTRACES,
         server_inline_image_preview = settings.INLINE_IMAGE_PREVIEW,
         server_inline_url_embed_preview = settings.INLINE_URL_EMBED_PREVIEW,
+        password_min_length = settings.PASSWORD_MIN_LENGTH,
+        password_min_guesses  = settings.PASSWORD_MIN_GUESSES,
 
         # Misc. extra data.
         have_initial_messages = user_has_messages,
@@ -208,7 +190,6 @@ def home_real(request):
         needs_tutorial        = needs_tutorial,
         first_in_realm        = first_in_realm,
         prompt_for_invites    = prompt_for_invites,
-        unread_count          = approximate_unread_count(user_profile),
         furthest_read_time    = sent_time_in_epoch_seconds(latest_read),
         has_mobile_devices    = num_push_devices_for_user(user_profile) > 0,
         persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
@@ -266,8 +247,8 @@ def desktop_home(request):
     # type: (HttpRequest) -> HttpResponse
     return HttpResponseRedirect(reverse('zerver.views.home.home'))
 
-def apps_view(request):
-    # type: (HttpRequest) -> HttpResponse
+def apps_view(request, _):
+    # type: (HttpRequest, Text) -> HttpResponse
     if settings.ZILENCER_ENABLED:
         return render(request, 'zerver/apps.html')
     return HttpResponseRedirect('https://zulipchat.com/apps/', status=301)
@@ -280,5 +261,5 @@ def is_buggy_ua(agent):
     This may get fixed in the future, but for right now we can
     just serve the more conservative CSS to all our desktop apps.
     """
-    return ("Humbug Desktop/" in agent or "Zulip Desktop/" in agent or "ZulipDesktop/" in agent) and \
+    return ("Zulip Desktop/" in agent or "ZulipDesktop/" in agent) and \
         "Mac" not in agent

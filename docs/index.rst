@@ -49,6 +49,7 @@ Contents:
    :maxdepth: 2
    :caption: Zulip in production
 
+   Production overview <prod>
    prod-requirements
    Installing a production server <prod-install>
    prod-troubleshooting
@@ -78,11 +79,20 @@ Contents:
    :caption: Developer tutorials
 
    integration-guide
+   integration-docs-guide
    webhook-walkthrough
+   running-bots-guide
+   writing-bots-guide
    new-feature-tutorial
    writing-views
    life-of-a-request
    reading-list
+   screenshot-and-gif-software
+   fixing-commits
+   git-cheat-sheet-detailed
+   git-cheat-sheet
+   shell-tips
+   working-copies
 
 .. _code-contribution-guide:
 
@@ -98,6 +108,7 @@ Contents:
    chat-zulip-org
    zulipbot-usage
    accessibility
+   bug-reports
 
 .. _code-testing:
 
@@ -119,25 +130,31 @@ Contents:
    :maxdepth: 2
    :caption: Subsystem documentation
 
+   dependencies
    settings
    events-system
    queuing
-   bots-guide
    custom-apps
    pointer
    markdown
    realms
+   management-commands
    front-end-build-process
    schema-migrations
    html_css
    hashchange-system
    emoji
+   hotspots
    full-text-search
+   email
    analytics
    translating
+   html-templates
    client
    logging
+   typing-indicators
    release-checklist
    api-release-checklist
+   swagger-api-docs
    README
    user-docs

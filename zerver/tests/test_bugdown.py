@@ -1,19 +1,18 @@
 # -*- coding: utf-8 -*-
-from __future__ import print_function
-from __future__ import absolute_import
 from django.conf import settings
 from django.test import TestCase, override_settings
 
 from zerver.lib import bugdown
 from zerver.lib.actions import (
-    check_add_realm_emoji,
     do_remove_realm_emoji,
     do_set_alert_words,
     get_realm,
 )
 from zerver.lib.alert_words import alert_words_in_realm
 from zerver.lib.camo import get_camo_url
+from zerver.lib.create_user import create_user
 from zerver.lib.emoji import get_emoji_url
+from zerver.lib.mention import possible_mentions
 from zerver.lib.message import render_markdown
 from zerver.lib.request import (
     JsonableError,
@@ -21,6 +20,7 @@ from zerver.lib.request import (
 from zerver.lib.test_classes import (
     ZulipTestCase,
 )
+from zerver.lib.test_runner import slow
 from zerver.lib.str_utils import force_str
 from zerver.models import (
     realm_in_local_realm_filters_cache,
@@ -35,17 +35,17 @@ from zerver.models import (
     Realm,
     RealmFilter,
     Recipient,
+    UserProfile,
 )
 
 import copy
 import mock
 import os
 import ujson
-import six
 
 from six.moves import urllib
 from zerver.lib.str_utils import NonBinaryStr
-from typing import Any, AnyStr, Dict, List, Optional, Tuple, Text
+from typing import Any, AnyStr, Dict, List, Optional, Set, Tuple, Text
 
 class FencedBlockPreprocessorTest(TestCase):
     def test_simple_quoting(self):
@@ -101,18 +101,21 @@ class FencedBlockPreprocessorTest(TestCase):
         processor = bugdown.fenced_code.FencedBlockPreprocessor(None)
 
         # Simulate code formatting.
-        processor.format_code = lambda lang, code: lang + ':' + code # type: ignore # mypy doesn't allow monkey-patching functions
-        processor.placeholder = lambda s: '**' + s.strip('\n') + '**' # type: ignore # https://github.com/python/mypy/issues/708
+        processor.format_code = lambda lang, code: lang + ':' + code  # type: ignore # mypy doesn't allow monkey-patching functions
+        processor.placeholder = lambda s: '**' + s.strip('\n') + '**'  # type: ignore # https://github.com/python/mypy/issues/708
 
         markdown = [
             '``` .py',
             'hello()',
             '```',
             '',
-            '``` .py',
+            '```vb.net',
             'goodbye()',
             '```',
             '',
+            '```c#',
+            'weirdchar()',
+            '```',
             ''
         ]
         expected = [
@@ -121,8 +124,11 @@ class FencedBlockPreprocessorTest(TestCase):
             '',
             '',
             '',
-            '**py:goodbye()**',
+            '**vb.net:goodbye()**',
             '',
+            '',
+            '',
+            '**c#:weirdchar()**',
             '',
             ''
         ]
@@ -134,8 +140,8 @@ class FencedBlockPreprocessorTest(TestCase):
         processor = bugdown.fenced_code.FencedBlockPreprocessor(None)
 
         # Simulate code formatting.
-        processor.format_code = lambda lang, code: lang + ':' + code # type: ignore # mypy doesn't allow monkey-patching functions
-        processor.placeholder = lambda s: '**' + s.strip('\n') + '**' # type: ignore # https://github.com/python/mypy/issues/708
+        processor.format_code = lambda lang, code: lang + ':' + code  # type: ignore # mypy doesn't allow monkey-patching functions
+        processor.placeholder = lambda s: '**' + s.strip('\n') + '**'  # type: ignore # https://github.com/python/mypy/issues/708
 
         markdown = [
             '~~~ quote',
@@ -162,22 +168,56 @@ def bugdown_convert(text):
     # type: (Text) -> Text
     return bugdown.convert(text, message_realm=get_realm('zulip'))
 
+class BugdownMiscTest(ZulipTestCase):
+    def test_get_full_name_info(self):
+        # type: () -> None
+        realm = get_realm('zulip')
+
+        def make_user(email, full_name):
+            # type: (Text, Text) -> UserProfile
+            return create_user(
+                email=email,
+                password='whatever',
+                realm=realm,
+                full_name=full_name,
+                short_name='whatever',
+            )
+
+        fred1 = make_user('fred1@example.com', 'Fred Flintstone')
+        fred1.is_active = False
+        fred1.save()
+
+        fred2 = make_user('fred2@example.com', 'Fred Flintstone')
+
+        fred3 = make_user('fred3@example.com', 'Fred Flintstone')
+        fred3.is_active = False
+        fred3.save()
+
+        dct = bugdown.get_full_name_info(realm.id, {'Fred Flintstone', 'cordelia LEAR', 'Not A User'})
+        self.assertEqual(set(dct.keys()), {'fred flintstone', 'cordelia lear'})
+        self.assertEqual(dct['fred flintstone'], dict(
+            email='fred2@example.com',
+            full_name='Fred Flintstone',
+            id=fred2.id
+        ))
+
 class BugdownTest(ZulipTestCase):
     def load_bugdown_tests(self):
         # type: () -> Tuple[Dict[Text, Any], List[List[Text]]]
         test_fixtures = {}
-        data_file = open(os.path.join(os.path.dirname(__file__), '../fixtures/bugdown-data.json'), 'r')
+        data_file = open(os.path.join(os.path.dirname(__file__), '../fixtures/markdown_test_cases.json'), 'r')
         data = ujson.loads('\n'.join(data_file.readlines()))
         for test in data['regular_tests']:
             test_fixtures[test['name']] = test
 
         return test_fixtures, data['linkify_tests']
 
+    @slow("Aggregate of runs dozens of individual markdown tests")
     def test_bugdown_fixtures(self):
         # type: () -> None
         format_tests, linkify_tests = self.load_bugdown_tests()
 
-        for name, test in six.iteritems(format_tests):
+        for name, test in format_tests.items():
             converted = bugdown_convert(test['input'])
 
             print("Running Bugdown test %s" % (name,))
@@ -389,6 +429,8 @@ class BugdownTest(ZulipTestCase):
         media_tweet_html = ('<a href="http://t.co/xo7pAhK6n3" target="_blank" title="http://t.co/xo7pAhK6n3">'
                             'http://twitter.com/NEVNBoston/status/421654515616849920/photo/1</a>')
 
+        emoji_in_tweet_html = """Zulip is <span class="emoji emoji-1f4af" title="hundred points">:hundred_points:</span>% open-source!"""
+
         def make_inline_twitter_preview(url, tweet_html, image_html=''):
             # type: (Text, Text, Text) -> Text
             ## As of right now, all previews are mocked to be the exact same tweet
@@ -481,39 +523,75 @@ class BugdownTest(ZulipTestCase):
                                          '</a>'
                                          '</div>'))))
 
+        msg = 'http://twitter.com/wdaher/status/287977969287315460'
+        converted = bugdown_convert(msg)
+        self.assertEqual(converted, '<p>%s</p>\n%s' % (
+            make_link('http://twitter.com/wdaher/status/287977969287315460'),
+            make_inline_twitter_preview('http://twitter.com/wdaher/status/287977969287315460', emoji_in_tweet_html)))
+
     def test_fetch_tweet_data_settings_validation(self):
         # type: () -> None
         with self.settings(TEST_SUITE=False, TWITTER_CONSUMER_KEY=None):
             self.assertIs(None, bugdown.fetch_tweet_data('287977969287315459'))
+
+    def test_content_has_emoji(self):
+        # type: () -> None
+        self.assertFalse(bugdown.content_has_emoji_syntax('boring'))
+        self.assertFalse(bugdown.content_has_emoji_syntax('hello: world'))
+        self.assertFalse(bugdown.content_has_emoji_syntax(':foobar'))
+        self.assertFalse(bugdown.content_has_emoji_syntax('::: hello :::'))
+
+        self.assertTrue(bugdown.content_has_emoji_syntax('foo :whatever:'))
+        self.assertTrue(bugdown.content_has_emoji_syntax('\n:whatever:'))
+        self.assertTrue(bugdown.content_has_emoji_syntax(':smile: ::::::'))
 
     def test_realm_emoji(self):
         # type: () -> None
         def emoji_img(name, file_name, realm_id):
             # type: (Text, Text, int) -> Text
             return '<img alt="%s" class="emoji" src="%s" title="%s">' % (
-                name, get_emoji_url(file_name, realm_id), name)
+                name, get_emoji_url(file_name, realm_id), name[1:-1].replace("_", " "))
 
         realm = get_realm('zulip')
-        check_add_realm_emoji(realm, "test", 'test.png')
 
         # Needs to mock an actual message because that's how bugdown obtains the realm
         msg = Message(sender=self.example_user('hamlet'))
-        converted = bugdown.convert(":test:", message_realm=realm, message=msg)
-        self.assertEqual(converted, '<p>%s</p>' % (emoji_img(':test:', 'test.png', realm.id)))
+        converted = bugdown.convert(":green_tick:", message_realm=realm, message=msg)
+        self.assertEqual(converted, '<p>%s</p>' % (emoji_img(':green_tick:', 'green_tick.png', realm.id)))
 
-        do_remove_realm_emoji(realm, 'test')
-        converted = bugdown.convert(":test:", message_realm=realm, message=msg)
-        self.assertEqual(converted, '<p>:test:</p>')
+        # Deactivate realm emoji.
+        do_remove_realm_emoji(realm, 'green_tick')
+        converted = bugdown.convert(":green_tick:", message_realm=realm, message=msg)
+        self.assertEqual(converted, '<p>:green_tick:</p>')
+
+    def test_deactivated_realm_emoji(self):
+        # type: () -> None
+        # Deactivate realm emoji.
+        realm = get_realm('zulip')
+        do_remove_realm_emoji(realm, 'green_tick')
+
+        msg = Message(sender=self.example_user('hamlet'))
+        converted = bugdown.convert(":green_tick:", message_realm=realm, message=msg)
+        self.assertEqual(converted, '<p>:green_tick:</p>')
 
     def test_unicode_emoji(self):
         # type: () -> None
         msg = u'\u2615'  # ☕
         converted = bugdown_convert(msg)
-        self.assertEqual(converted, u'<p><img alt="\u2615" class="emoji" src="/static/generated/emoji/images/emoji/unicode/2615.png" title="\u2615"></p>')
+        self.assertEqual(converted, u'<p><span class="emoji emoji-2615" title="coffee">:coffee:</span></p>')
 
         msg = u'\u2615\u2615'  # ☕☕
         converted = bugdown_convert(msg)
-        self.assertEqual(converted, u'<p><img alt="\u2615" class="emoji" src="/static/generated/emoji/images/emoji/unicode/2615.png" title="\u2615"><img alt="\u2615" class="emoji" src="/static/generated/emoji/images/emoji/unicode/2615.png" title="\u2615"></p>')
+        self.assertEqual(converted, u'<p><span class="emoji emoji-2615" title="coffee">:coffee:</span><span class="emoji emoji-2615" title="coffee">:coffee:</span></p>')
+
+    def test_same_markup(self):
+        # type: () -> None
+        msg = u'\u2615'  # ☕
+        unicode_converted = bugdown_convert(msg)
+
+        msg = u':coffee:'  # ☕☕
+        converted = bugdown_convert(msg)
+        self.assertEqual(converted, unicode_converted)
 
     def test_realm_patterns(self):
         # type: () -> None
@@ -577,7 +655,7 @@ class BugdownTest(ZulipTestCase):
             directly for testing is kind of awkward
             '''
             class Instance(object):
-                realm_id = None # type: Optional[int]
+                realm_id = None  # type: Optional[int]
             instance = Instance()
             instance.realm_id = realm.id
             flush_realm_filter(sender=None, instance=instance)
@@ -649,7 +727,7 @@ class BugdownTest(ZulipTestCase):
             return render_markdown(msg,
                                    content,
                                    realm_alert_words=realm_alert_words,
-                                   message_users={user_profile})
+                                   user_ids={user_profile.id})
 
         content = "We have an ALERTWORD day today!"
         self.assertEqual(render(msg, content), "<p>We have an ALERTWORD day today!</p>")
@@ -682,6 +760,17 @@ class BugdownTest(ZulipTestCase):
                          '<p><span class="user-mention" data-user-email="*" data-user-id="*">@everyone</span> test</p>')
         self.assertTrue(msg.mentions_wildcard)
 
+    def test_mention_everyone_style_normal_user(self):
+        # type: () -> None
+        user_profile = self.example_user('othello')
+        msg = Message(sender=user_profile, sending_client=get_client("test"))
+
+        content = "@aaron test"
+        self.assertEqual(render_markdown(msg, content),
+                         '<p>@aaron test</p>')
+        self.assertFalse(msg.mentions_wildcard)
+        self.assertEqual(msg.mentions_user_ids, set([]))
+
     def test_mention_single(self):
         # type: () -> None
         sender_user_profile = self.example_user('othello')
@@ -697,19 +786,21 @@ class BugdownTest(ZulipTestCase):
                          '@King Hamlet</span></p>' % (self.example_email("hamlet"), user_id))
         self.assertEqual(msg.mentions_user_ids, set([user_profile.id]))
 
-    def test_mention_shortname(self):
+    def test_possible_mentions(self):
         # type: () -> None
-        sender_user_profile = self.example_user('othello')
-        user_profile = self.example_user('hamlet')
-        msg = Message(sender=sender_user_profile, sending_client=get_client("test"))
-        user_id = user_profile.id
+        def assert_mentions(content, names):
+            # type: (Text, Set[Text]) -> None
+            self.assertEqual(possible_mentions(content), names)
 
-        content = "@**hamlet**"
-        self.assertEqual(render_markdown(msg, content),
-                         '<p><span class="user-mention" '
-                         'data-user-email="%s" data-user-id="%s">'
-                         '@King Hamlet</span></p>' % (self.example_email("hamlet"), user_id))
-        self.assertEqual(msg.mentions_user_ids, set([user_profile.id]))
+        assert_mentions('', set())
+        assert_mentions('boring', set())
+        assert_mentions('@all', set())
+        assert_mentions('smush@**steve**smush', set())
+
+        assert_mentions(
+            'Hello @**King Hamlet** and @**Cordelia Lear**\n@**Foo van Barson** @**all**',
+            {'King Hamlet', 'Cordelia Lear', 'Foo van Barson'}
+        )
 
     def test_mention_multiple(self):
         # type: () -> None
@@ -718,7 +809,8 @@ class BugdownTest(ZulipTestCase):
         cordelia = self.example_user('cordelia')
         msg = Message(sender=sender_user_profile, sending_client=get_client("test"))
 
-        content = "@**King Hamlet** and @**cordelia**, check this out"
+        content = "@**King Hamlet** and @**Cordelia Lear**, check this out"
+
         self.assertEqual(render_markdown(msg, content),
                          '<p>'
                          '<span class="user-mention" '
@@ -796,6 +888,17 @@ class BugdownTest(ZulipTestCase):
         self.assertEqual(
             render_markdown(msg, content),
             '<p>#<strong>casesens</strong></p>')
+
+    def test_possible_stream_names(self):
+        # type: () -> None
+        content = '''#**test here**
+            This mentions #**Denmark** too.
+            #**garçon** #**천국** @**Ignore Person**
+        '''
+        self.assertEqual(
+            bugdown.possible_linked_stream_names(content),
+            {'test here', 'Denmark', 'garçon', '천국'}
+        )
 
     def test_stream_unicode(self):
         # type: () -> None
@@ -932,6 +1035,15 @@ class BugdownTest(ZulipTestCase):
             '<p><a href="https://lists.debian.org/debian-ctte/2014/02/msg00173.html" target="_blank" title="https://lists.debian.org/debian-ctte/2014/02/msg00173.html">https://lists.debian.org/debian-ctte/2014/02/msg00173.html</a></p>',
         )
 
+    def test_url_to_a(self):
+        # type: () -> None
+        url = 'javascript://example.com/invalidURL'
+        converted = bugdown.url_to_a(url, url)
+        self.assertEqual(
+            converted,
+            'javascript://example.com/invalidURL',
+        )
+
 class BugdownApiTests(ZulipTestCase):
     def test_render_message_api(self):
         # type: () -> None
@@ -942,8 +1054,7 @@ class BugdownApiTests(ZulipTestCase):
             **self.api_auth(self.example_email("othello"))
         )
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
-        self.assertEqual(data['rendered'],
+        self.assertEqual(result.json()['rendered'],
                          u'<p>That is a <strong>bold</strong> statement</p>')
 
     def test_render_mention_stream_api(self):
@@ -956,9 +1067,8 @@ class BugdownApiTests(ZulipTestCase):
             **self.api_auth(self.example_email("othello"))
         )
         self.assert_json_success(result)
-        data = ujson.loads(result.content)
         user_id = self.example_user('hamlet').id
-        self.assertEqual(data['rendered'],
+        self.assertEqual(result.json()['rendered'],
                          u'<p>This mentions <a class="stream" data-stream-id="%s" href="/#narrow/stream/Denmark">#Denmark</a> and <span class="user-mention" data-user-email="%s" data-user-id="%s">@King Hamlet</span>.</p>' % (get_stream("Denmark", get_realm("zulip")).id, self.example_email("hamlet"), user_id))
 
 class BugdownErrorTests(ZulipTestCase):
@@ -980,6 +1090,19 @@ class BugdownErrorTests(ZulipTestCase):
 
 
 class BugdownAvatarTestCase(ZulipTestCase):
+    def test_possible_avatar_emails(self):
+        # type: () -> None
+        content = '''
+            hello !avatar(foo@example.com) my email is ignore@ignore.com
+            !gravatar(bar@yo.tv)
+
+            smushing!avatar(hamlet@example.org) is allowed
+        '''
+        self.assertEqual(
+            bugdown.possible_avatar_emails(content),
+            {'foo@example.com', 'bar@yo.tv', 'hamlet@example.org'},
+        )
+
     def test_avatar_with_id(self):
         # type: () -> None
         sender_user_profile = self.example_user('othello')

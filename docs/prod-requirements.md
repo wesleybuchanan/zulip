@@ -10,6 +10,24 @@ and an authentication mechanism.  Or, you can check out the
 
 ## Server
 
+#### General
+
+The installer expects Zulip to be the **only thing** running on the
+system; it will install system packages with `apt` (like nginx,
+postgresql, and redis) and configure them for its own use.  We
+strongly recommend using either a fresh machine instance in a cloud
+provider, a fresh VM, or a dedicated machine.  If you decide to
+disregard our advice and use a server that hosts other services, we
+can't support you, but
+[we do have some notes on issues you'll encounter](prod-install-existing-server.html).
+
+#### Operating System
+
+Ubuntu 16.04 Xenial and Ubuntu 14.04 Trusty are supported for running
+Zulip in production.  64-bit is recommended.  We recommend Xenial if
+you have a choice, since 14.04 is approaching end-of-life and you'll
+save yourself the work of upgrading in a few months.
+
 #### Hardware Specifications
 
 * CPU and Memory: For installations with 100+ users you'll need a
@@ -24,8 +42,12 @@ and an authentication mechanism.  Or, you can check out the
   [documentation on scalability](prod-maintain-secure-upgrade.html#scalability)
   for advice on hardware requirements for larger organizations.
 
-* Disk space: You'll need at least 10GB of free disk space. If you intend to
-  store uploaded files locally rather than on S3 you will likely need more.
+* Disk space: You'll need at least 10GB of free disk space for a
+  server with dozens of users. If you intend to store uploaded files
+  locally rather than on S3 you will likely need more, depending how
+  often your users upload large files.  You'll eventually need 100GB
+  or more if you have thousands of active users or millions of total
+  messages sent.
 
 #### Network and Security Specifications
 
@@ -44,25 +66,21 @@ and an authentication mechanism.  Or, you can check out the
   need outgoing SMTP access to your SMTP server (the standard port for
   this is 587) so that Zulip can send email.
 
-#### Operating System
-
-Ubuntu 14.04 Trusty and Ubuntu 16.04 Xenial are supported for running
-Zulip in production. 64-bit is recommended.
-
 #### Domain name
 
 You should already have a domain name available for your Zulip
 production instance. In order to generate valid SSL certificates with Let's
 Encrypt, and to enable other services such as Google Authentication, you'll
-need to update the domains A record to point to your production server.
+need to update the domain's A record to point to your production server.
 
 ## Credentials needed
 
 #### SSL Certificate
 
-* SSL Certificate for the host you're putting this on (e.g. zulip.example.com).
-  The installation instructions contain documentation for how to get an SSL
-  certificate for free using [LetsEncrypt](https://letsencrypt.org/).
+* An SSL certificate for the host you're putting this on (e.g.,
+  zulip.example.com).  If you don't have an SSL solution already, read
+  about [getting an SSL certificate for free](ssl-certificates.html) using
+  Let's Encrypt.
 
 #### Outgoing email
 
@@ -71,7 +89,7 @@ need to update the domains A record to point to your production server.
   during the signup process, missed message notifications, password
   reset, etc.).  If you don't have an existing outgoing SMTP solution,
   read about
-  [free outgoing SMTP options and options for prototyping](prod-email.html#free-outgoing-smtp).
+  [free outgoing SMTP options and options for prototyping](prod-email.html#free-outgoing-email-services).
 
 Once you have met these requirements, see [full instructions for installing
 Zulip in production](prod-install.html).

@@ -79,7 +79,6 @@ Dependencies:
 import re
 import subprocess
 import markdown
-import six
 from django.utils.html import escape
 from markdown.extensions.codehilite import CodeHilite, CodeHiliteExtension
 from zerver.lib.str_utils import force_bytes
@@ -98,7 +97,7 @@ FENCE_RE = re.compile(u"""
     (
         \\{?\\.?
         (?P<lang>
-            [a-zA-Z0-9_+-]*
+            [a-zA-Z0-9_+-./#]*
         ) # "py" or "javascript"
         \\}?
     ) # language, like ".py" or "{javascript}"

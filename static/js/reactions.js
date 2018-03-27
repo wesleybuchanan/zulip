@@ -1,8 +1,44 @@
 var reactions = (function () {
 var exports = {};
 
+exports.view = {}; // function namespace
+
+exports.open_reactions_popover = function () {
+    var message = current_msg_list.selected_message();
+    var target = $(current_msg_list.selected_row()).find(".actions_hover")[0];
+    if (!message.sent_by_me) {
+        target = $(current_msg_list.selected_row()).find(".reaction_button")[0];
+    }
+    emoji_picker.toggle_emoji_popover(target, current_msg_list.selected_id());
+    return true;
+};
+
+function should_send_reaction(emoji_name, operation) {
+    // If a default emoji with this name exists then always send it irrespective
+    // of whether a realm emoji with this name exists or not.
+    if (!emoji_codes.name_to_codepoint.hasOwnProperty(emoji_name)) {
+        // When the user attempts to add a reaction for a given emoji
+        // name, and a built-in emoji with this name doesn't exist,
+        // then send the request only if there is an active realm
+        // emoji with this name.
+        //
+        // This behavior isn't exactly correct: A user should be add
+        // their support to an emoji reaction for a deactivated (no
+        // longer available for new messages) realm emoji, but more
+        // backend work is required to support that anyway.
+        if (operation === "add") {
+            return emoji.active_realm_emojis.hasOwnProperty(emoji_name);
+        }
+        // While removing a reaction and a default emoji with this name doesn't
+        // exist then send the request if there is any realm emoji with this name
+        // whether active or inactive.
+        return emoji.all_realm_emojis.hasOwnProperty(emoji_name);
+    }
+    return true;
+}
+
 function send_reaction_ajax(message_id, emoji_name, operation) {
-    if (!emoji.emojis_by_name[emoji_name] && !emoji.realm_emojis[emoji_name]) {
+    if (!should_send_reaction(emoji_name, operation)) {
         // Emoji doesn't exist
         return;
     }
@@ -128,7 +164,6 @@ exports.add_reaction = function (event) {
         return;
     }
 
-    event.emoji_name_css_class = emoji.emojis_name_to_css_class[emoji_name];
     event.user.id = event.user.user_id;
 
     message.reactions.push(event);
@@ -136,19 +171,30 @@ exports.add_reaction = function (event) {
     var user_list = get_user_list_for_message_reaction(message, emoji_name);
 
     if (user_list.length > 1) {
-        exports.update_existing_reaction(event, user_list);
+        exports.view.update_existing_reaction({
+            message_id: event.message_id,
+            emoji_name: event.emoji_name,
+            user_list: user_list,
+            user_id: event.user.id,
+        });
     } else {
-        exports.insert_new_reaction(event, user_list);
+        exports.view.insert_new_reaction({
+            message_id: event.message_id,
+            emoji_name: event.emoji_name,
+            user_id: event.user.id,
+        });
     }
 };
 
-exports.update_existing_reaction = function (event, user_list) {
+exports.view.update_existing_reaction = function (opts) {
     // Our caller ensures that this message already has a reaction
     // for this emoji and sets up our user_list.  This function
     // simply updates the DOM.
 
-    var message_id = event.message_id;
-    var emoji_name = event.emoji_name;
+    var message_id = opts.message_id;
+    var emoji_name = opts.emoji_name;
+    var user_list = opts.user_list;
+    var user_id = opts.user_id;
 
     var reaction = exports.find_reaction(message_id, emoji_name);
 
@@ -157,38 +203,46 @@ exports.update_existing_reaction = function (event, user_list) {
     var new_title = generate_title(emoji_name, user_list);
     reaction.prop('title', new_title);
 
-    if (event.user.id === page_params.user_id) {
+    if (user_id === page_params.user_id) {
         reaction.addClass("reacted");
     }
 };
 
-exports.insert_new_reaction = function (event, user_list) {
+exports.view.insert_new_reaction = function (opts) {
     // Our caller ensures we are the first user to react to this
     // message with this emoji, and it populates user_list for
     // us.  We then render the emoji/title/count and insert it
     // before the add button.
 
-    var message_id = event.message_id;
-    var emoji_name = event.emoji_name;
+    var message_id = opts.message_id;
+    var emoji_name = opts.emoji_name;
+    var user_id = opts.user_id;
+    var user_list = [user_id];
+
+    var context = {
+        message_id: message_id,
+        emoji_name: emoji_name,
+    };
 
     var new_title = generate_title(emoji_name, user_list);
 
-    if (emoji.realm_emojis[emoji_name]) {
-        event.is_realm_emoji = true;
-        event.url = emoji.realm_emojis[emoji_name].emoji_url;
+    if (emoji.active_realm_emojis[emoji_name]) {
+        context.is_realm_emoji = true;
+        context.url = emoji.active_realm_emojis[emoji_name].emoji_url;
     }
 
-    event.count = 1;
-    event.title = new_title;
-    event.emoji_alt_code = page_params.emoji_alt_code;
+    context.count = 1;
+    context.title = new_title;
+    context.emoji_alt_code = page_params.emoji_alt_code;
+    context.emoji_name_css_class = emoji.emojis_name_to_css_class[emoji_name];
 
-    if (event.user.id === page_params.user_id) {
-        event.class = "message_reaction reacted";
+    if (opts.user_id === page_params.user_id) {
+        context.class = "message_reaction reacted";
     } else {
-        event.class = "message_reaction";
+        context.class = "message_reaction";
     }
 
-    var new_reaction = $(templates.render('message_reaction', event));
+    var new_reaction = $(templates.render('message_reaction', context));
 
     // Now insert it before the add button.
     var reaction_button_element = exports.get_add_reaction_button(message_id);
@@ -223,6 +277,21 @@ exports.remove_reaction = function (event) {
 
     // Compute the new user list for this reaction.
     var user_list = get_user_list_for_message_reaction(message, emoji_name);
+
+    exports.view.remove_reaction({
+        message_id: message_id,
+        emoji_name: emoji_name,
+        user_list: user_list,
+        user_id: user_id,
+    });
+};
+
+exports.view.remove_reaction = function (opts) {
+
+    var message_id = opts.message_id;
+    var emoji_name = opts.emoji_name;
+    var user_list = opts.user_list;
+    var user_id = opts.user_id;
 
     var reaction = exports.find_reaction(message_id, emoji_name);
 
@@ -267,25 +336,25 @@ exports.get_message_reactions = function (message) {
                           'in reaction for message ' + message.id);
             return;
         }
-
-        var user_list = message_reactions.setdefault(reaction.emoji_name, []);
-        user_list.push(user_id);
+        reaction.user_ids = [];
+        var collapsed_reaction = message_reactions.setdefault(
+            reaction.emoji_name,
+            _.omit(reaction, 'user')
+        );
+        collapsed_reaction.user_ids.push(user_id);
     });
     var reactions = message_reactions.items().map(function (item) {
-        var emoji_name = item[0];
-        var user_ids = item[1];
-        var reaction = {
-            emoji_name: emoji_name,
-            emoji_name_css_class: emoji.emojis_name_to_css_class[emoji_name],
-            count: user_ids.length,
-            title: generate_title(emoji_name, user_ids),
-            emoji_alt_code: page_params.emoji_alt_code,
-        };
-        if (emoji.realm_emojis[reaction.emoji_name]) {
+        var reaction = item[1];
+        reaction.emoji_name_css_class = reaction.emoji_code;
+        reaction.count = reaction.user_ids.length;
+        reaction.title = generate_title(reaction.emoji_name, reaction.user_ids);
+        reaction.emoji_alt_code = page_params.emoji_alt_code;
+
+        if (reaction.reaction_type !== 'unicode_emoji') {
             reaction.is_realm_emoji = true;
-            reaction.url = emoji.realm_emojis[reaction.emoji_name].emoji_url;
+            reaction.url = emoji.all_realm_emojis[reaction.emoji_name].emoji_url;
         }
-        if (user_ids.indexOf(page_params.user_id) !== -1) {
+        if (reaction.user_ids.indexOf(page_params.user_id) !== -1) {
             reaction.class = "message_reaction reacted";
         } else {
             reaction.class = "message_reaction";
@@ -293,15 +362,6 @@ exports.get_message_reactions = function (message) {
         return reaction;
     });
     return reactions;
-};
-
-exports.initialize = function () {
-    $(document).on('message_id_changed', function (event) {
-        // When a message ID is changed via editing, update any
-        // data-message-id references to it.
-        var elts = $(".message_reactions[data-message-id='" + event.old_id + "']");
-        elts.attr("data-message-id", event.new_id);
-    });
 };
 
 return exports;

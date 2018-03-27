@@ -1,12 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from __future__ import print_function
 from __future__ import absolute_import
-from contextlib import contextmanager
 import logging
 import os
 import sys
-import optparse
+import argparse
 import subprocess
+
+from linter_lib.printer import print_err, colors
 
 # check for the venv
 from lib import sanity_check
@@ -14,18 +15,6 @@ sanity_check.check_venv(__file__)
 
 import lister
 from typing import cast, Callable, Dict, Iterator, List
-
-@contextmanager
-def bright_red_output():
-    # type: () -> Iterator[None]
-    # Make the lint output bright red
-    sys.stdout.write('\x1B[1;31m')
-    sys.stdout.flush()
-    try:
-        yield
-    finally:
-        # Restore normal terminal colors
-        sys.stdout.write('\x1B[0m')
 
 
 def run_parallel(lint_functions):
@@ -51,26 +40,33 @@ def run_parallel(lint_functions):
 
 def run():
     # type: () -> None
-    parser = optparse.OptionParser()
-    parser.add_option('--force', default=False,
-                      action="store_true",
-                      help='Run tests despite possible problems.')
-    parser.add_option('--full',
-                      action='store_true',
-                      help='Check some things we typically ignore')
-    parser.add_option('--pep8',
-                      action='store_true',
-                      help='Run the pep8 checker')
-    parser.add_option('--no-gitlint',
-                      action='store_true',
-                      help='Disable gitlint')
-    parser.add_option('--modified', '-m',
-                      action='store_true',
-                      help='Only check modified files')
-    parser.add_option('--verbose', '-v',
-                      action='store_true',
-                      help='Print verbose timing output')
-    (options, args) = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--force', default=False,
+                        action="store_true",
+                        help='Run tests despite possible problems.')
+    parser.add_argument('--full',
+                        action='store_true',
+                        help='Check some things we typically ignore')
+    parser.add_argument('--no-gitlint',
+                        action='store_true',
+                        help='Disable gitlint')
+    parser.add_argument('--modified', '-m',
+                        action='store_true',
+                        help='Only check modified files')
+    parser.add_argument('--verbose', '-v',
+                        action='store_true',
+                        help='Print verbose timing output')
+    parser.add_argument('targets',
+                        nargs='*',
+                        help='Specify directories to check')
+    limited_tests_group = parser.add_mutually_exclusive_group()
+    limited_tests_group.add_argument('--frontend',
+                                     action='store_true',
+                                     help='Only check files relevant to frontend')
+    limited_tests_group.add_argument('--backend',
+                                     action='store_true',
+                                     help='Only check files relevant to backend')
+    args = parser.parse_args()
 
     tools_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.dirname(tools_dir)
@@ -87,17 +83,24 @@ def run():
 
     os.chdir(root_dir)
 
-    if not options.force:
+    if not args.force:
         ok, msg = get_provisioning_status()
         if not ok:
             print(msg)
             print('If you really know what you are doing, use --force to run anyway.')
             sys.exit(1)
 
+    backend_file_types = ['py', 'sh', 'pp', 'json', 'md', 'txt', 'text', 'yaml']
+    frontend_file_types = ['js', 'css', 'handlebars', 'html']
+    file_types = backend_file_types + frontend_file_types
+    if args.backend:
+        file_types = backend_file_types
+    if args.frontend:
+        file_types = frontend_file_types
+
     by_lang = cast(Dict[str, List[str]],
-                   lister.list_files(args, modified_only=options.modified,
-                                     ftypes=['py', 'sh', 'js', 'pp', 'css', 'handlebars',
-                                             'html', 'json', 'md', 'txt', 'text', 'yaml'],
+                   lister.list_files(args.targets, modified_only=args.modified,
+                                     ftypes=file_types,
                                      use_shebang=True, group_by_ftype=True, exclude=EXCLUDED_FILES))
 
     # Invoke the appropriate lint checker for each language,
@@ -105,7 +108,7 @@ def run():
 
     logging.basicConfig(format="%(asctime)s %(message)s")
     logger = logging.getLogger()
-    if options.verbose:
+    if args.verbose:
         logger.setLevel(logging.INFO)
     else:
         logger.setLevel(logging.WARNING)
@@ -128,57 +131,71 @@ def run():
 
         If target_langs is empty, just runs the linter unconditionally.
         """
+        color = next(colors)
+
         def run_linter():
             # type: () -> int
-            if len(target_langs) == 0:
-                return subprocess.call(command)
-            targets = [target for lang in target_langs for target in by_lang[lang]]
-            if len(targets) == 0:
-                return 0
-            return subprocess.call(command + targets)
+            targets = []  # type: List[str]
+            if len(target_langs) != 0:
+                targets = [target for lang in target_langs for target in by_lang[lang]]
+                if len(targets) == 0:
+                    # If we this linter has a list of languages, and
+                    # no files in those languages are to be checked,
+                    # then we can safely return success without
+                    # invoking the external linter.
+                    return 0
+
+            p = subprocess.Popen(command + targets,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+
+            assert p.stdout  # use of subprocess.PIPE indicates non-None
+            for line in iter(p.stdout.readline, b''):
+                print_err(name, color, line)
+
+            return p.wait()  # Linter exit code
+
         lint_functions[name] = run_linter
 
-    with bright_red_output():
-        external_linter('add_class', ['tools/find-add-class'])
-        external_linter('css', ['tools/check-css'], ['css'])
-        external_linter('eslint', ['node', 'node_modules/.bin/eslint', '--quiet'], ['js'])
-        external_linter('tslint', ['node', 'node_modules/.bin/tslint', '-c',
-                                   'static/ts/tslint.json'], ['ts'])
-        external_linter('puppet', ['puppet', 'parser', 'validate'], ['pp'])
-        external_linter('templates', ['tools/check-templates'], ['handlebars', 'html'])
-        external_linter('urls', ['tools/check-urls'])
-        external_linter('swagger', ['node', 'tools/check-swagger'], ['yaml'])
+    external_linter('add_class', ['tools/find-add-class'], ['js'])
+    external_linter('css', ['tools/check-css'], ['css'])
+    external_linter('eslint', ['node', 'node_modules/.bin/eslint', '--quiet'], ['js'])
+    external_linter('tslint', ['node', 'node_modules/.bin/tslint', '-c',
+                               'static/ts/tslint.json'], ['ts'])
+    external_linter('puppet', ['puppet', 'parser', 'validate'], ['pp'])
+    external_linter('templates', ['tools/check-templates'], ['handlebars', 'html'])
+    external_linter('urls', ['tools/check-urls'], ['py'])
+    external_linter('swagger', ['node', 'tools/check-swagger'], ['yaml'])
 
-        # gitlint disabled until we can stabilize it more
-#        if not options.no_gitlint:
-#            external_linter('commit_messages', ['tools/commit-message-lint'])
+    # gitlint disabled until we can stabilize it more
+    # if not args.no_gitlint:
+    #     external_linter('commit_messages', ['tools/commit-message-lint'])
 
-        @lint
-        def custom_py():
-            # type: () -> int
-            failed = check_custom_checks_py()
-            return 1 if failed else 0
+    @lint
+    def custom_py():
+        # type: () -> int
+        failed = check_custom_checks_py()
+        return 1 if failed else 0
 
-        @lint
-        def custom_nonpy():
-            # type: () -> int
-            failed = check_custom_checks_nonpy()
-            return 1 if failed else 0
+    @lint
+    def custom_nonpy():
+        # type: () -> int
+        failed = check_custom_checks_nonpy()
+        return 1 if failed else 0
 
-        @lint
-        def pyflakes():
-            # type: () -> int
-            failed = check_pyflakes(options, by_lang)
-            return 1 if failed else 0
+    @lint
+    def pyflakes():
+        # type: () -> int
+        failed = check_pyflakes(args, by_lang)
+        return 1 if failed else 0
 
-        if options.pep8:
-            @lint
-            def pep8():
-                # type: () -> int
-                failed = check_pep8(by_lang['py'])
-                return 1 if failed else 0
+    @lint
+    def pep8():
+        # type: () -> int
+        failed = check_pep8(by_lang['py'])
+        return 1 if failed else 0
 
-        failed = run_parallel(lint_functions)
+    failed = run_parallel(lint_functions)
 
     sys.exit(1 if failed else 0)
 

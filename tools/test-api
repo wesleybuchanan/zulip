@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-from __future__ import print_function
-from __future__ import absolute_import
+#!/usr/bin/env python3
 import os
 import sys
 
@@ -9,15 +7,10 @@ from lib import sanity_check
 sanity_check.check_venv(__file__)
 
 import django
-TOOLS_DIR = os.path.dirname(__file__)
-ROOT_DIR = os.path.dirname(TOOLS_DIR)
-sys.path.insert(0, ROOT_DIR)
+ZULIP_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ZULIP_PATH)
+os.chdir(ZULIP_PATH)
 
-api_path = os.path.abspath(os.path.join(ROOT_DIR, 'api'))
-if not os.path.exists(api_path):
-    raise Exception('programming error--files probably got moved')
-
-sys.path.insert(0, api_path)
 from zulip import Client
 
 from tools.lib.test_server import test_server_running
@@ -25,13 +18,14 @@ from tools.lib.api_tests import test_the_api
 
 os.environ['DJANGO_SETTINGS_MODULE'] = 'zproject.test_settings'
 django.setup()
-from zerver.models import get_user_profile_by_email
+from zerver.models import get_user, get_realm
 
 
-with test_server_running():
+with test_server_running(external_host='zulipdev.com:9981'):
     email = 'iago@zulip.com'  # Iago is an admin
-    api_key = get_user_profile_by_email(email).api_key
-    site = 'http://127.0.0.1:9981'
+    realm = get_realm("zulip")
+    api_key = get_user(email, realm).api_key
+    site = 'http://zulip.zulipdev.com:9981'
 
     client = Client(
         email=email,

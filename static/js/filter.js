@@ -55,6 +55,8 @@ function message_matches_search_term(message, operator, operand) {
             return message.mentioned;
         } else if (operand === 'alerted') {
             return message.alerted;
+        } else if (operand === 'unread') {
+            return unread.message_unread(message);
         }
         return true; // is:whatever returns true
 
@@ -110,21 +112,34 @@ function message_matches_search_term(message, operator, operand) {
     case 'sender':
         return people.id_matches_email_operand(message.sender_id, operand);
 
+    case 'group-pm-with':
+        var operand_ids = people.pm_with_operand_ids(operand);
+        if (!operand_ids) {
+            return false;
+        }
+        var user_ids = people.group_pm_with_user_ids(message);
+        if (!user_ids) {
+            return false;
+        }
+        return (user_ids.includes(operand_ids[0]));
+        // We should also check if the current user is in the recipient list (user_ids) of the
+        // message, but it is implicit by the fact that the current user has access to the message.
+
     case 'pm-with':
         // TODO: use user_ids, not emails here
         if (message.type !== 'private') {
             return false;
         }
-        var operand_ids = people.pm_with_operand_ids(operand);
+        operand_ids = people.pm_with_operand_ids(operand);
         if (!operand_ids) {
             return false;
         }
-        var message_ids = people.pm_with_user_ids(message);
-        if (!message_ids) {
+        user_ids = people.pm_with_user_ids(message);
+        if (!user_ids) {
             return false;
         }
 
-        return _.isEqual(operand_ids, message_ids);
+        return _.isEqual(operand_ids, user_ids);
     }
 
     return true; // unknown operators return true (effectively ignored)
@@ -180,6 +195,9 @@ Filter.canonicalize_term = function (opts) {
             operand = people.my_current_email();
         }
         break;
+    case 'group-pm-with':
+        operand = operand.toString().toLowerCase();
+        break;
     case 'search':
         // The mac app automatically substitutes regular quotes with curly
         // quotes when typing in the search bar.  Curly quotes don't trigger our
@@ -200,8 +218,6 @@ Filter.canonicalize_term = function (opts) {
     };
 };
 
-
-
 /* We use a variant of URI encoding which looks reasonably
    nice and still handles unambiguously cases such as
    spaces in operands.
@@ -210,16 +226,18 @@ Filter.canonicalize_term = function (opts) {
    narrow in the URL fragment.  There we do use full
    URI encoding to avoid problematic characters. */
 function encodeOperand(operand) {
-    return operand.replace(/%/g,  '%25')
+    return operand.replace(/%/g, '%25')
                   .replace(/\+/g, '%2B')
-                  .replace(/ /g,  '+');
+                  .replace(/ /g, '+')
+                  .replace(/"/g, '%22');
 }
 
 function decodeOperand(encoded, operator) {
-    if (operator !== 'pm-with' && operator !== 'sender' && operator !== 'from') {
+    encoded = encoded.replace(/"/g, '');
+    if (_.contains(['group-pm-with','pm-with','sender','from'],operator) === false) {
         encoded = encoded.replace(/\+/g, ' ');
     }
-    return util.robust_uri_decode(encoded);
+    return util.robust_uri_decode(encoded).trim();
 }
 
 // Parse a string into a list of operators (see below).
@@ -231,7 +249,9 @@ Filter.parse = function (str) {
     var operand;
     var term;
 
-    var matches = str.match(/"[^"]+"|\S+/g);
+    // Match all operands that either have no spaces, or are surrounded by
+    // quotes, preceded by an optional operator that may have a space after it.
+    var matches = str.match(/([^\s:]+: ?)?("[^"]+"?|\S+)/g);
     if (matches === null) {
         return operators;
     }
@@ -293,6 +313,9 @@ Filter.unparse = function (operators) {
             return elem.operand;
         }
         var sign = elem.negated ? '-' : '';
+        if (elem.operator === '') {
+            return elem.operand;
+        }
         return sign + elem.operator + ':' + encodeOperand(elem.operand.toString());
     });
     return parts.join(' ');
@@ -376,6 +399,7 @@ Filter.prototype = {
     update_email: function (user_id, new_email) {
         _.each(this._operators, function (term) {
             switch (term.operator) {
+                case 'group-pm-with':
                 case 'pm-with':
                 case 'sender':
                 case 'from':
@@ -416,10 +440,10 @@ Filter.operator_to_prefix = function (operator, negated) {
     var verb;
 
     if (operator === 'search') {
-        return negated ? 'Exclude' : 'Search for';
+        return negated ? 'exclude' : 'search for';
     }
 
-    verb = negated ? 'Exclude ' : 'Narrow to ';
+    verb = negated ? 'exclude ' : '';
 
     switch (operator) {
     case 'stream':
@@ -440,7 +464,7 @@ Filter.operator_to_prefix = function (operator, negated) {
 
     case 'from':
     case 'sender':
-        return verb + 'messages sent by';
+        return verb + 'sent by';
 
     case 'pm-with':
         return verb + 'private messages with';
@@ -451,6 +475,9 @@ Filter.operator_to_prefix = function (operator, negated) {
     // Note: We hack around using this in "describe" below.
     case 'is':
         return verb + 'messages that are';
+
+    case 'group-pm-with':
+        return verb + 'group private messages including';
     }
     return '';
 };
@@ -471,7 +498,7 @@ Filter.describe = function (operators) {
         if (is(operators[0], 'stream') && is(operators[1], 'topic')) {
             var stream = operators[0].operand;
             var topic = operators[1].operand;
-            var part = 'Narrow to ' + stream + ' > ' + topic;
+            var part = "stream " + stream + ' > ' + topic;
             parts = [part];
             operators = operators.slice(2);
         }
@@ -481,24 +508,26 @@ Filter.describe = function (operators) {
         var operand = elem.operand;
         var canonicalized_operator = Filter.canonicalize_operator(elem.operator);
         if (canonicalized_operator ==='is') {
-            var verb = elem.negated ? 'Exclude ' : 'Narrow to ';
+            var verb = elem.negated ? 'exclude ' : '';
             if (operand === 'private') {
-                return verb + 'all private messages';
+                return verb + 'private messages';
             } else if (operand === 'starred') {
                 return verb + 'starred messages';
             } else if (operand === 'mentioned') {
-                return verb + 'mentioned messages';
+                return verb + '@-mentions';
             } else if (operand === 'alerted') {
                 return verb + 'alerted messages';
+            } else if (operand === 'unread') {
+                return verb + 'unread messages';
             }
-        } else {
-            var prefix_for_operator = Filter.operator_to_prefix(canonicalized_operator,
-                                                                elem.negated);
-            if (prefix_for_operator !== '') {
-                return prefix_for_operator + ' ' + operand;
-            }
+            return operand + ' messages';
         }
-        return 'Narrow to (unknown operator)';
+        var prefix_for_operator = Filter.operator_to_prefix(canonicalized_operator,
+                                                            elem.negated);
+        if (prefix_for_operator !== '') {
+            return prefix_for_operator + ' ' + operand;
+        }
+        return "unknown operator";
     });
     return parts.concat(more_parts).join(', ');
 };

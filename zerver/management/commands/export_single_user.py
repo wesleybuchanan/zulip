@@ -1,11 +1,7 @@
-from __future__ import absolute_import
-from __future__ import print_function
 
 from typing import Any
 
 from argparse import ArgumentParser
-from django.core.management.base import BaseCommand, CommandError
-from django.core.exceptions import ValidationError
 
 import os
 import shutil
@@ -14,9 +10,9 @@ import tempfile
 import ujson
 
 from zerver.lib.export import do_export_user
-from zerver.models import UserProfile, get_user_profile_by_email
+from zerver.lib.management import ZulipBaseCommand
 
-class Command(BaseCommand):
+class Command(ZulipBaseCommand):
     help = """Exports message data from a Zulip user
 
     This command exports the message history for a single Zulip user.
@@ -34,13 +30,12 @@ class Command(BaseCommand):
                             action="store",
                             default=None,
                             help='Directory to write exported data to.')
+        self.add_realm_args(parser)
 
     def handle(self, *args, **options):
         # type: (*Any, **Any) -> None
-        try:
-            user_profile = get_user_profile_by_email(options["email"])
-        except UserProfile.DoesNotExist:
-            raise CommandError("No such user.")
+        realm = self.get_realm(options)
+        user_profile = self.get_user(options["email"], realm)
 
         output_dir = options["output_dir"]
         if output_dir is None:

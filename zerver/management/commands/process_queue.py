@@ -1,11 +1,9 @@
-from __future__ import absolute_import
 
 from types import FrameType
 from typing import Any, List
 
 from argparse import ArgumentParser
 from django.core.management.base import BaseCommand
-from django.core.management import CommandError
 from django.conf import settings
 from django.utils import autoreload
 from zerver.worker.queue_processors import get_worker, get_active_worker_queues
@@ -35,6 +33,15 @@ class Command(BaseCommand):
         logging.basicConfig()
         logger = logging.getLogger('process_queue')
 
+        def exit_with_three(signal, frame):
+            # type: (int, FrameType) -> None
+            """
+            This process is watched by Django's autoreload, so exiting
+            with status code 3 will cause this process to restart.
+            """
+            logger.warning("SIGUSR1 received. Restarting this queue processor.")
+            sys.exit(3)
+
         if not settings.USING_RABBITMQ:
             # Make the warning silent when running the tests
             if settings.TEST_SUITE:
@@ -56,8 +63,10 @@ class Command(BaseCommand):
             logger.info('%d queue worker threads were launched' % (cnt,))
 
         if options['all']:
+            signal.signal(signal.SIGUSR1, exit_with_three)
             autoreload.main(run_threaded_workers, (get_active_worker_queues(), logger))
         elif options['multi_threaded']:
+            signal.signal(signal.SIGUSR1, exit_with_three)
             queues = options['multi_threaded']
             autoreload.main(run_threaded_workers, (queues, logger))
         else:
@@ -75,6 +84,7 @@ class Command(BaseCommand):
                 sys.exit(0)
             signal.signal(signal.SIGTERM, signal_handler)
             signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGUSR1, signal_handler)
 
             worker.start()
 

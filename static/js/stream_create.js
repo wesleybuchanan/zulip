@@ -76,11 +76,12 @@ var stream_name_error = (function () {
     return self;
 }());
 
-function ajaxSubscribeForCreation(stream, description, principals, invite_only, announce) {
+function ajaxSubscribeForCreation(stream_name, description, principals, invite_only, announce) {
     // Subscribe yourself and possible other people to a new stream.
     return channel.post({
         url: "/json/users/me/subscriptions",
-        data: {subscriptions: JSON.stringify([{name: stream, description: description}]),
+        data: {subscriptions: JSON.stringify([{name: stream_name,
+                                               description: description}]),
                principals: JSON.stringify(principals),
                invite_only: JSON.stringify(invite_only),
                announce: JSON.stringify(announce),
@@ -96,7 +97,7 @@ function ajaxSubscribeForCreation(stream, description, principals, invite_only, 
             if (msg.indexOf('access') >= 0) {
                 // If we can't access the stream, we can safely assume it's
                 // a duplicate stream that we are not invited to.
-                stream_name_error.report_already_exists(stream);
+                stream_name_error.report_already_exists(stream_name);
                 stream_name_error.select();
             }
 
@@ -134,7 +135,38 @@ function update_announce_stream_state() {
     $('#announce-new-stream').show();
 }
 
-exports.new_stream_clicked = function (stream) {
+function get_principals() {
+    return _.map(
+        $("#stream_creation_form input:checkbox[name=user]:checked"),
+        function (elem) {
+            return $(elem).val();
+        }
+    );
+}
+
+function create_stream() {
+    var stream_name = $.trim($("#create_stream_name").val());
+    var description = $.trim($("#create_stream_description").val());
+    var is_invite_only = $('#stream_creation_form input[name=privacy]:checked').val() === "invite-only";
+    var principals = get_principals();
+
+    // You are always subscribed to streams you create.
+    principals.push(people.my_current_email());
+
+    created_stream = stream_name;
+
+    var announce = (!!page_params.notifications_stream &&
+        $('#announce-new-stream input').prop('checked'));
+
+    ajaxSubscribeForCreation(stream_name,
+        description,
+        principals,
+        is_invite_only,
+        announce
+    );
+}
+
+exports.new_stream_clicked = function (stream_name) {
     // this changes the tab switcher (settings/preview) which isn't necessary
     // to a add new stream title.
     $(".display-type #add_new_stream_title").show();
@@ -145,13 +177,13 @@ exports.new_stream_clicked = function (stream) {
     $("#stream_settings_title, .subscriptions-container .settings, .nothing-selected").hide();
     $("#stream-creation, #add_new_stream_title").show();
 
-    if (stream !== '') {
-        $('#create_stream_name').val(stream);
+    if (stream_name !== '') {
+        $('#create_stream_name').val(stream_name);
     }
     exports.show_new_stream_modal();
 
     // at less than 700px we have a @media query that when you tap the
-    // #create_stream_button, the stream prompt slides in. However, when you
+    // .create_stream_button, the stream prompt slides in. However, when you
     // focus  the button on that page, the entire app view jumps over to
     // the other tab, and the animation breaks.
     // it is unclear whether this is a browser bug or "feature", however what
@@ -282,43 +314,38 @@ $(function () {
 
     $(".subscriptions").on("submit", "#stream_creation_form", function (e) {
         e.preventDefault();
-        var stream = $.trim($("#create_stream_name").val());
-        var description = $.trim($("#create_stream_description").val());
-
-        var name_ok = stream_name_error.validate_for_submit(stream);
+        var stream_name = $.trim($("#create_stream_name").val());
+        var name_ok = stream_name_error.validate_for_submit(stream_name);
 
         if (!name_ok) {
             return;
         }
 
-        var principals = _.map(
-            $("#stream_creation_form input:checkbox[name=user]:checked"),
-            function (elem) {
-                return $(elem).val();
-            }
-        );
+        var principals = get_principals();
+        if (principals.length >= 50) {
+            var invites_warning_modal = templates.render('subscription_invites_warning_modal',
+                                                         {stream_name: stream_name,
+                                                          count: principals.length});
+            $('#stream-creation').append(invites_warning_modal);
+        } else {
+            create_stream();
+        }
+    });
 
-        // You are always subscribed to streams you create.
-        principals.push(people.my_current_email());
+    $(document).on("click", ".close-invites-warning-modal", function () {
+        $("#invites-warning-overlay").remove();
+    });
 
-        created_stream = stream;
-
-        var announce = (!!page_params.notifications_stream &&
-            $('#announce-new-stream input').prop('checked'));
-
-        ajaxSubscribeForCreation(stream,
-            description,
-            principals,
-            $('#stream_creation_form input[name=privacy]:checked').val() === "invite-only",
-            announce
-        );
+    $(document).on("click", ".confirm-invites-warning-modal", function () {
+        create_stream();
+        $("#invites-warning-overlay").remove();
     });
 
     $(".subscriptions").on("input", "#create_stream_name", function () {
-        var stream = $.trim($("#create_stream_name").val());
+        var stream_name = $.trim($("#create_stream_name").val());
 
         // This is an inexpensive check.
-        stream_name_error.pre_validate(stream);
+        stream_name_error.pre_validate(stream_name);
     });
 
     $("body").on("mouseover", "#announce-stream-docs", function (e) {

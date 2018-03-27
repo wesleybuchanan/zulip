@@ -33,15 +33,43 @@ var list_of_popovers = [];
     }
 }($.fn.popover));
 
-function load_medium_avatar(user_email) {
+function load_medium_avatar(user, elt) {
+    var user_avatar_url = "avatar/" + user.user_id + "/medium";
     var sender_avatar_medium = new Image();
-    sender_avatar_medium.src= "avatar/" + user_email + "/medium";
-    $(sender_avatar_medium).load(function () {
-        $(".popover-avatar").css("background-image","url("+$(this).attr("src")+")");
+    sender_avatar_medium.src = user_avatar_url;
+    $(sender_avatar_medium).on("load", function () {
+        elt.css("background-image", "url(" + $(this).attr("src") + ")");
     });
 }
 
-function show_message_info_popover(element, id) {
+function user_last_seen_time_status(user_id) {
+    var status = presence.get_status(user_id);
+    if (status === "active") {
+        return i18n.t("Active now");
+    }
+
+    if (page_params.realm_is_zephyr_mirror_realm) {
+        // We don't send presence data to clients in Zephyr mirroring realms
+        return i18n.t("Unknown");
+    }
+
+    // There are situations where the client has incomplete presence
+    // history on a user.  This can happen when users are deactivated,
+    // or when they just haven't been present in a long time (and we
+    // may have queries on presence that go back only N weeks).
+    //
+    // We give the somewhat vague status of "Unknown" for these users.
+    var last_active_date = presence.last_active_date(user_id);
+    if (last_active_date === undefined) {
+        return i18n.t("Unknown");
+    }
+    return timerender.last_seen_status_from_date(last_active_date.clone());
+}
+
+// element is the target element to pop off of
+// user is the user whose profile to show
+// message is the message containing it, which should be selected
+function show_user_info_popover(element, user, message) {
     var last_popover_elem = current_message_info_popover_elem;
     popovers.hide_all();
     if (last_popover_elem !== undefined
@@ -50,33 +78,29 @@ function show_message_info_popover(element, id) {
         // by clicking on the same element that caused the popover.
         return;
     }
-    current_msg_list.select_id(id);
+    current_msg_list.select_id(message.id);
     var elt = $(element);
     if (elt.data('popover') === undefined) {
-        timerender.set_full_datetime(current_msg_list.get(id),
-                                     elt.closest(".message_row").find(".message_time"));
-
-        var message = current_msg_list.get(id);
-        var sender = people.get_person_from_user_id(message.sender_id);
-        var sender_email;
-
-        if (sender) {
-            sender_email = sender.email;
-        } else {
-            blueslip.debug('Bad sender in message' + message.sender_id);
-            sender_email = message.sender_email;
+        if (user === undefined) {
+            // This case should not happen, because
+            // people.extract_people_from_message should have added
+            // the message sender to the people.js data set.
+            blueslip.error('Bad sender in message' + message.sender_id);
+            return;
         }
 
         var args = {
-            user_full_name: message.sender_full_name,
-            user_email: sender_email,
-            user_id: message.sender_id,
-            user_time: people.get_user_time(message.sender_id),
-            pm_with_uri: narrow.pm_with_uri(sender_email),
-            sent_by_uri: narrow.by_sender_uri(sender_email),
+            user_full_name: user.full_name,
+            user_email: user.email,
+            user_id: user.user_id,
+            user_time: people.get_user_time(user.user_id),
+            presence_status: presence.get_status(user.user_id),
+            user_last_seen_time_status: user_last_seen_time_status(user.user_id),
+            pm_with_uri: narrow.pm_with_uri(user.email),
+            sent_by_uri: narrow.by_sender_uri(user.email),
             narrowed: narrow_state.active(),
-            historical: message.historical,
             private_message_class: "respond_personal_button",
+            is_active: people.realm_user_is_active_human_or_bot(user.user_id),
         };
 
         var ypos = elt.offset().top;
@@ -94,14 +118,15 @@ function show_message_info_popover(element, id) {
 
         elt.popover({
             placement: placement,
-            template:  templates.render('user_info_popover',   {class: "message-info-popover"}),
-            title:     templates.render('user_info_popover_title', {user_avatar: "avatar/" + sender_email}),
-            content:   templates.render('user_info_popover_content', args),
-            trigger:   "manual",
+            template: templates.render('user_info_popover', {class: "message-info-popover"}),
+            title: templates.render('user_info_popover_title',
+                                    {user_avatar: "avatar/" + user.email}),
+            content: templates.render('user_info_popover_content', args),
+            trigger: "manual",
         });
         elt.popover("show");
 
-        load_medium_avatar(sender_email);
+        load_medium_avatar(user, $(".popover-avatar"));
 
         current_message_info_popover_elem = elt;
     }
@@ -110,7 +135,6 @@ function show_message_info_popover(element, id) {
 exports.toggle_actions_popover = function (element, id) {
     var last_popover_elem = current_actions_popover_elem;
     popovers.hide_all();
-    $(element).closest('.message_row').toggleClass('has_popover has_actions_popover');
     if (last_popover_elem !== undefined
         && last_popover_elem.get()[0] === element) {
         // We want it to be the case that a user can dismiss a popover
@@ -118,6 +142,7 @@ exports.toggle_actions_popover = function (element, id) {
         return;
     }
 
+    $(element).closest('.message_row').toggleClass('has_popover has_actions_popover');
     current_msg_list.select_id(id);
     var elt = $(element);
     if (elt.data('popover') === undefined) {
@@ -146,7 +171,7 @@ exports.toggle_actions_popover = function (element, id) {
 
         var should_display_edit_history_option = _.any(message.edit_history, function (entry) {
             return entry.prev_content !== undefined;
-        });
+        }) && page_params.realm_allow_edit_history;
         var should_display_delete_option = page_params.is_admin;
         var args = {
             message: message,
@@ -218,7 +243,7 @@ exports.actions_menu_handle_keyboard = function (key) {
     var index = items.index(items.filter(':focus'));
 
     if (key === "enter" && index >= 0 && index < items.length) {
-        return items.eq(index).trigger('click');
+        return items[index].click();
     }
     if (index === -1) {
         index = 0;
@@ -236,6 +261,7 @@ exports.actions_popped = function () {
 
 exports.hide_actions_popover = function () {
     if (popovers.actions_popped()) {
+        $('.has_popover').removeClass('has_popover has_actions_popover');
         current_actions_popover_elem.popover("destroy");
         current_actions_popover_elem = undefined;
     }
@@ -291,6 +317,22 @@ exports.hide_user_sidebar_popover = function () {
     }
 };
 
+exports.show_sender_info = function () {
+    var $message = $(".selected_message");
+    var $sender = $message.find(".sender_info_hover");
+    var $prev_message = $message.prev();
+    while (!$sender[0]) {
+        $prev_message = $prev_message.prev();
+        if (!$prev_message) {
+            break;
+        }
+        $sender = $prev_message.find(".sender_info_hover");
+    }
+    var message = current_msg_list.get(rows.id($message));
+    var user = people.get_person_from_user_id(message.sender_id);
+    show_user_info_popover($sender[0], user, message);
+};
+
 exports.register_click_handlers = function () {
     $("#main_div").on("click", ".actions_hover", function (e) {
         var row = $(this).closest(".message_row");
@@ -301,7 +343,9 @@ exports.register_click_handlers = function () {
     $("#main_div").on("click", ".sender_info_hover", function (e) {
         var row = $(this).closest(".message_row");
         e.stopPropagation();
-        show_message_info_popover(this, rows.id(row));
+        var message = current_msg_list.get(rows.id(row));
+        var user = people.get_person_from_user_id(message.sender_id);
+        show_user_info_popover(this, user, message);
     });
 
     $('body').on('click', '.user_popover .narrow_to_private_messages', function (e) {
@@ -379,7 +423,6 @@ exports.register_click_handlers = function () {
         // as the presence list may be redrawn with new elements.
         var target = $(this).closest('li');
         var user_id = target.find('a').attr('data-user-id');
-        var name = target.find('a').attr('data-name');
 
         if (current_user_sidebar_user_id === user_id) {
             // If the popover is already shown, clicking again should toggle it.
@@ -392,29 +435,33 @@ exports.register_click_handlers = function () {
             popovers.show_userlist_sidebar();
         }
 
-        var user_email = people.get_person_from_user_id(user_id).email;
+        var user = people.get_person_from_user_id(user_id);
+        var user_email = user.email;
 
         var args = {
             user_email: user_email,
-            user_full_name: name,
+            user_full_name: user.full_name,
             user_id: user_id,
             user_time: people.get_user_time(user_id),
+            presence_status: presence.get_status(user_id),
+            user_last_seen_time_status: user_last_seen_time_status(user_id),
             pm_with_uri: narrow.pm_with_uri(user_email),
             sent_by_uri: narrow.by_sender_uri(user_email),
             private_message_class: "compose_private_message",
+            is_active: people.realm_user_is_active_human_or_bot(user_id),
         };
 
         target.popover({
-            template:  templates.render('user_info_popover',   {class: "user_popover"}),
-            title:     templates.render('user_info_popover_title', {user_avatar: "avatar/" + user_email}),
-            content:   templates.render('user_info_popover_content', args),
-            trigger:   "manual",
+            template: templates.render('user_info_popover', {class: "user_popover"}),
+            title: templates.render('user_info_popover_title', {user_avatar: "avatar/" + user_email}),
+            content: templates.render('user_info_popover_content', args),
+            trigger: "manual",
             fixed: true,
             placement: userlist_placement === "left" ? "right" : "left",
         });
         target.popover("show");
 
-        load_medium_avatar(user_email);
+        load_medium_avatar(user, $(".popover-avatar"));
 
         current_user_sidebar_user_id = user_id;
         current_user_sidebar_popover = target.data('popover');
@@ -500,8 +547,7 @@ exports.register_click_handlers = function () {
         var stream = $(e.currentTarget).data('msg-stream');
         var topic = $(e.currentTarget).data('msg-topic');
         popovers.hide_actions_popover();
-        muting_ui.unmute_topic(stream, topic);
-        muting_ui.persist_and_rerender();
+        muting_ui.unmute(stream, topic);
         e.stopPropagation();
         e.preventDefault();
     });
@@ -514,17 +560,21 @@ exports.register_click_handlers = function () {
         e.preventDefault();
     });
 
-    function initClipboard(selector) {
-        return new Clipboard(selector);
-    }
-    initClipboard('.copy_link');
+    new Clipboard('.copy_link');
 
     $('body').on('click', '.copy_link', function (e) {
         popovers.hide_actions_popover();
         var id = $(this).attr("data-message-id");
         var row = $("[zid='" + id + "']");
-        row.find(".alert-copied").css("display", "block");
-        row.find(".alert-copied").delay(1000).fadeOut(300);
+        row.find(".alert-copied")
+            .css("display", "block")
+            .delay(1000).fadeOut(300);
+
+        setTimeout(function () {
+            // The Cliboard library works by focusing to a hidden textarea.
+            // We unfocus this so keyboard shortcuts, etc., will work again.
+            $(":focus").blur();
+        }, 0);
 
         e.stopPropagation();
         e.preventDefault();
@@ -578,6 +628,49 @@ exports.hide_all = function () {
 
 exports.set_userlist_placement = function (placement) {
     userlist_placement = placement || "right";
+};
+
+exports.compute_placement = function (elt, popover_height, popover_width,
+                                      prefer_vertical_positioning) {
+    var client_rect = elt.get(0).getBoundingClientRect();
+    var distance_from_top = client_rect.top;
+    var distance_from_bottom = message_viewport.height() - client_rect.bottom;
+    var distance_from_left = client_rect.left;
+    var distance_from_right = message_viewport.width() - client_rect.right;
+
+    var elt_will_fit_horizontally =
+        distance_from_left + elt.width() / 2 > popover_width / 2 &&
+        distance_from_right + elt.width() / 2 > popover_width / 2;
+
+    var elt_will_fit_vertically =
+        distance_from_bottom + elt.height() / 2 > popover_height / 2 &&
+        distance_from_top + elt.height() / 2 > popover_height / 2;
+
+    // default to placing the popover in the center of the screen
+    var placement = 'viewport_center';
+
+    // prioritize left/right over top/bottom
+    if (distance_from_top > popover_height && elt_will_fit_horizontally) {
+        placement = 'top';
+    }
+    if (distance_from_bottom > popover_height && elt_will_fit_horizontally) {
+        placement = 'bottom';
+    }
+
+    if (prefer_vertical_positioning && placement !== 'viewport_center') {
+        // If vertical positioning is prefered and the popover fits in
+        // either top or bottom position then return.
+        return placement;
+    }
+
+    if (distance_from_left > popover_width && elt_will_fit_vertically) {
+        placement = 'left';
+    }
+    if (distance_from_right > popover_width && elt_will_fit_vertically) {
+        placement = 'right';
+    }
+
+    return placement;
 };
 
 return exports;

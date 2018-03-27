@@ -1,10 +1,8 @@
-from __future__ import absolute_import
-
 from django.utils.translation import ugettext as _
 from django.http import HttpRequest, HttpResponse
 from typing import Any, Dict, List
 
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
 from zerver.models import UserProfile
@@ -40,25 +38,21 @@ def api_greenhouse_webhook(request, user_profile,
                            payload=REQ(argument_type='body'),
                            stream=REQ(default='greenhouse'), topic=REQ(default=None)):
     # type: (HttpRequest, UserProfile, Dict[str, Any], str, str) -> HttpResponse
-    try:
-        if payload['action'] == 'update_candidate':
-            candidate = payload['payload']['candidate']
-        else:
-            candidate = payload['payload']['application']['candidate']
-        action = payload['action'].replace('_', ' ').title()
-        body = "{}\n>{} {}\nID: {}\n{}".format(
-            action,
-            candidate['first_name'],
-            candidate['last_name'],
-            str(candidate['id']),
-            message_creator(payload['action'],
-                            payload['payload']['application']))
+    if payload['action'] == 'update_candidate':
+        candidate = payload['payload']['candidate']
+    else:
+        candidate = payload['payload']['application']['candidate']
+    action = payload['action'].replace('_', ' ').title()
+    body = "{}\n>{} {}\nID: {}\n{}".format(
+        action,
+        candidate['first_name'],
+        candidate['last_name'],
+        str(candidate['id']),
+        message_creator(payload['action'],
+                        payload['payload']['application']))
 
-        if topic is None:
-            topic = "{} - {}".format(action, str(candidate['id']))
+    if topic is None:
+        topic = "{} - {}".format(action, str(candidate['id']))
 
-    except KeyError as e:
-        return json_error(_("Missing key {} in JSON").format(str(e)))
-
-    check_send_message(user_profile, request.client, 'stream', [stream], topic, body)
+    check_send_stream_message(user_profile, request.client, stream, topic, body)
     return json_success()

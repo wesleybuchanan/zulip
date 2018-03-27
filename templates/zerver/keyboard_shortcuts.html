@@ -1,6 +1,6 @@
 <div class="overlay-modal" id="keyboard-shortcuts" tabindex="-1" role="dialog"
-     aria-label="{{ _('Keyboard shortcuts') }}" aria-hidden="true">
-  <div class="modal-body" tabindex="1">
+     aria-label="{{ _('Keyboard shortcuts') }}">
+  <div class="modal-body" tabindex="0">
     <div>
       <table class="hotkeys_table table table-striped table-bordered table-condensed">
         <thead>
@@ -14,11 +14,11 @@
         </tr>
         <tr>
           <td class="hotkey">q</td>
-          <td class="definition">{% trans %}Search people{% endtrans %}</td>
+          <td class="definition">{% trans %}Search streams{% endtrans %}</td>
         </tr>
         <tr>
           <td class="hotkey">w</td>
-          <td class="definition">{% trans %}Search streams{% endtrans %}</td>
+          <td class="definition">{% trans %}Search people{% endtrans %}</td>
         </tr>
         <tr>
           <td class="hotkey">Up, k</td>
@@ -130,6 +130,10 @@
           <td class="definition">{% trans %}Edit your last message{% endtrans %}</td>
         </tr>
         <tr>
+          <td class="hotkey">u</td>
+          <td class="definition">{% trans %}Show message sender's profile{% endtrans %}</td>
+        </tr>
+        <tr>
           <td class="hotkey">v</td>
           <td class="definition">{% trans %}Show images in thread{% endtrans %}</td>
         </tr>
@@ -150,6 +154,10 @@
                  src="/static/generated/emoji/images/emoji/unicode/1f44d.png"
                  title=":thumbs_up:"/>
           </td>
+        </tr>
+        <tr>
+          <td class="hotkey">-</td>
+          <td class="definition">{% trans %}Collapse/show selected message{% endtrans %}</td>
         </tr>
         <tr>
           <td class="hotkey">M</td>
@@ -207,7 +215,7 @@
       <table class="hotkeys_table table table-striped table-bordered table-condensed">
         <thead>
           <tr>
-            <th colspan="2">{{ _("Streams") }}</th>
+            <th colspan="2">{{ _("Streams settings") }}</th>
           </tr>
         </thead>
         <tr>
@@ -233,6 +241,6 @@
       </table>
     </div>
     <hr/>
-    <a href="/help/keyboard-shortcuts" target="_blank">Detailed keyboard shortcuts documentation</a>
+    <a href="/help/keyboard-shortcuts" target="_blank">{% trans %}Detailed keyboard shortcuts documentation{% endtrans %}</a>
   </div>
 </div>

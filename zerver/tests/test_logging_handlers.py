@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 import logging
 import sys
@@ -7,12 +6,13 @@ import sys
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest, HttpResponse
-from django.test import RequestFactory
+from django.test import RequestFactory, TestCase
+from django.utils.log import AdminEmailHandler
 from functools import wraps
 from mock import patch
 if False:
     from mypy_extensions import NoReturn
-from typing import Any, Callable, Dict, Mapping, Optional, Text
+from typing import Any, Callable, Dict, Mapping, Optional, Text, Iterator
 
 from zerver.lib.request import JsonableError
 from zerver.lib.test_classes import ZulipTestCase
@@ -60,26 +60,23 @@ class AdminZulipHandlerTest(ZulipTestCase):
         # type: () -> None
         settings.LOGGING_NOT_DISABLED = True
 
-    def get_admin_zulip_handler(self, logger):
-        # type: (logging.Logger) -> Any
-
-        # Ensure that AdminEmailHandler does not get filtered out
-        # even with DEBUG=True.
-        admin_email_handler = [
-            h for h in logger.handlers
+    def get_admin_zulip_handler(self):
+        # type: () -> Any
+        return [
+            h for h in logging.getLogger('').handlers
             if h.__class__.__name__ == "AdminZulipHandler"
         ][0]
-        return admin_email_handler
 
     def test_basic(self):
         # type: () -> None
         """A random exception passes happily through AdminZulipHandler"""
-        handler = self.get_admin_zulip_handler(self.logger)
+        handler = self.get_admin_zulip_handler()
         try:
             raise Exception("Testing Error!")
         except Exception:
             exc_info = sys.exc_info()
-        record = self.logger.makeRecord('name', logging.ERROR, 'function', 16, 'message', None, exc_info)  # type: ignore # https://github.com/python/typeshed/pull/1100
+        record = self.logger.makeRecord('name', logging.ERROR, 'function', 16,
+                                        'message', {}, exc_info)
         handler.emit(record)
 
     def run_handler(self, record):
@@ -105,8 +102,8 @@ class AdminZulipHandlerTest(ZulipTestCase):
 
             global captured_request
             global captured_exc_info
-            record = self.logger.makeRecord('name', logging.ERROR, 'function', 15,  # type: ignore # https://github.com/python/typeshed/pull/1100
-                                            'message\nmoremesssage\nmore', None,
+            record = self.logger.makeRecord('name', logging.ERROR, 'function', 15,
+                                            'message\nmoremesssage\nmore', {},
                                             None)
             record.request = captured_request  # type: ignore # this field is dynamically added
 
@@ -130,7 +127,8 @@ class AdminZulipHandlerTest(ZulipTestCase):
 
             global captured_request
             global captured_exc_info
-            record = self.logger.makeRecord('name', logging.ERROR, 'function', 15, 'message', None, captured_exc_info)  # type: ignore # https://github.com/python/typeshed/pull/1100
+            record = self.logger.makeRecord('name', logging.ERROR, 'function', 15,
+                                            'message', {}, captured_exc_info)
             record.request = captured_request  # type: ignore # this field is dynamically added
 
             report = self.run_handler(record)
@@ -206,3 +204,23 @@ class AdminZulipHandlerTest(ZulipTestCase):
             self.assertIn("user_email", report)
             self.assertIn("message", report)
             self.assertIn("stack_trace", report)
+
+class LoggingConfigTest(TestCase):
+    @staticmethod
+    def all_loggers():
+        # type: () -> Iterator[logging.Logger]
+        # There is no documented API for enumerating the loggers; but the
+        # internals of `logging` haven't changed in ages, so just use them.
+        loggerDict = logging.Logger.manager.loggerDict  # type: ignore
+        for logger in loggerDict.values():
+            if not isinstance(logger, logging.Logger):
+                continue
+            yield logger
+
+    def test_django_emails_disabled(self):
+        # type: () -> None
+        for logger in self.all_loggers():
+            # The `handlers` attribute is undocumented, but see comment on
+            # `all_loggers`.
+            for handler in logger.handlers:
+                assert not isinstance(handler, AdminEmailHandler)

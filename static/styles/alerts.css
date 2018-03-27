@@ -95,7 +95,12 @@
 
 .alert-box .alert .exit::after {
     padding: 10px;
-    content: "×";
+    content: "\d7";
+}
+
+.alert-box .browser-alert .error::before {
+    content: "Browser Error: ";
+    font-weight: 600;
 }
 
 /* animation section */

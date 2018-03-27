@@ -70,6 +70,8 @@ If you want to help make Zulip more accessible, here is a list of the
 For more information about making Zulip accessible to as many users as
 possible, the following resources may be useful.
 
+* [Font Awesome accessibility guide](http://fontawesome.io/accessibility/),
+  which is especially helpful since Zulip uses Font Awesome for its icons.
 * [Web Content Accessibility Guidelines (WCAG) 2.0](https://www.w3.org/TR/WCAG/)
 * [WAI-ARIA](https://www.w3.org/WAI/intro/aria) - Web Accessibility Initiative
   Accessible Rich Internet Application Suite
@@ -80,4 +82,4 @@ possible, the following resources may be useful.
 
 [chrome-webstore]: https://chrome.google.com/webstore/detail/accessibility-developer-t/fpkknkljclfencbdbgkenhalefipecmb
 [openedx-guidelines]: http://edx.readthedocs.io/projects/edx-developer-guide/en/latest/conventions/accessibility.html
-[accessibility-issues]: https://github.com/zulip/zulip/issues?q=is%3Aissue+is%3Aopen+label%3Aaccessibility
+[accessibility-issues]: https://github.com/zulip/zulip/issues?q=is%3Aissue+is%3Aopen+label%3A%22area%3A%20accessibility%22

@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-from __future__ import print_function
 import datetime
 from boto.s3.key import Key
 from boto.s3.connection import S3Connection
@@ -17,17 +15,15 @@ import ujson
 import shutil
 import subprocess
 import tempfile
-from zerver.lib.avatar_hash import user_avatar_hash
+from zerver.lib.avatar_hash import user_avatar_hash, user_avatar_path_from_ids
 from zerver.lib.create_user import random_api_key
 from zerver.models import UserProfile, Realm, Client, Huddle, Stream, \
     UserMessage, Subscription, Message, RealmEmoji, RealmFilter, \
     RealmDomain, Recipient, DefaultStream, get_user_profile_by_id, \
     UserPresence, UserActivity, UserActivityInterval, \
-    get_user_profile_by_email, \
     get_display_recipient, Attachment, get_system_bot
 from zerver.lib.parallel import run_parallel
 from zerver.lib.utils import mkdir_p
-from six.moves import range
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # Custom mypy types follow:
@@ -77,8 +73,7 @@ ALL_ZERVER_TABLES = [
     'zerver_realmemoji',
     'zerver_realmfilter',
     'zerver_recipient',
-    'zerver_referral',
-    'zerver_scheduledjob',
+    'zerver_scheduledemail',
     'zerver_stream',
     'zerver_subscription',
     'zerver_useractivity',
@@ -97,8 +92,7 @@ NON_EXPORTED_TABLES = [
     'zerver_preregistrationuser',
     'zerver_preregistrationuser_streams',
     'zerver_pushdevicetoken',
-    'zerver_referral',
-    'zerver_scheduledjob',
+    'zerver_scheduledemail',
     'zerver_userprofile_groups',
     'zerver_userprofile_user_permissions',
 ]
@@ -142,7 +136,7 @@ def sanity_check_output(data):
 
     for table in tables:
         if table not in data:
-            logging.warn('??? NO DATA EXPORTED FOR TABLE %s!!!' % (table,))
+            logging.warning('??? NO DATA EXPORTED FOR TABLE %s!!!' % (table,))
 
 def write_data_to_file(output_file, data):
     # type: (Path, Any) -> None
@@ -159,15 +153,14 @@ def make_raw(query, exclude=None):
     for instance in query:
         data = model_to_dict(instance, exclude=exclude)
         """
-        In Django 1.10, model_to_dict resolves ManyToManyField as a QuerySet.
-        Previously, we used to get primary keys. Following code converts the
-        QuerySet into primary keys.
-        For reference: https://www.mail-archive.com/django-updates@googlegroups.com/msg163020.html
+        In Django 1.11.5, model_to_dict evaluates the QuerySet of
+        many-to-many field to give us a list of instances. We require
+        a list of primary keys, so we get the primary keys from the
+        instances below.
         """
         for field in instance._meta.many_to_many:
             value = data[field.name]
-            if isinstance(value, QuerySet):
-                data[field.name] = [row.pk for row in value]
+            data[field.name] = [row.id for row in value]
 
         rows.append(data)
 
@@ -340,7 +333,7 @@ def export_from_config(response, config, seed_object=None, context=None):
         rows = list(query)
 
     elif config.id_source:
-        # In this mode,  we are the figurative Blog, and we now
+        # In this mode, we are the figurative Blog, and we now
         # need to look at the current response to get all the
         # blog ids from the Article rows we fetched previously.
         model = config.model
@@ -871,9 +864,9 @@ def export_files_from_s3(realm, bucket_name, output_dir, processing_avatars=Fals
     if processing_avatars:
         bucket_list = bucket.list()
         for user_profile in UserProfile.objects.filter(realm=realm):
-            avatar_hash = user_avatar_hash(user_profile.email)
-            avatar_hash_values.add(avatar_hash)
-            avatar_hash_values.add(avatar_hash + ".original")
+            avatar_path = user_avatar_path_from_ids(user_profile.id, realm.id)
+            avatar_hash_values.add(avatar_path)
+            avatar_hash_values.add(avatar_path + ".original")
             user_ids.add(user_profile.id)
     else:
         bucket_list = bucket.list(prefix="%s/" % (realm.id,))
@@ -983,13 +976,13 @@ def export_avatars_from_local(realm, local_dir, output_dir):
         if user.avatar_source == UserProfile.AVATAR_FROM_GRAVATAR:
             continue
 
-        avatar_hash = user_avatar_hash(user.email)
-        wildcard = os.path.join(local_dir, avatar_hash + '.*')
+        avatar_path = user_avatar_path_from_ids(user.id, realm.id)
+        wildcard = os.path.join(local_dir, avatar_path + '.*')
 
         for local_path in glob.glob(wildcard):
             logging.info('Copying avatar file for user %s from %s' % (
                 user.email, local_path))
-            fn = os.path.basename(local_path)
+            fn = os.path.relpath(local_path, local_dir)
             output_path = os.path.join(output_dir, fn)
             mkdir_p(str(os.path.dirname(output_path)))
             subprocess.check_call(["cp", "-a", str(local_path), str(output_path)])
@@ -1300,6 +1293,15 @@ def fix_bitfield_keys(data, table, field_name):
         item[field_name] = item[field_name + '_mask']
         del item[field_name + '_mask']
 
+def fix_realm_authentication_bitfield(data, table, field_name):
+    # type: (TableData, TableName, Field) -> None
+    """Used to fixup the authentication_methods bitfield to be a string"""
+    for item in data[table]:
+        values_as_bitstring = ''.join(['1' if field[1] else '0' for field in
+                                       item[field_name]])
+        values_as_int = int(values_as_bitstring, 2)
+        item[field_name] = values_as_int
+
 def bulk_import_model(data, model, table, dump_file_id=None):
     # type: (TableData, Any, TableName, str) -> None
     # TODO, deprecate dump_file_id
@@ -1330,10 +1332,10 @@ def import_uploads_local(import_dir, processing_avatars=False):
 
     for record in records:
         if processing_avatars:
-            # For avatars, we need to rehash the user's email with the
+            # For avatars, we need to rehash the user ID with the
             # new server's avatar salt
-            avatar_hash = user_avatar_hash(record['user_profile_email'])
-            file_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars", avatar_hash)
+            avatar_path = user_avatar_path_from_ids(record['user_profile_id'], record['realm_id'])
+            file_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars", avatar_path)
             if record['s3_path'].endswith('.original'):
                 file_path += '.original'
             else:
@@ -1361,8 +1363,8 @@ def import_uploads_s3(bucket_name, import_dir, processing_avatars=False):
         if processing_avatars:
             # For avatars, we need to rehash the user's email with the
             # new server's avatar salt
-            avatar_hash = user_avatar_hash(record['user_profile_email'])
-            key.key = avatar_hash
+            avatar_path = user_avatar_path_from_ids(record['user_profile_id'], record['realm_id'])
+            key.key = avatar_path
             if record['s3_path'].endswith('.original'):
                 key.key += '.original'
         else:
@@ -1431,6 +1433,7 @@ def do_import_realm(import_dir):
 
     convert_to_id_fields(data, 'zerver_realm', 'notifications_stream')
     fix_datetime_fields(data, 'zerver_realm')
+    fix_realm_authentication_bitfield(data, 'zerver_realm', 'authentication_methods')
     realm = Realm(**data['zerver_realm'][0])
     if realm.notifications_stream_id is not None:
         notifications_stream_id = int(realm.notifications_stream_id)  # type: Optional[int]
@@ -1457,8 +1460,8 @@ def do_import_realm(import_dir):
     # Remap the user IDs for notification_bot and friends to their
     # appropriate IDs on this server
     for item in data['zerver_userprofile_crossrealm']:
-        logging.info("Adding to ID map: %s %s" % (item['id'], get_user_profile_by_email(item['email']).id))
-        new_user_id = get_user_profile_by_email(item['email']).id
+        logging.info("Adding to ID map: %s %s" % (item['id'], get_system_bot(item['email']).id))
+        new_user_id = get_system_bot(item['email']).id
         update_id_map(table='user_profile', old_id=item['id'], new_id=new_user_id)
 
     # Merge in zerver_userprofile_mirrordummy

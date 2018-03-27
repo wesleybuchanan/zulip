@@ -1,7 +1,7 @@
-from __future__ import absolute_import
 
 from django import forms
 from django.conf import settings
+from django.contrib.auth import authenticate
 from django.contrib.auth.forms import SetPasswordForm, AuthenticationForm, \
     PasswordResetForm
 from django.core.exceptions import ValidationError
@@ -9,17 +9,24 @@ from django.core.urlresolvers import reverse
 from django.core.validators import validate_email
 from django.db.models.query import QuerySet
 from django.utils.translation import ugettext as _
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.sites.shortcuts import get_current_site
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.http import HttpRequest
 from jinja2 import Markup as mark_safe
 
-from zerver.lib.actions import do_change_password, is_inactive, user_email_is_unique
+from zerver.lib.actions import do_change_password, user_email_is_unique, \
+    validate_email_for_realm
 from zerver.lib.name_restrictions import is_reserved_subdomain, is_disposable_domain
 from zerver.lib.request import JsonableError
+from zerver.lib.send_email import send_email, FromAddress
+from zerver.lib.subdomains import get_subdomain, check_subdomain, is_root_domain_available
 from zerver.lib.users import check_full_name
-from zerver.lib.utils import get_subdomain, check_subdomain
 from zerver.models import Realm, get_user_profile_by_email, UserProfile, \
-    get_realm_by_email_domain, get_realm, \
-    get_unique_open_realm, email_to_domain, email_allowed_for_realm
-from zproject.backends import password_auth_enabled
+    get_realm, email_to_domain, email_allowed_for_realm
+from zproject.backends import email_auth_enabled
 
 import logging
 import re
@@ -33,7 +40,7 @@ MIT_VALIDATION_ERROR = u'That user does not exist at MIT or is a ' + \
                        u'<a href="mailto:support@zulipchat.com">contact us</a>.'
 WRONG_SUBDOMAIN_ERROR = "Your Zulip account is not a member of the " + \
                         "organization associated with this subdomain.  " + \
-                        "Please contact %s with any questions!" % (settings.ZULIP_ADMINISTRATOR,)
+                        "Please contact %s with any questions!" % (FromAddress.SUPPORT,)
 
 def email_is_not_mit_mailing_list(email):
     # type: (Text) -> None
@@ -49,66 +56,81 @@ def email_is_not_mit_mailing_list(email):
             else:
                 raise
 
+def check_subdomain_available(subdomain):
+    # type: (str) -> None
+    error_strings = {
+        'too short': _("Subdomain needs to have length 3 or greater."),
+        'extremal dash': _("Subdomain cannot start or end with a '-'."),
+        'bad character': _("Subdomain can only have lowercase letters, numbers, and '-'s."),
+        'unavailable': _("Subdomain unavailable. Please choose a different one.")}
+
+    if subdomain == Realm.SUBDOMAIN_FOR_ROOT_DOMAIN:
+        if is_root_domain_available():
+            return
+        raise ValidationError(error_strings['unavailable'])
+    if len(subdomain) < 3:
+        raise ValidationError(error_strings['too short'])
+    if subdomain[0] == '-' or subdomain[-1] == '-':
+        raise ValidationError(error_strings['extremal dash'])
+    if not re.match('^[a-z0-9-]*$', subdomain):
+        raise ValidationError(error_strings['bad character'])
+    if is_reserved_subdomain(subdomain) or \
+       get_realm(subdomain) is not None:
+        raise ValidationError(error_strings['unavailable'])
+
 class RegistrationForm(forms.Form):
     MAX_PASSWORD_LENGTH = 100
-    full_name = forms.CharField(max_length=100)
+    full_name = forms.CharField(max_length=UserProfile.MAX_NAME_LENGTH)
     # The required-ness of the password field gets overridden if it isn't
     # actually required for a realm
-    password = forms.CharField(widget=forms.PasswordInput, max_length=MAX_PASSWORD_LENGTH,
-                               required=False)
-    realm_name = forms.CharField(max_length=Realm.MAX_REALM_NAME_LENGTH, required=False)
+    password = forms.CharField(widget=forms.PasswordInput, max_length=MAX_PASSWORD_LENGTH)
     realm_subdomain = forms.CharField(max_length=Realm.MAX_REALM_SUBDOMAIN_LENGTH, required=False)
-    realm_org_type = forms.ChoiceField(((Realm.COMMUNITY, 'Community'),
-                                        (Realm.CORPORATE, 'Corporate')),
-                                       initial=Realm.COMMUNITY, required=False)
 
-    if settings.TERMS_OF_SERVICE:
-        terms = forms.BooleanField(required=True)
+    def __init__(self, *args, **kwargs):
+        # type: (*Any, **Any) -> None
+
+        # Since the superclass doesn't except random extra kwargs, we
+        # remove it from the kwargs dict before initializing.
+        self.realm_creation = kwargs['realm_creation']
+        del kwargs['realm_creation']
+
+        super(RegistrationForm, self).__init__(*args, **kwargs)
+        if settings.TERMS_OF_SERVICE:
+            self.fields['terms'] = forms.BooleanField(required=True)
+        self.fields['realm_name'] = forms.CharField(
+            max_length=Realm.MAX_REALM_NAME_LENGTH,
+            required=self.realm_creation)
 
     def clean_full_name(self):
         # type: () -> Text
         try:
             return check_full_name(self.cleaned_data['full_name'])
         except JsonableError as e:
-            raise ValidationError(e.error)
+            raise ValidationError(e.msg)
 
     def clean_realm_subdomain(self):
         # type: () -> str
-        if settings.REALMS_HAVE_SUBDOMAINS:
-            error_strings = {
-                'too short': _("Subdomain needs to have length 3 or greater."),
-                'extremal dash': _("Subdomain cannot start or end with a '-'."),
-                'bad character': _("Subdomain can only have lowercase letters, numbers, and '-'s."),
-                'unavailable': _("Subdomain unavailable. Please choose a different one.")}
-        else:
-            error_strings = {
-                'too short': _("Short name needs at least 3 characters."),
-                'extremal dash': _("Short name cannot start or end with a '-'."),
-                'bad character': _("Short name can only have lowercase letters, numbers, and '-'s."),
-                'unavailable': _("Short name unavailable. Please choose a different one.")}
+        if not self.realm_creation:
+            # This field is only used if realm_creation
+            return ""
+
         subdomain = self.cleaned_data['realm_subdomain']
-        if not subdomain:
-            return ''
-        if len(subdomain) < 3:
-            raise ValidationError(error_strings['too short'])
-        if subdomain[0] == '-' or subdomain[-1] == '-':
-            raise ValidationError(error_strings['extremal dash'])
-        if not re.match('^[a-z0-9-]*$', subdomain):
-            raise ValidationError(error_strings['bad character'])
-        if is_reserved_subdomain(subdomain) or \
-           get_realm(subdomain) is not None:
-            raise ValidationError(error_strings['unavailable'])
+        if 'realm_in_root_domain' in self.data:
+            subdomain = Realm.SUBDOMAIN_FOR_ROOT_DOMAIN
+
+        check_subdomain_available(subdomain)
         return subdomain
 
 class ToSForm(forms.Form):
     terms = forms.BooleanField(required=True)
 
 class HomepageForm(forms.Form):
-    email = forms.EmailField(validators=[is_inactive])
+    email = forms.EmailField()
 
     def __init__(self, *args, **kwargs):
         # type: (*Any, **Any) -> None
         self.realm = kwargs.pop('realm', None)
+        self.from_multiuse_invite = kwargs.pop('from_multiuse_invite', False)
         super(HomepageForm, self).__init__(*args, **kwargs)
 
     def clean_email(self):
@@ -117,25 +139,16 @@ class HomepageForm(forms.Form):
         allowed to join the realm they are trying to join."""
         email = self.cleaned_data['email']
 
-        if get_unique_open_realm():
-            return email
-
         # Otherwise, the user is trying to join a specific realm.
         realm = self.realm
-        if realm is None and not settings.REALMS_HAVE_SUBDOMAINS:
-            realm = get_realm_by_email_domain(email)
+        from_multiuse_invite = self.from_multiuse_invite
 
         if realm is None:
-            if settings.REALMS_HAVE_SUBDOMAINS:
-                raise ValidationError(_("The organization you are trying to "
-                                        "join using {email} does not "
-                                        "exist.").format(email=email))
-            else:
-                raise ValidationError(_("Your email address, {email}, does not "
-                                        "correspond to any existing "
-                                        "organization.").format(email=email))
+            raise ValidationError(_("The organization you are trying to "
+                                    "join using {email} does not "
+                                    "exist.").format(email=email))
 
-        if realm.invite_required:
+        if not from_multiuse_invite and realm.invite_required:
             raise ValidationError(_("Please request an invite for {email} "
                                     "from the organization "
                                     "administrator.").format(email=email))
@@ -145,6 +158,8 @@ class HomepageForm(forms.Form):
                 _("Your email address, {email}, is not in one of the domains "
                   "that are allowed to register for accounts in this organization.").format(
                       string_id=realm.string_id, email=email))
+
+        validate_email_for_realm(realm, email)
 
         if realm.is_zephyr_mirror_realm:
             email_is_not_mit_mailing_list(email)
@@ -176,7 +191,7 @@ class ZulipPasswordResetForm(PasswordResetForm):
         users who don't have a usable password to reset their
         passwords.
         """
-        if not password_auth_enabled:
+        if not email_auth_enabled():
             logging.info("Password reset attempted for %s even though password auth is disabled." % (email,))
             return []
         result = UserProfile.objects.filter(email__iexact=email, is_active=True,
@@ -185,47 +200,70 @@ class ZulipPasswordResetForm(PasswordResetForm):
             logging.info("Password reset attempted for %s; no active account." % (email,))
         return result
 
-    def send_mail(self, subject_template_name, email_template_name,
-                  context, from_email, to_email, html_email_template_name=None):
-        # type: (str, str, Dict[str, Any], str, str, str) -> None
+    def send_mail(self, context, from_email, to_email):
+        # type: (Dict[str, Any], str, str) -> None
         """
         Currently we don't support accounts in multiple subdomains using
-        a single email addresss. We override this function so that we do
+        a single email address. We override this function so that we do
         not send a reset link to an email address if the reset attempt is
         done on the subdomain which does not match user.realm.subdomain.
 
         Once we start supporting accounts with the same email in
-        multiple subdomains, we may be able to delete or refactor this
-        function.
+        multiple subdomains, we may be able to refactor this function.
+
+        A second reason we override this function is so that we can send
+        the mail through the functions in zerver.lib.send_email, to match
+        how we send all other mail in the codebase.
         """
-        user_realm = get_user_profile_by_email(to_email).realm
+        user = get_user_profile_by_email(to_email)
         attempted_subdomain = get_subdomain(getattr(self, 'request'))
         context['attempted_realm'] = False
-        if not check_subdomain(user_realm.subdomain, attempted_subdomain):
+        if not check_subdomain(user.realm.subdomain, attempted_subdomain):
             context['attempted_realm'] = get_realm(attempted_subdomain)
 
-        super(ZulipPasswordResetForm, self).send_mail(
-            subject_template_name,
-            email_template_name,
-            context,
-            from_email,
-            to_email,
-            html_email_template_name=html_email_template_name
-        )
+        send_email('zerver/emails/password_reset', to_user_id=user.id,
+                   from_name="Zulip Account Security",
+                   from_address=FromAddress.NOREPLY, context=context)
 
-    def save(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        """Currently we don't support accounts in multiple subdomains using
-        a single email addresss. We override this function so that we can
-        inject request parameter in context. This parameter will be used
-        by send_mail function.
-
-        Once we start supporting accounts with the same email in
-        multiple subdomains, we may be able to delete or refactor this
-        function.
+    def save(self,
+             subject_template_name='registration/password_reset_subject.txt',  # type: Text
+             email_template_name='registration/password_reset_email.html',  # type: Text
+             use_https=False,  # type: bool
+             token_generator=default_token_generator,  # type: PasswordResetTokenGenerator
+             from_email=None,  # type: Optional[Text]
+             request=None,  # type: HttpRequest
+             html_email_template_name=None,  # type: Optional[Text]
+             extra_email_context=None  # type: Optional[Dict[str, Any]]
+             ):
+        # type: (...) -> None
         """
-        setattr(self, 'request', kwargs.get('request'))
-        super(ZulipPasswordResetForm, self).save(*args, **kwargs)
+        Currently we don't support accounts in multiple subdomains using a
+        single email addresss. Once we start supporting accounts with the same
+        email in multiple subdomains, we may be able to delete or refactor this
+        function.
+
+        Generates a one-use only link for resetting password and sends to the
+        user.
+
+        Note: We ignore the various email template arguments (those
+        are an artifact of using Django's password reset framework)
+
+        """
+        setattr(self, 'request', request)
+        email = self.cleaned_data["email"]
+        users = list(self.get_users(email))
+
+        for user in users:
+            context = {
+                'email': email,
+                'uid': urlsafe_base64_encode(force_bytes(user.id)),
+                'user': user,
+                'token': token_generator.make_token(user),
+                'protocol': 'https' if use_https else 'http',
+            }
+            if extra_email_context is not None:
+                context.update(extra_email_context)
+            self.send_mail(context, from_email, email)
 
 class CreateUserForm(forms.Form):
     full_name = forms.CharField(max_length=100)
@@ -245,7 +283,14 @@ class OurAuthenticationForm(AuthenticationForm):
 
 Please contact %s to reactivate this group.""" % (
                 user_profile.realm.name,
-                settings.ZULIP_ADMINISTRATOR)
+                FromAddress.SUPPORT)
+            raise ValidationError(mark_safe(error_msg))
+
+        if not user_profile.is_active and not user_profile.is_mirror_dummy:
+            error_msg = (
+                u"Sorry for the trouble, but your account has been deactivated. "
+                u"Please contact your organization administrator to reactivate it. "
+                u"If you're not sure who that is, try contacting %s.") % (FromAddress.SUPPORT,)
             raise ValidationError(mark_safe(error_msg))
 
         if not check_subdomain(get_subdomain(self.request), user_profile.realm.subdomain):
@@ -253,6 +298,26 @@ Please contact %s to reactivate this group.""" % (
                             (user_profile.email, get_subdomain(self.request)))
             raise ValidationError(mark_safe(WRONG_SUBDOMAIN_ERROR))
         return email
+
+    def clean(self):
+        # type: () -> Dict[str, Any]
+        username = self.cleaned_data.get('username')
+        password = self.cleaned_data.get('password')
+
+        if username is not None and password:
+            subdomain = get_subdomain(self.request)
+            self.user_cache = authenticate(self.request, username=username, password=password,
+                                           realm_subdomain=subdomain)
+            if self.user_cache is None:
+                raise forms.ValidationError(
+                    self.error_messages['invalid_login'],
+                    code='invalid_login',
+                    params={'username': self.username_field.verbose_name},
+                )
+            else:
+                self.confirm_login_allowed(self.user_cache)
+
+        return self.cleaned_data
 
 class MultiEmailField(forms.Field):
     def to_python(self, emails):

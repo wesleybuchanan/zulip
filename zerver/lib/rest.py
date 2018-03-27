@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 
 from typing import Any, Dict
 
@@ -89,7 +88,7 @@ def rest_dispatch(request, **kwargs):
             # This request  API based authentication.
             target_function = authenticated_rest_api_view()(target_function)
         # /json views (web client) validate with a session token (cookie)
-        elif not request.path.startswith("/api") and request.user.is_authenticated():
+        elif not request.path.startswith("/api") and request.user.is_authenticated:
             # Authenticated via sessions framework, only CSRF check needed
             target_function = csrf_protect(authenticated_json_view(target_function))
 
@@ -98,7 +97,10 @@ def rest_dispatch(request, **kwargs):
         elif request.META.get('HTTP_AUTHORIZATION', None):
             # Wrap function with decorator to authenticate the user before
             # proceeding
-            target_function = authenticated_rest_api_view()(target_function)
+            view_kwargs = {}
+            if 'allow_incoming_webhooks' in view_flags:
+                view_kwargs['is_webhook'] = True
+            target_function = authenticated_rest_api_view(**view_kwargs)(target_function)
         # Pick a way to tell user they're not authed based on how the request was made
         else:
             # If this looks like a request from a top-level page in a

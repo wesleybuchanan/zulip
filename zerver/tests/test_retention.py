@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 import types
 from datetime import datetime, timedelta
 
@@ -11,8 +10,6 @@ from zerver.models import Message, Realm, Recipient, UserProfile, UserMessage, A
 from zerver.lib.retention import get_expired_messages, move_message_to_archive
 
 from typing import Any, List
-
-from six.moves import range
 
 
 class TestRetentionLib(ZulipTestCase):

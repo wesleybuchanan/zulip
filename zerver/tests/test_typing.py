@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 import ujson
-from typing import Any, Dict, List
+from typing import Any, Mapping, List
 from six import string_types
 
 from zerver.lib.test_helpers import tornado_redirected_to_list, get_display_recipient
@@ -67,7 +66,7 @@ class TypingNotificationRecipientsTest(ZulipTestCase):
         expected_recipient_emails = set([user.email for user in expected_recipients])
         expected_recipient_ids = set([user.id for user in expected_recipients])
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post('/api/v1/typing', {'to': recipient.email,
                                                          'op': 'start'},
@@ -97,7 +96,7 @@ class TypingNotificationRecipientsTest(ZulipTestCase):
         expected_recipients = set(recipient) | set([sender])
         expected_recipient_emails = set([user.email for user in expected_recipients])
         expected_recipient_ids = set([user.id for user in expected_recipients])
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post('/api/v1/typing', {'to': ujson.dumps([user.email for user in recipient]),
                                                          'op': 'start'},
@@ -128,7 +127,7 @@ class TypingStartedNotificationTest(ZulipTestCase):
         email = user.email
         expected_recipient_emails = set([email])
         expected_recipient_ids = set([user.id])
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post('/api/v1/typing', {'to': email,
                                                          'op': 'start'},
@@ -160,7 +159,7 @@ class TypingStartedNotificationTest(ZulipTestCase):
         expected_recipient_emails = set([user.email for user in expected_recipients])
         expected_recipient_ids = set([user.id for user in expected_recipients])
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post('/api/v1/typing', {'to': recipient.email,
                                                          'op': 'start'},
@@ -192,7 +191,7 @@ class StoppedTypingNotificationTest(ZulipTestCase):
         expected_recipient_emails = set([email])
         expected_recipient_ids = set([user.id])
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post('/api/v1/typing', {'to': email,
                                                          'op': 'stop'},
@@ -224,7 +223,7 @@ class StoppedTypingNotificationTest(ZulipTestCase):
         expected_recipient_emails = set([user.email for user in expected_recipients])
         expected_recipient_ids = set([user.id for user in expected_recipients])
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post('/api/v1/typing', {'to': recipient.email,
                                                          'op': 'stop'},

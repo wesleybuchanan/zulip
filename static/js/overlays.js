@@ -16,6 +16,10 @@ exports.is_active = function () {
     return !!open_overlay_name;
 };
 
+exports.is_modal_open = function () {
+    return $(".modal").hasClass("in");
+};
+
 exports.info_overlay_open = function () {
     return open_overlay_name === 'informationalOverlays';
 };
@@ -32,6 +36,18 @@ exports.lightbox_open = function () {
     return open_overlay_name === 'lightbox';
 };
 
+exports.drafts_open = function () {
+    return open_overlay_name === 'drafts';
+};
+
+exports.active_modal = function () {
+    if (!exports.is_modal_open()) {
+        blueslip.error("Programming error — Called active_modal when there is no modal open");
+        return;
+    }
+    return $(".modal.in").attr("id");
+};
+
 exports.open_overlay = function (opts) {
     if (!opts.name || !opts.overlay || !opts.on_close) {
         blueslip.error('Programming error in open_overlay');
@@ -43,6 +59,8 @@ exports.open_overlay = function (opts) {
             ' before closing ' + open_overlay_name);
         return;
     }
+
+    blueslip.debug('open overlay: ' + opts.name);
 
     // Our overlays are kind of crufty...we have an HTML id
     // attribute for them and then a data-overlay attribute for
@@ -56,22 +74,56 @@ exports.open_overlay = function (opts) {
     active_overlay = opts.overlay;
     opts.overlay.addClass('show');
 
+    opts.overlay.attr("aria-hidden", "false");
+    $('.app').attr("aria-hidden", "true");
+    $('.fixed-app').attr("aria-hidden", "true");
+    $('.header').attr("aria-hidden", "true");
+
     close_handler = function () {
         opts.on_close();
         reset_state();
     };
 };
 
-exports.close_overlay = function (name) {
-    if (name !== open_overlay_name) {
-        blueslip.error("Trying to close " + name + " when " + open_overlay_name + " is open." );
+exports.open_modal = function (name) {
+    if (name === undefined) {
+        blueslip.error('Undefined name was passed into open_modal');
         return;
     }
 
+    if (exports.is_modal_open()) {
+        blueslip.error('open_modal() was called while ' + exports.active_modal() +
+            ' modal was open.');
+        return;
+    }
+
+    blueslip.debug('open modal: ' + name);
+
+    $("#" + name).modal("show").attr("aria-hidden", false);
+};
+
+exports.close_overlay = function (name) {
+    if (name !== open_overlay_name) {
+        blueslip.error("Trying to close " + name + " when " + open_overlay_name + " is open.");
+        return;
+    }
+
+    if (name === undefined) {
+        blueslip.error('Undefined name was passed into close_overlay');
+        return;
+    }
+
+    blueslip.debug('close overlay: ' + name);
+
     active_overlay.removeClass("show");
 
+    active_overlay.attr("aria-hidden", "true");
+    $('.app').attr("aria-hidden", "false");
+    $('.fixed-app').attr("aria-hidden", "false");
+    $('.header').attr("aria-hidden", "false");
+
     if (!close_handler) {
-        blueslip.error("Overlay close handler for " + name + " not properly setup." );
+        blueslip.error("Overlay close handler for " + name + " not properly setup.");
         return;
     }
 
@@ -85,6 +137,37 @@ exports.close_active = function () {
     }
 
     exports.close_overlay(open_overlay_name);
+};
+
+exports.close_modal = function (name) {
+    if (name === undefined) {
+        blueslip.error('Undefined name was passed into close_modal');
+        return;
+    }
+
+    if (!exports.is_modal_open()) {
+        blueslip.warn('close_active_modal() called without checking is_modal_open()');
+        return;
+    }
+
+    if (exports.active_modal() !== name) {
+        blueslip.error("Trying to close " + name +
+            " modal when " + exports.active_modal() + " is open.");
+        return;
+    }
+
+    blueslip.debug('close modal: ' + name);
+
+    $("#" + name).modal("hide").attr("aria-hidden", true);
+};
+
+exports.close_active_modal = function () {
+    if (!exports.is_modal_open()) {
+        blueslip.warn('close_active_modal() called without checking is_modal_open()');
+        return;
+    }
+
+    $(".modal.in").modal("hide").attr("aria-hidden", true);
 };
 
 exports.close_for_hash_change = function () {
@@ -108,7 +191,7 @@ $(function () {
 
         // if the target is not the .overlay element, search up the node tree
         // until it is found.
-        if ($target.is(".exit, .exit-sign, .overlay-content")) {
+        if ($target.is(".exit, .exit-sign, .overlay-content, .exit span")) {
             $target = $target.closest("[data-overlay]");
         } else if (!$target.is(".overlay")) {
             // not a valid click target then.

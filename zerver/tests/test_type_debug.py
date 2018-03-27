@@ -1,4 +1,3 @@
-from __future__ import print_function
 
 import sys
 from unittest import TestCase
@@ -49,7 +48,7 @@ class TypesPrintTest(TestCase):
         def empty_func():
             # type: () -> None
             pass
-        self.check_signature("empty_func() -> None", None, empty_func)  # type: ignore # https://github.com/python/mypy/issues/1932
+        self.check_signature("empty_func() -> None", None, empty_func)
         self.check_signature("<lambda>() -> None", None, (lambda: None))  # type: ignore # https://github.com/python/mypy/issues/1932
 
     def test_basic(self):

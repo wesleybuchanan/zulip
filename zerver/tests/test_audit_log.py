@@ -4,7 +4,8 @@ from django.utils.timezone import now as timezone_now
 from zerver.lib.actions import do_create_user, do_deactivate_user, \
     do_activate_user, do_reactivate_user, do_change_password, \
     do_change_user_email, do_change_avatar_fields, do_change_bot_owner, \
-    do_regenerate_api_key, do_change_full_name, do_change_tos_version
+    do_regenerate_api_key, do_change_full_name, do_change_tos_version, \
+    bulk_add_subscriptions, bulk_remove_subscriptions
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.models import RealmAuditLog, get_realm
 
@@ -50,6 +51,10 @@ class TestRealmAuditLog(ZulipTestCase):
         self.assertEqual(RealmAuditLog.objects.filter(event_type='user_email_changed',
                                                       event_time__gte=now).count(), 1)
         self.assertEqual(email, user.email)
+
+        # Test the RealmAuditLog stringification
+        audit_entry = RealmAuditLog.objects.get(event_type='user_email_changed', event_time__gte=now)
+        self.assertTrue(str(audit_entry).startswith("<RealmAuditLog: <UserProfile: test@example.com <Realm: zulip 1>> user_email_changed "))
 
     def test_change_avatar_source(self):
         # type: () -> None
@@ -102,3 +107,23 @@ class TestRealmAuditLog(ZulipTestCase):
         self.assertEqual(RealmAuditLog.objects.filter(event_type='user_api_key_changed',
                                                       event_time__gte=now).count(), 1)
         self.assertTrue(user.api_key)
+
+    def test_subscriptions(self):
+        # type: () -> None
+        now = timezone_now()
+        user = [self.example_user('hamlet')]
+        stream = [self.make_stream('test_stream')]
+
+        bulk_add_subscriptions(stream, user)
+        subscription_creation_logs = RealmAuditLog.objects.filter(event_type='subscription_created',
+                                                                  event_time__gte=now)
+        self.assertEqual(subscription_creation_logs.count(), 1)
+        self.assertEqual(subscription_creation_logs[0].modified_stream.id, stream[0].id)
+        self.assertEqual(subscription_creation_logs[0].modified_user, user[0])
+
+        bulk_remove_subscriptions(user, stream)
+        subscription_deactivation_logs = RealmAuditLog.objects.filter(event_type='subscription_deactivated',
+                                                                      event_time__gte=now)
+        self.assertEqual(subscription_deactivation_logs.count(), 1)
+        self.assertEqual(subscription_deactivation_logs[0].modified_stream.id, stream[0].id)
+        self.assertEqual(subscription_deactivation_logs[0].modified_user, user[0])

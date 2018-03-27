@@ -32,11 +32,11 @@
     }
 
     .column-right.expanded .right-sidebar {
-        background: rgba(255,255,255,1);
-        box-shadow: 0px -2px 3px 0px rgba(0,0,0,0.1);
-        border-left: 1px solid #dddddd;
+        background: hsla(0, 0%, 100%, 1.0);
+        box-shadow: 0px -2px 3px 0px hsla(0, 0%, 0%, 0.1);
+        border-left: 1px solid hsl(0, 0%, 86%);
         margin-top: 40px;
-        padding-top: 10px;
+        padding: 10px 15px 0px 15px;
         height: 100%;
         right: 0px;
     }
@@ -74,9 +74,9 @@
 
     .nav .dropdown-menu {
         min-width: 180px;
-        -webkit-box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.2);
-        -moz-box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.2);
-        box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.2);
+        -webkit-box-shadow: 0px 0px 5px hsla(0, 0%, 0%, 0.2);
+        -moz-box-shadow: 0px 0px 5px hsla(0, 0%, 0%, 0.2);
+        box-shadow: 0px 0px 5px hsla(0, 0%, 0%, 0.2);
     }
 
     .nav .dropdown-menu:after {
@@ -100,6 +100,11 @@
         padding: 0px;
     }
 
+    .input-append .user-list-filter {
+        /* input should be 100% - 6px padding x2 - 1px border x2. */
+        width: calc(100% - 12px - 2px);
+    }
+
     .screen-narrow-show {
         display: inline-block !important;
     }
@@ -117,9 +122,9 @@
     }
 
     .column-left.expanded .left-sidebar {
-        background: rgba(255,255,255,1);
-        box-shadow: 0px 2px 3px 0px rgba(0,0,0,0.1);
-        border-right: 1px solid #dddddd;
+        background: hsla(0, 0%, 100%, 1.0);
+        box-shadow: 0px 2px 3px 0px hsla(0, 0%, 0%, 0.1);
+        border-right: 1px solid hsl(0, 0%, 86%);
         margin-top: 40px;
         padding-top: 10px;
         height: 100%;
@@ -214,18 +219,7 @@
     .column-left.expanded .bottom_sidebar {
         margin-top: 10px;
     }
-}
 
-@media (max-width: 350px) {
-    html {
-        overflow-x: hidden;
-    }
-    .stream_row .description {
-        display: none;
-    }
-}
-
-@media (max-width: 500px) {
     .compose_stream_button,
     .compose_private_button {
         padding: 5px 10px 5px 10px;
@@ -336,7 +330,34 @@
     .message_content {
         padding-right: 50px;
     }
+}
 
+@media (max-width: 370px) {
+    #subject.recipient_box {
+        width: calc(100% - 175px);
+        min-width: 95px;
+    }
+
+    .compose-content {
+        margin-right: 5px;
+        margin-left: 5px;
+    }
+}
+
+@media (max-width: 350px) {
+    html {
+        overflow-x: hidden;
+    }
+    .stream_row .description {
+        display: none;
+    }
+
+    body,
+    html,
+    .app-main,
+    .header-main {
+        min-width: 320px;
+    }
 }
 
 @media only screen and (min-device-width: 300px) and (max-device-width: 700px) {

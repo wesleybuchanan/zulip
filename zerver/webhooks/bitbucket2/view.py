@@ -1,12 +1,11 @@
 # Webhooks for external integrations.
-from __future__ import absolute_import
 import re
 from functools import partial
 from six.moves import zip
 from typing import Any, Callable, Dict, List, Optional, Text
 from django.http import HttpRequest, HttpResponse
 from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success, json_error
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
 from zerver.models import UserProfile
@@ -44,25 +43,22 @@ class UnknownTriggerType(Exception):
 def api_bitbucket2_webhook(request, user_profile, payload=REQ(argument_type='body'),
                            stream=REQ(default='bitbucket'), branches=REQ(default=None)):
     # type: (HttpRequest, UserProfile, Dict[str, Any], str, Optional[Text]) -> HttpResponse
-    try:
-        type = get_type(request, payload)
-        if type != 'push':
-            subject = get_subject_based_on_type(payload, type)
-            body = get_body_based_on_type(type)(payload)
-            check_send_message(user_profile, request.client, 'stream', [stream], subject, body)
-        else:
-            branch = get_branch_name_for_push_event(payload)
-            if branch and branches:
-                if branches.find(branch) == -1:
-                    return json_success()
-            subjects = get_push_subjects(payload)
-            bodies_list = get_push_bodies(payload)
-            for body, subject in zip(bodies_list, subjects):
-                check_send_message(user_profile, request.client, 'stream', [stream], subject, body)
-
-    except KeyError as e:
-        return json_error(_("Missing key {} in JSON").format(str(e)))
-
+    type = get_type(request, payload)
+    if type != 'push':
+        subject = get_subject_based_on_type(payload, type)
+        body = get_body_based_on_type(type)(payload)
+        check_send_stream_message(user_profile, request.client,
+                                  stream, subject, body)
+    else:
+        branch = get_branch_name_for_push_event(payload)
+        if branch and branches:
+            if branches.find(branch) == -1:
+                return json_success()
+        subjects = get_push_subjects(payload)
+        bodies_list = get_push_bodies(payload)
+        for body, subject in zip(bodies_list, subjects):
+            check_send_stream_message(user_profile, request.client,
+                                      stream, subject, body)
     return json_success()
 
 def get_subject_for_branch_specified_events(payload, branch_name=None):
@@ -137,8 +133,10 @@ def get_type(request, payload):
     raise UnknownTriggerType("We don't support {} event type".format(event_key))
 
 def get_body_based_on_type(type):
-    # type: (str) -> Any
-    return GET_SINGLE_MESSAGE_BODY_DEPENDING_ON_TYPE_MAPPER.get(type)
+    # type: (str) -> Callable[[Dict[str, Any]], Text]
+    fn = GET_SINGLE_MESSAGE_BODY_DEPENDING_ON_TYPE_MAPPER.get(type)
+    assert callable(fn)  # type parameter should be pre-checked, so not None
+    return fn
 
 def get_push_bodies(payload):
     # type: (Dict[str, Any]) -> List[Text]

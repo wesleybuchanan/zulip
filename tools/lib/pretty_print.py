@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-from __future__ import print_function
 
 from typing import Any, Dict, List
 
@@ -8,7 +6,6 @@ from .template_parser import (
     Token,
     is_django_block_tag,
 )
-from six.moves import range
 import subprocess
 
 def pretty_print_html(html, num_spaces=4):
@@ -30,7 +27,8 @@ def pretty_print_html(html, num_spaces=4):
         line=-1,
         token_kind='html_start',
         tag='html',
-        extra_indent=0)  # type: Dict[str, Any]
+        extra_indent=0,
+        ignore_lines=[])  # type: Dict[str, Any]
     stack.append(info)
 
     # Our main job is to figure out offsets that we use to nudge lines
@@ -79,7 +77,8 @@ def pretty_print_html(html, num_spaces=4):
                         extra_indent_prev=extra_indent,
                         adjustment=adjustment,
                         indenting=True,
-                        adjust_offset_until=token.line
+                        adjust_offset_until=token.line,
+                        ignore_lines=[]
                     )
                     if token.kind in ('handlebars_start', 'django_start'):
                         info.update(dict(depth=new_depth - 1, indenting=False))
@@ -91,7 +90,8 @@ def pretty_print_html(html, num_spaces=4):
                         line=token.line,
                         tag=token.tag,
                         token_kind=token.kind,
-                        extra_indent=stack[-1]['extra_indent']
+                        extra_indent=stack[-1]['extra_indent'],
+                        ignore_lines=[]
                     )
                 stack.append(info)
         elif token.kind in ('html_end', 'handlebars_end',
@@ -107,6 +107,8 @@ def pretty_print_html(html, num_spaces=4):
                 if token.tag == 'pre':
                     offsets[start_line] = 0
                     offsets[end_line] = 0
+                    stack[-1]['ignore_lines'].append(start_line)
+                    stack[-1]['ignore_lines'].append(end_line)
                 else:
                     offsets[start_line] = info['offset']
                     line = lines[token.line - 1]
@@ -139,7 +141,8 @@ def pretty_print_html(html, num_spaces=4):
                             offsets[line_num] = offset
                         elif (token.kind in ('handlebars_end', 'django_end') and
                                 info['indenting'] and
-                                line_num < info['adjust_offset_until']):
+                                line_num < info['adjust_offset_until'] and
+                                line_num not in info['ignore_lines']):
                             offsets[line_num] += num_spaces
                 elif token.tag != 'pre':
                     for line_num in range(start_line + 1, end_line):
@@ -149,6 +152,7 @@ def pretty_print_html(html, num_spaces=4):
                     for line_num in range(start_line + 1, end_line):
                         if line_num not in offsets:
                             offsets[line_num] = 0
+                            stack[-1]['ignore_lines'].append(line_num)
 
     # Now that we have all of our offsets calculated, we can just
     # join all our lines together, fixing up offsets as needed.

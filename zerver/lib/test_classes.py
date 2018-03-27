@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-from __future__ import print_function
 from contextlib import contextmanager
 from typing import (cast, Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional,
                     Sized, Tuple, Union, Text)
@@ -36,7 +34,7 @@ from zerver.models import (
     get_stream,
     get_user,
     get_user_profile_by_email,
-    get_realm_by_email_domain,
+    get_realm,
     Client,
     Message,
     Realm,
@@ -63,7 +61,6 @@ from six import binary_type
 from zerver.lib.str_utils import NonBinaryStr
 
 from contextlib import contextmanager
-import six
 
 API_KEYS = {}  # type: Dict[Text, Text]
 
@@ -107,15 +104,23 @@ class ZulipTestCase(TestCase):
     functions have to fake out the linter by using a local variable called
     django_client to fool the regext.
     '''
-    def __init__(self, *args, **kwargs):
-        # type: (*Any, **Any) -> None
-        # This method should be removed when we migrate to version 3 of Python
-        import six
-        if six.PY2:
-            self.assertRaisesRegex = self.assertRaisesRegexp
-        super(ZulipTestCase, self).__init__(*args, **kwargs)
-
+    DEFAULT_SUBDOMAIN = "zulip"
     DEFAULT_REALM = Realm.objects.get(string_id='zulip')
+
+    def set_http_host(self, kwargs):
+        # type: (Dict[str, Any]) -> None
+        if 'subdomain' in kwargs:
+            if kwargs['subdomain'] != "":
+                kwargs["HTTP_HOST"] = "%s.%s" % (kwargs["subdomain"], settings.EXTERNAL_HOST)
+            else:
+                kwargs["HTTP_HOST"] = settings.EXTERNAL_HOST
+            del kwargs['subdomain']
+        elif 'HTTP_HOST' not in kwargs:
+            if self.DEFAULT_SUBDOMAIN == "":
+                kwargs["HTTP_HOST"] = settings.EXTERNAL_HOST
+            else:
+                kwargs["HTTP_HOST"] = "%s.%s" % (self.DEFAULT_SUBDOMAIN,
+                                                 settings.EXTERNAL_HOST,)
 
     @instrument_url
     def client_patch(self, url, info={}, **kwargs):
@@ -125,6 +130,7 @@ class ZulipTestCase(TestCase):
         """
         encoded = urllib.parse.urlencode(info)
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.patch(url, encoded, **kwargs)
 
     @instrument_url
@@ -140,6 +146,7 @@ class ZulipTestCase(TestCase):
         """
         encoded = encode_multipart(BOUNDARY, info)
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.patch(
             url,
             encoded,
@@ -151,28 +158,15 @@ class ZulipTestCase(TestCase):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         encoded = urllib.parse.urlencode(info)
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.put(url, encoded, **kwargs)
-
-    @instrument_url
-    def client_put_multipart(self, url, info={}, **kwargs):
-        # type: (Text, Dict[str, Any], **Any) -> HttpResponse
-        """
-        Use this for put requests that have file uploads or
-        that need some sort of multi-part content.  In the future
-        Django's test client may become a bit more flexible,
-        so we can hopefully eliminate this.  (When you post
-        with the Django test client, it deals with MULTIPART_CONTENT
-        automatically, but not put.)
-        """
-        encoded = encode_multipart(BOUNDARY, info)
-        django_client = self.client  # see WRAPPER_COMMENT
-        return django_client.put(url, encoded, content_type=MULTIPART_CONTENT, **kwargs)
 
     @instrument_url
     def client_delete(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         encoded = urllib.parse.urlencode(info)
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.delete(url, encoded, **kwargs)
 
     @instrument_url
@@ -180,12 +174,22 @@ class ZulipTestCase(TestCase):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         encoded = urllib.parse.urlencode(info)
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.options(url, encoded, **kwargs)
+
+    @instrument_url
+    def client_head(self, url, info={}, **kwargs):
+        # type: (Text, Dict[str, Any], **Any) -> HttpResponse
+        encoded = urllib.parse.urlencode(info)
+        django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
+        return django_client.head(url, encoded, **kwargs)
 
     @instrument_url
     def client_post(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.post(url, info, **kwargs)
 
     @instrument_url
@@ -207,6 +211,7 @@ class ZulipTestCase(TestCase):
     def client_get(self, url, info={}, **kwargs):
         # type: (Text, Dict[str, Any], **Any) -> HttpResponse
         django_client = self.client  # see WRAPPER_COMMENT
+        self.set_http_host(kwargs)
         return django_client.get(url, info, **kwargs)
 
     example_user_map = dict(
@@ -218,6 +223,9 @@ class ZulipTestCase(TestCase):
         AARON=u'AARON@zulip.com',
         aaron=u'aaron@zulip.com',
         ZOE=u'ZOE@zulip.com',
+        webhook_bot=u'webhook-bot@zulip.com',
+        welcome_bot=u'welcome-bot@zulip.com',
+        outgoing_webhook_bot=u'outgoing-webhook@zulip.com'
     )
 
     mit_user_map = dict(
@@ -241,17 +249,17 @@ class ZulipTestCase(TestCase):
     def nonreg_user(self, name):
         # type: (str) -> UserProfile
         email = self.nonreg_user_map[name]
-        return get_user(email, get_realm_by_email_domain(email))
+        return get_user(email, get_realm("zulip"))
 
     def example_user(self, name):
         # type: (str) -> UserProfile
         email = self.example_user_map[name]
-        return get_user_profile_by_email(email)
+        return get_user(email, get_realm('zulip'))
 
     def mit_user(self, name):
         # type: (str) -> UserProfile
         email = self.mit_user_map[name]
-        return get_user_profile_by_email(email)
+        return get_user(email, get_realm('zephyr'))
 
     def nonreg_email(self, name):
         # type: (str) -> Text
@@ -267,14 +275,15 @@ class ZulipTestCase(TestCase):
 
     def notification_bot(self):
         # type: () -> UserProfile
-        return get_user_profile_by_email('notification-bot@zulip.com')
+        return get_user('notification-bot@zulip.com', get_realm('zulip'))
 
-    def login_with_return(self, email, password=None):
-        # type: (Text, Optional[Text]) -> HttpResponse
+    def login_with_return(self, email, password=None, **kwargs):
+        # type: (Text, Optional[Text], **Any) -> HttpResponse
         if password is None:
             password = initial_password(email)
         return self.client_post('/accounts/login/',
-                                {'username': email, 'password': password})
+                                {'username': email, 'password': password},
+                                **kwargs)
 
     def login(self, email, password=None, fails=False):
         # type: (Text, Optional[Text], bool) -> HttpResponse
@@ -289,15 +298,17 @@ class ZulipTestCase(TestCase):
         # type: () -> None
         self.client.logout()
 
-    def register(self, email, password):
-        # type: (Text, Text) -> HttpResponse
-        self.client_post('/accounts/home/', {'email': email})
-        return self.submit_reg_form_for_user(email, password)
+    def register(self, email, password, **kwargs):
+        # type: (Text, Text, **Any) -> HttpResponse
+        self.client_post('/accounts/home/', {'email': email},
+                         **kwargs)
+        return self.submit_reg_form_for_user(email, password, **kwargs)
 
     def submit_reg_form_for_user(self, email, password, realm_name="Zulip Test",
-                                 realm_subdomain="zuliptest", realm_org_type=Realm.COMMUNITY,
-                                 from_confirmation='', full_name=None, timezone=u'', **kwargs):
-        # type: (Text, Text, Optional[Text], Optional[Text], int, Optional[Text], Optional[Text], Optional[Text], **Any) -> HttpResponse
+                                 realm_subdomain="zuliptest",
+                                 from_confirmation='', full_name=None, timezone=u'',
+                                 realm_in_root_domain=None, **kwargs):
+        # type: (Text, Text, Optional[Text], Optional[Text], Optional[Text], Optional[Text], Optional[Text], Optional[Text], **Any) -> HttpResponse
         """
         Stage two of the two-step registration process.
 
@@ -308,17 +319,19 @@ class ZulipTestCase(TestCase):
         """
         if full_name is None:
             full_name = email.replace("@", "_")
-        return self.client_post('/accounts/register/',
-                                {'full_name': full_name,
-                                 'password': password,
-                                 'realm_name': realm_name,
-                                 'realm_subdomain': realm_subdomain,
-                                 'key': find_key_by_email(email),
-                                 'realm_org_type': realm_org_type,
-                                 'timezone': timezone,
-                                 'terms': True,
-                                 'from_confirmation': from_confirmation},
-                                **kwargs)
+        payload = {
+            'full_name': full_name,
+            'password': password,
+            'realm_name': realm_name,
+            'realm_subdomain': realm_subdomain,
+            'key': find_key_by_email(email),
+            'timezone': timezone,
+            'terms': True,
+            'from_confirmation': from_confirmation,
+        }
+        if realm_in_root_domain is not None:
+            payload['realm_in_root_domain'] = realm_in_root_domain
+        return self.client_post('/accounts/register/', payload, **kwargs)
 
     def get_confirmation_url_from_outbox(self, email_address, path_pattern="(\S+)>"):
         # type: (Text, Text) -> Text
@@ -330,40 +343,31 @@ class ZulipTestCase(TestCase):
         else:
             raise AssertionError("Couldn't find a confirmation email.")
 
-    def get_api_key(self, email):
-        # type: (Text) -> Text
-        if email not in API_KEYS:
-            API_KEYS[email] = get_user_profile_by_email(email).api_key
-        return API_KEYS[email]
-
-    def get_server_api_key(self, server_uuid):
-        # type: (Text) -> Text
-        if server_uuid not in API_KEYS:
-            API_KEYS[server_uuid] = get_remote_server_by_uuid(server_uuid).api_key
-
-        return API_KEYS[server_uuid]
-
     def api_auth(self, identifier):
         # type: (Text) -> Dict[str, Text]
         """
         identifier: Can be an email or a remote server uuid.
         """
-        if is_remote_server(identifier):
-            api_key = self.get_server_api_key(identifier)
+        if identifier in API_KEYS:
+            api_key = API_KEYS[identifier]
         else:
-            api_key = self.get_api_key(identifier)
+            if is_remote_server(identifier):
+                api_key = get_remote_server_by_uuid(identifier).api_key
+            else:
+                api_key = get_user_profile_by_email(identifier).api_key
+            API_KEYS[identifier] = api_key
 
         credentials = u"%s:%s" % (identifier, api_key)
         return {
             'HTTP_AUTHORIZATION': u'Basic ' + base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
         }
 
-    def get_streams(self, email):
-        # type: (Text) -> List[Text]
+    def get_streams(self, email, realm):
+        # type: (Text, Realm) -> List[Text]
         """
         Helper function to get the stream names for a user
         """
-        user_profile = get_user_profile_by_email(email)
+        user_profile = get_user(email, realm)
         subs = Subscription.objects.filter(
             user_profile=user_profile,
             active=True,
@@ -376,9 +380,11 @@ class ZulipTestCase(TestCase):
         sender = get_user_profile_by_email(sender_name)
         if message_type in [Recipient.PERSONAL, Recipient.HUDDLE]:
             message_type_name = "private"
-        else:
+        elif message_type == Recipient.STREAM:
             message_type_name = "stream"
-        if isinstance(raw_recipients, six.string_types):
+        else:
+            raise AssertionError("Recipient type should be an Recipient.STREAM type enum")
+        if isinstance(raw_recipients, str):
             recipient_list = [raw_recipients]
         else:
             recipient_list = raw_recipients
@@ -396,7 +402,7 @@ class ZulipTestCase(TestCase):
                        "num_after": num_after,
                        "use_first_unread_anchor": ujson.dumps(use_first_unread_anchor)}
         result = self.client_get("/json/messages", dict(post_params))
-        data = ujson.loads(result.content)
+        data = result.json()
         return data['messages']
 
     def users_subscribed_to_stream(self, stream_name, realm):
@@ -419,18 +425,25 @@ class ZulipTestCase(TestCase):
         Successful POSTs return a 200 and JSON of the form {"result": "success",
         "msg": ""}.
         """
-        self.assertEqual(result.status_code, 200, result)
-        json = ujson.loads(result.content)
+        try:
+            json = ujson.loads(result.content)
+        except Exception:  # nocoverage
+            json = {'msg': "Error parsing JSON in response!"}
+        self.assertEqual(result.status_code, 200, json['msg'])
         self.assertEqual(json.get("result"), "success")
         # We have a msg key for consistency with errors, but it typically has an
         # empty value.
         self.assertIn("msg", json)
+        self.assertNotEqual(json["msg"], "Error parsing JSON in response!")
         return json
 
     def get_json_error(self, result, status_code=400):
         # type: (HttpResponse, int) -> Dict[str, Any]
-        self.assertEqual(result.status_code, status_code)
-        json = ujson.loads(result.content)
+        try:
+            json = ujson.loads(result.content)
+        except Exception:  # nocoverage
+            json = {'msg': "Error parsing JSON in response!"}
+        self.assertEqual(result.status_code, status_code, msg=json.get('msg'))
         self.assertEqual(json.get("result"), "error")
         return json['msg']
 
@@ -442,11 +455,15 @@ class ZulipTestCase(TestCase):
         """
         self.assertEqual(self.get_json_error(result, status_code=status_code), msg)
 
-    def assert_length(self, queries, count):
-        # type: (Sized, int) -> None
-        actual_count = len(queries)
-        return self.assertTrue(actual_count == count,
-                               "len(%s) == %s, != %s" % (queries, actual_count, count))
+    def assert_length(self, items, count):
+        # type: (List, int) -> None
+        actual_count = len(items)
+        if actual_count != count:  # nocoverage
+            print('ITEMS:\n')
+            for item in items:
+                print(item)
+            print("\nexpected length: %s\nactual length: %s" % (count, actual_count))
+            raise AssertionError('List is unexpected size!')
 
     def assert_json_error_contains(self, result, msg_substring, status_code=400):
         # type: (HttpResponse, Text, int) -> None
@@ -497,45 +514,45 @@ class ZulipTestCase(TestCase):
         return stream
 
     # Subscribe to a stream directly
-    def subscribe_to_stream(self, email, stream_name, realm=None):
-        # type: (Text, Text, Optional[Realm]) -> Stream
-        if realm is None:
-            realm = get_realm_by_email_domain(email)
+    def subscribe(self, user_profile, stream_name):
+        # type: (UserProfile, Text) -> Stream
         try:
-            stream = get_stream(stream_name, realm)
-            from_creation = False
+            stream = get_stream(stream_name, user_profile.realm)
+            from_stream_creation = False
         except Stream.DoesNotExist:
-            stream, from_creation = create_stream_if_needed(realm, stream_name)
-        user_profile = get_user_profile_by_email(email)
-        bulk_add_subscriptions([stream], [user_profile], from_creation=from_creation)
+            stream, from_stream_creation = create_stream_if_needed(user_profile.realm, stream_name)
+        bulk_add_subscriptions([stream], [user_profile], from_stream_creation=from_stream_creation)
         return stream
 
-    def unsubscribe_from_stream(self, email, stream_name):
-        # type: (Text, Text) -> None
-        user_profile = get_user_profile_by_email(email)
+    def unsubscribe(self, user_profile, stream_name):
+        # type: (UserProfile, Text) -> None
         stream = get_stream(stream_name, user_profile.realm)
         bulk_remove_subscriptions([user_profile], [stream])
 
     # Subscribe to a stream by making an API request
-    def common_subscribe_to_streams(self, email, streams, extra_post_data={}, invite_only=False):
-        # type: (Text, Iterable[Text], Dict[str, Any], bool) -> HttpResponse
+    def common_subscribe_to_streams(self, email, streams, extra_post_data={}, invite_only=False,
+                                    **kwargs):
+        # type: (Text, Iterable[Text], Dict[str, Any], bool, **Any) -> HttpResponse
         post_data = {'subscriptions': ujson.dumps([{"name": stream} for stream in streams]),
                      'invite_only': ujson.dumps(invite_only)}
         post_data.update(extra_post_data)
-        result = self.client_post("/api/v1/users/me/subscriptions", post_data, **self.api_auth(email))
+        kw = kwargs.copy()
+        kw.update(self.api_auth(email))
+        result = self.client_post("/api/v1/users/me/subscriptions", post_data,
+                                  **kw)
         return result
 
-    def send_json_payload(self, email, url, payload, stream_name=None, **post_params):
-        # type: (Text, Text, Union[Text, Dict[str, Any]], Optional[Text], **Any) -> Message
+    def send_json_payload(self, user_profile, url, payload, stream_name=None, **post_params):
+        # type: (UserProfile, Text, Union[Text, Dict[str, Any]], Optional[Text], **Any) -> Message
         if stream_name is not None:
-            self.subscribe_to_stream(email, stream_name)
+            self.subscribe(user_profile, stream_name)
 
         result = self.client_post(url, payload, **post_params)
         self.assert_json_success(result)
 
         # Check the correct message was sent
         msg = self.get_last_message()
-        self.assertEqual(msg.sender.email, email)
+        self.assertEqual(msg.sender.email, user_profile.email)
         if stream_name is not None:
             self.assertEqual(get_display_recipient(msg.recipient), stream_name)
         # TODO: should also validate recipient for private messages
@@ -576,6 +593,11 @@ class WebhookTestCase(ZulipTestCase):
     URL_TEMPLATE = None  # type: Optional[Text]
     FIXTURE_DIR_NAME = None  # type: Optional[Text]
 
+    @property
+    def test_user(self):
+        # type: () -> UserProfile
+        return get_user(self.TEST_USER_EMAIL, get_realm("zulip"))
+
     def setUp(self):
         # type: () -> None
         self.url = self.build_webhook_url()
@@ -586,7 +608,7 @@ class WebhookTestCase(ZulipTestCase):
         payload = self.get_body(fixture_name)
         if content_type is not None:
             kwargs['content_type'] = content_type
-        msg = self.send_json_payload(self.TEST_USER_EMAIL, self.url, payload,
+        msg = self.send_json_payload(self.test_user, self.url, payload,
                                      self.STREAM_NAME, **kwargs)
         self.do_test_subject(msg, expected_subject)
         self.do_test_message(msg, expected_message)
@@ -600,7 +622,7 @@ class WebhookTestCase(ZulipTestCase):
         if content_type is not None:
             kwargs['content_type'] = content_type
 
-        msg = self.send_json_payload(self.TEST_USER_EMAIL, self.url, payload,
+        msg = self.send_json_payload(self.test_user, self.url, payload,
                                      stream_name=None, **kwargs)
         self.do_test_message(msg, expected_message)
 
@@ -610,7 +632,7 @@ class WebhookTestCase(ZulipTestCase):
         # type: (*Any, **Any) -> Text
         url = self.URL_TEMPLATE
         if url.find("api_key") >= 0:
-            api_key = self.get_api_key(self.TEST_USER_EMAIL)
+            api_key = self.test_user.api_key
             url = self.URL_TEMPLATE.format(api_key=api_key,
                                            stream=self.STREAM_NAME)
         else:

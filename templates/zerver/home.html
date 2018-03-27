@@ -46,6 +46,14 @@
             start the conversation</a>?</p>
         {% endtrans %}
       </div>
+      <div id="empty_narrow_group_private_message" class="empty_feed_notice">
+        <h4>{{ _('You have no group private messages with this person yet!') }}</h4>
+
+        {% trans %}
+        <p>Why not <a href="#" class="empty_feed_compose_private">
+            start the conversation</a>?</p>
+        {% endtrans %}
+      </div>
       <div id="empty_narrow_multi_private_message" class="empty_feed_notice">
         <h4>{{ _('You have no private messages with these people yet!') }}</h4>
 
@@ -73,9 +81,22 @@
       </div>
       <div id="empty_star_narrow_message" class="empty_feed_notice">
         <h4>{{ _("You haven't starred anything yet!") }}</h4>
+
+        {% trans %}
+        <p>Learn more about starring messages at <a href="/help/star-a-message">
+           {{ realm_uri }}/help/star-a-message</a>.</p>
+        {% endtrans %}
+      </div>
+      <div id="no_unread_narrow_message" class="empty_feed_notice">
+        <h4>{{ _("You have no unread messages!") }}</h4>
       </div>
       <div id="empty_narrow_all_mentioned" class="empty_feed_notice">
         <h4>{{ _("You haven't been mentioned yet!") }}</h4>
+
+        {% trans %}
+        <p>Learn more about mentions at <a href="/help/at-mention-a-team-member">
+           {{ realm_uri }}/help/at-mention-a-team-member</a>.</p>
+        {% endtrans %}
       </div>
       <div id="empty_search_narrow_message" class="empty_feed_notice">
         <h4>{{ _('Nobody has talked about that yet!') }}</h4>

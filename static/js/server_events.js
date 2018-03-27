@@ -4,7 +4,6 @@ var exports = {};
 
 var waiting_on_homeview_load = true;
 
-var events_stored_during_tutorial = [];
 var events_stored_while_loading = [];
 
 var get_events_xhr;
@@ -39,16 +38,6 @@ function get_events_success(events) {
         }
     });
 
-    if (tutorial.is_running()) {
-        events_stored_during_tutorial = events_stored_during_tutorial.concat(events);
-        return;
-    }
-
-    if (events_stored_during_tutorial.length > 0) {
-        events = events_stored_during_tutorial.concat(events);
-        events_stored_during_tutorial = [];
-    }
-
     if (waiting_on_homeview_load) {
         events_stored_while_loading = events_stored_while_loading.concat(events);
         return;
@@ -68,8 +57,9 @@ function get_events_success(events) {
         case 'message':
             var msg = event.message;
             msg.flags = event.flags;
-            if (event.local_message_id !== undefined) {
+            if (event.local_message_id) {
                 msg.local_id = event.local_message_id;
+                sent_messages.report_event_received(event.local_message_id);
             }
             messages.push(msg);
             break;
@@ -99,6 +89,10 @@ function get_events_success(events) {
     });
 
     if (messages.length !== 0) {
+        // Sort by ID, so that if we get multiple messages back from
+        // the server out-of-order, we'll still end up with our
+        // message lists in order.
+        messages = _.sortBy(messages, 'id');
         try {
             messages = echo.process_from_server(messages);
             message_events.insert_new_messages(messages);
@@ -188,7 +182,7 @@ function get_events(options) {
                 // If we're old enough that our message queue has been
                 // garbage collected, immediately reload.
                 if ((xhr.status === 400) &&
-                    (JSON.parse(xhr.responseText).msg.indexOf("Bad event queue id") !== -1)) {
+                    (JSON.parse(xhr.responseText).code === 'BAD_EVENT_QUEUE_ID')) {
                     page_params.event_queue_expired = true;
                     reload.initiate({immediate: true,
                                      save_pointer: false,
@@ -261,7 +255,7 @@ exports.check_for_unsuspend = function () {
 };
 setInterval(exports.check_for_unsuspend, 5000);
 
-util.execute_early(function () {
+exports.initialize = function () {
     $(document).on('unsuspend', function () {
         // Immediately poll for new events on unsuspend
         blueslip.log("Restarting get_events due to unsuspend");
@@ -269,13 +263,14 @@ util.execute_early(function () {
         exports.restart_get_events({dont_block: true});
     });
     get_events();
-});
+};
 
 exports.cleanup_event_queue = function cleanup_event_queue() {
     // Submit a request to the server to cleanup our event queue
     if (page_params.event_queue_expired === true) {
         return;
     }
+    blueslip.log("Cleaning up our event queue");
     // Set expired because in a reload we may be called twice.
     page_params.event_queue_expired = true;
     channel.del({

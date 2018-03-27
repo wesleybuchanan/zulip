@@ -103,9 +103,9 @@ Zulip server, setting up a new Zulip realm, or starting to use Zulip.
 
 * [Move Zulip's prompt for permission to display notifications to be
   manually triggered](https://github.com/zulip/zulip/issues/1189)
-* [Add a mechanism for deleting early test messages (e.g.,
+* <strike>[Add a mechanism for deleting early test messages (e.g.,
   administrators can hard-delete
-  messages)](https://github.com/zulip/zulip/issues/135)
+  messages)](https://github.com/zulip/zulip/issues/135)</strike>
 * <strike>[Allow customizing emails when inviting new users](https://github.com/zulip/zulip/pull/1409)</strike>
 
 ## Production installation issues
@@ -139,18 +139,18 @@ major focus area for the project.
 
 * [Make the Zulip Tornado service support horizontal
   scaling](https://github.com/zulip/zulip/issues/445)
-* [Make presence system scale well to 10000 users in a
-  realm.](https://github.com/zulip/zulip/issues/728)
-* [Support running queue workers multithreaded in production to
+* <strike>[Make presence system scale well to 5000 users in a
+  realm.](https://github.com/zulip/zulip/issues/728)</strike>
+* <strike>[Support running queue workers multithreaded in production to
   decrease minimum memory
-  footprint](https://github.com/zulip/zulip/issues/34)
+  footprint](https://github.com/zulip/zulip/issues/34)</strike>
 * [Improve @-mentioning syntax based on stronger unique
   identifiers](https://github.com/zulip/zulip/issues/374)
 
 ## Technology improvements
 
-* [Add support for Zulip running purely on Python
-  3](https://github.com/zulip/zulip/issues/256)
+* <strike>[Add support for Zulip running purely on Python
+  3](https://github.com/zulip/zulip/issues/256)</strike>
 * [Automatic thumbnailing of uploaded images' previews to save
   bandwidth](https://github.com/zulip/zulip/issues/432)
 * <strike>[Upgrade Zulip to use Django 1.10.  The patches
@@ -171,7 +171,7 @@ major focus area for the project.
 While the Zulip server has a great codebase compared to most projects
 of its size, it takes work to keep it that way.
 
-* [Migrate most web routes to REST API](https://github.com/zulip/zulip/issues/611)
+* <strike>[Migrate most web routes to REST API](https://github.com/zulip/zulip/issues/611)</strike>
 * <strike>[Split Tornado subsystem into a separate Django app](https://github.com/zulip/zulip/issues/729)</strike>
 * [Refactor zulip.css to be broken into components](https://github.com/zulip/zulip/issues/731)
 
@@ -182,8 +182,8 @@ of its size, it takes work to keep it that way.
 * [Add support for stronger security controls for uploaded files (The
   LOCAL_UPLOADS_DIR file uploads backend only supports world-readable
   uploads)](https://github.com/zulip/zulip/issues/320)
-* [Fix requirement to set a password when creating account via
-  Google](https://github.com/zulip/zulip/issues/1633)
+* <strike>[Fix requirement to set a password when creating account via
+  Google](https://github.com/zulip/zulip/issues/1633)</strike>
 * [Add a retention policy feature that automatically deletes old
   messages](https://github.com/zulip/zulip/issues/106)
 * [Add UI for viewing and cancelling open Zulip
@@ -204,8 +204,8 @@ of its size, it takes work to keep it that way.
   with Zulip.](https://github.com/zulip/zulip/issues/672)
 * [Write a visual design / frontend style guide for
   Zulip](https://github.com/zulip/zulip/issues/979)
-* [Update all screenshots to show the current Zulip
-  UI](https://github.com/zulip/zulip/issues/599)
+* <strike>[Update all screenshots to show the current Zulip
+  UI](https://github.com/zulip/zulip/issues/599)</strike>
 
 ### Nice to have
 
@@ -220,10 +220,10 @@ reasonably good framework for writing new webhook integrations for
 getting notifications into Zulip, it'd be great to streamline that
 process and make bots that receive messages just as easy to build.
 
-* [Add an outgoing webhook integration system](https://github.com/zulip/zulip/issues/735)
+* <strike>[Add an outgoing webhook integration system](https://github.com/zulip/zulip/issues/735)</strike>
 * [Make setting up a new integration a smooth flow](https://github.com/zulip/zulip/issues/692)
-* [Default new incoming webhooks to permissions-limited incoming webhook
-  bots](https://github.com/zulip/zulip/issues/2186)
+* <strike>[Default new incoming webhooks to permissions-limited incoming webhook
+  bots](https://github.com/zulip/zulip/issues/2186)</strike>
 * <strike>[Change how Zulip displays bot names to distinguish them from human
   users](https://github.com/zulip/zulip/issues/1107)</strike>
 
@@ -247,8 +247,8 @@ moving quickly, we're
 To support a great mobile experiences, we need to make some
 improvements in the Zulip server.
 
-* [Push notifications bouncer service for GCM and
-  APNS](https://github.com/zulip/zulip/issues/1767)
+* <strike>[Push notifications bouncer service for GCM and
+  APNS](https://github.com/zulip/zulip/issues/1767)</strike>
 * [A slick process for doing mobile login without typing your password
   on your phone](https://github.com/zulip/zulip/issues/2185)
 * [`@here` mention support (that doesn’t spam people not currently
@@ -264,9 +264,9 @@ The new
 is implemented in [Electron](http://electron.atom.io/), and primarily
 needs work on installer tooling to finish replacing the old app.
 
-* Finish releasing the Electron app to replace the old desktop app
-* [Support having multiple Zulip realms open
-  simultaneously](https://github.com/zulip/zulip-electron/issues/1)
+* <strike>Finish releasing the Electron app to replace the old desktop app</strike>
+* <strike>[Support having multiple Zulip realms open
+  simultaneously](https://github.com/zulip/zulip-electron/issues/1)</strike>
 
 ## Community
 

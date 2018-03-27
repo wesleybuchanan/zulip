@@ -1,9 +1,11 @@
 from django.conf.urls import url
 from django.conf import settings
-import os.path
+from django.views.generic import TemplateView
+import os
 from django.views.static import serve
 import zerver.views.registration
 import zerver.views.auth
+import zerver.views.email_log
 
 # These URLs are available only in the development environment
 
@@ -19,6 +21,10 @@ urls = [
         serve, {'document_root':
                 os.path.join(settings.DEPLOY_ROOT, 'var/coverage'),
                 'show_indexes': True}),
+    url(r'^node-coverage/(?P<path>.*)$',
+        serve, {'document_root':
+                os.path.join(settings.DEPLOY_ROOT, 'var/node-coverage/lcov-report'),
+                'show_indexes': True}),
     url(r'^docs/(?P<path>.*)$',
         serve, {'document_root':
                 os.path.join(settings.DEPLOY_ROOT, 'docs/_build/html')}),
@@ -26,6 +32,18 @@ urls = [
     # The special no-password login endpoint for development
     url(r'^devlogin/$', zerver.views.auth.login_page,
         {'template_name': 'zerver/dev_login.html'}, name='zerver.views.auth.login_page'),
+
+    # Page for testing email templates
+    url(r'^emails/$', zerver.views.email_log.email_page),
+    url(r'^emails/generate/$', zerver.views.email_log.generate_all_emails),
+    url(r'^emails/clear/$', zerver.views.email_log.clear_emails),
+
+    # Listing of useful URLs and various tools for development
+    url(r'^devtools/$', TemplateView.as_view(template_name='zerver/dev_tools.html')),
+
+    # Have easy access for error pages
+    url(r'^errors/404/$', TemplateView.as_view(template_name='404.html')),
+    url(r'^errors/5xx/$', TemplateView.as_view(template_name='500.html')),
 ]
 
 i18n_urls = [

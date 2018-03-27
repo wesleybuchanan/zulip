@@ -96,6 +96,8 @@ function populate_users(realm_people_data) {
     _.each(realm_people_data.members, function (user) {
         user.is_active_human = user.is_active && !user.is_bot;
         if (user.is_bot) {
+            // Convert bot type id to string for viewing to the users.
+            user.bot_type = settings_bots.type_id_to_string(user.bot_type);
             bots.push(user);
         } else if (user.is_active) {
             active_users.push(user);
@@ -108,6 +110,12 @@ function populate_users(realm_people_data) {
     deactivated_users = _.sortBy(deactivated_users, 'full_name');
     bots = _.sortBy(bots, 'full_name');
 
+    var update_scrollbar = function ($sel) {
+        return function () {
+            ui.update_scrollbar($sel);
+        };
+    };
+
     var $bots_table = $("#admin_bots_table");
     list_render($bots_table, bots, {
         name: "admin_bot_list",
@@ -118,10 +126,11 @@ function populate_users(realm_people_data) {
             element: $bots_table.closest(".settings-section").find(".search"),
             callback: function (item, value) {
                 return (
-                    item.full_name.toLowerCase().match(value) ||
-                    item.email.toLowerCase().match(value)
+                    item.full_name.toLowerCase().indexOf(value) >= 0 ||
+                    item.email.toLowerCase().indexOf(value) >= 0
                 );
             },
+            onupdate: update_scrollbar($bots_table),
         },
     }).init();
 
@@ -136,8 +145,13 @@ function populate_users(realm_people_data) {
             } else if (presence.presence_info[item.user_id]) {
                 // XDate takes number of milliseconds since UTC epoch.
                 var last_active = presence.presence_info[item.user_id].last_active * 1000;
-                var last_active_date = new XDate(last_active);
-                activity_rendered = timerender.render_date(last_active_date, undefined, today);
+
+                if (!isNaN(last_active)) {
+                    var last_active_date = new XDate(last_active);
+                    activity_rendered = timerender.render_date(last_active_date, undefined, today);
+                } else {
+                    activity_rendered = $("<span></span>").text(i18n.t("Never"));
+                }
             } else {
                 activity_rendered = $("<span></span>").text(i18n.t("Unknown"));
             }
@@ -152,10 +166,11 @@ function populate_users(realm_people_data) {
             element: $users_table.closest(".settings-section").find(".search"),
             callback: function (item, value) {
                 return (
-                    item.full_name.toLowerCase().match(value) ||
-                    item.email.toLowerCase().match(value)
+                    item.full_name.toLowerCase().indexOf(value) >= 0 ||
+                    item.email.toLowerCase().indexOf(value) >= 0
                 );
             },
+            onupdate: update_scrollbar($users_table),
         },
     }).init();
 
@@ -169,12 +184,18 @@ function populate_users(realm_people_data) {
             element: $deactivated_users_table.closest(".settings-section").find(".search"),
             callback: function (item, value) {
                 return (
-                    item.full_name.toLowerCase().match(value) ||
-                    item.email.toLowerCase().match(value)
+                    item.full_name.toLowerCase().indexOf(value) >= 0 ||
+                    item.email.toLowerCase().indexOf(value) >= 0
                 );
             },
+            onupdate: update_scrollbar($deactivated_users_table),
         },
     }).init();
+
+    [$bots_table, $users_table, $deactivated_users_table].forEach(function ($o) {
+        ui.set_up_scrollbar($o.closest(".progressive-table-wrapper"));
+    });
+
     loading.destroy_indicator($('#admin_page_users_loading_indicator'));
     loading.destroy_indicator($('#admin_page_bots_loading_indicator'));
     loading.destroy_indicator($('#admin_page_deactivated_users_loading_indicator'));

@@ -19,10 +19,10 @@ exports.message = function (response, status_box, cls, type) {
     }
 
     if (type === 'subscriptions-status') {
-        status_box.removeClass(status_classes).addClass(cls).children('#response')
+        status_box.removeClass(common.status_classes).addClass(cls).children('#response')
               .text(response).stop(true).fadeTo(0, 1);
     } else {
-        status_box.removeClass(status_classes).addClass(cls)
+        status_box.removeClass(common.status_classes).addClass(cls)
               .text(response).stop(true).fadeTo(0, 1);
     }
 
@@ -41,6 +41,13 @@ exports.error = function (response, xhr, status_box, type) {
 
 exports.success = function (response, status_box, type) {
     exports.message(response, status_box, 'alert-success', type);
+};
+
+exports.generic_embed_error = function (error) {
+    var $alert = $("<div class='alert home-error-bar'></div>");
+    var $exit = "<div class='exit'></div>";
+
+    $(".alert-box").append($alert.html($exit + "<div class='content'>" + error + "</div>").addClass("show"));
 };
 
 exports.hide_error = function ($target) {

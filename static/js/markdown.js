@@ -12,7 +12,7 @@ var realm_filter_map = {};
 var realm_filter_list = [];
 
 // Regexes that match some of our common bugdown markup
-var bugdown_re = [
+var backend_only_markdown_re = [
     // Inline image previews, check for contiguous chars ending in image suffix
     // To keep the below regexes simple, split them out for the end-of-message case
 
@@ -24,13 +24,22 @@ var bugdown_re = [
     /[^\s]*(?:twitter|youtube).com\/[^\s]*/,
 ];
 
-exports.contains_bugdown = function (content) {
+exports.contains_backend_only_syntax = function (content) {
     // Try to guess whether or not a message has bugdown in it
     // If it doesn't, we can immediately render it client-side
-    var markedup = _.find(bugdown_re, function (re) {
+    var markedup = _.find(backend_only_markdown_re, function (re) {
         return re.test(content);
     });
-    return markedup !== undefined;
+
+    // If a realm filter doesn't start with some specified characters
+    // then don't render it locally. It is workaround for the fact that
+    // javascript regex doesn't support lookbehind.
+    var false_filter_match = _.find(realm_filter_list, function (re) {
+        var pattern = /(?:[^\s'"\(,:<])/.source + re[0].source + /(?![\w])/.source;
+        var regex = new RegExp(pattern);
+        return regex.test(content);
+    });
+    return markedup !== undefined || false_filter_match !== undefined;
 };
 
 function push_uniquely(lst, elem) {
@@ -65,16 +74,9 @@ exports.apply_markdown = function (message) {
         },
     };
     message.content = marked(message.raw_content + '\n\n', options).trim();
-};
-
-exports.add_message_flags = function (message) {
-    // Note: mention flags are set in apply_markdown()
-
-    if (message.raw_content.indexOf('/me ') === 0 &&
-        message.content.indexOf('<p>') === 0 &&
-        message.content.lastIndexOf('</p>') === message.content.length - 4) {
-        message.flags.push('is_me_message');
-    }
+    message.is_me_message = (message.raw_content.indexOf('/me ') === 0 &&
+                             message.content.indexOf('<p>') === 0 &&
+                             message.content.lastIndexOf('</p>') === message.content.length - 4);
 };
 
 exports.add_subject_links = function (message) {
@@ -115,31 +117,33 @@ function escape(html, encode) {
 }
 
 function handleUnicodeEmoji(unicode_emoji) {
-    var hex_value = unicode_emoji.codePointAt(0).toString(16);
-    if (emoji.emojis_by_unicode.hasOwnProperty(hex_value)) {
-        var emoji_url = emoji.emojis_by_unicode[hex_value];
-        return '<img alt="' + unicode_emoji + '"' +
-               ' class="emoji" src="' + emoji_url + '"' +
-               ' title="' + unicode_emoji + '">';
+    var codepoint = unicode_emoji.codePointAt(0).toString(16);
+    if (emoji_codes.codepoint_to_name.hasOwnProperty(codepoint)) {
+        var emoji_name = emoji_codes.codepoint_to_name[codepoint];
+        var alt_text = ':' + emoji_name + ':';
+        var title = emoji_name.split("_").join(" ");
+        return '<span class="emoji emoji-' + codepoint + '"' +
+               ' title="' + title + '">' + alt_text +
+               '</span>';
     }
     return unicode_emoji;
 }
 
 function handleEmoji(emoji_name) {
-    var input_emoji = ':' + emoji_name + ":";
-    var emoji_url;
-    if (emoji.realm_emojis.hasOwnProperty(emoji_name)) {
-        emoji_url = emoji.realm_emojis[emoji_name].emoji_url;
-        return '<img alt="' + input_emoji + '"' +
+    var alt_text = ':' + emoji_name + ':';
+    var title = emoji_name.split("_").join(" ");
+    if (emoji.active_realm_emojis.hasOwnProperty(emoji_name)) {
+        var emoji_url = emoji.active_realm_emojis[emoji_name].emoji_url;
+        return '<img alt="' + alt_text + '"' +
                ' class="emoji" src="' + emoji_url + '"' +
-               ' title="' + input_emoji + '">';
-    } else if (emoji.emojis_by_name.hasOwnProperty(emoji_name)) {
-        emoji_url = emoji.emojis_by_name[emoji_name];
-        return '<img alt="' + input_emoji + '"' +
-               ' class="emoji" src="' + emoji_url + '"' +
-               ' title="' + input_emoji + '">';
+               ' title="' + title + '">';
+    } else if (emoji_codes.name_to_codepoint.hasOwnProperty(emoji_name)) {
+        var codepoint = emoji_codes.name_to_codepoint[emoji_name];
+        return '<span class="emoji emoji-' + codepoint + '"' +
+               ' title="' + title + '">' + alt_text +
+               '</span>';
     }
-    return input_emoji;
+    return alt_text;
 }
 
 function handleAvatar(email) {
@@ -177,7 +181,7 @@ function handleTex(tex, fullmatch) {
     try {
         return katex.renderToString(tex);
     } catch (ex) {
-        if (ex.message.startsWith('KaTeX parse error')) { // TeX syntax error
+        if (ex.message.indexOf('KaTeX parse error') === 0) { // TeX syntax error
             return '<span class="tex-error">' + escape(fullmatch) + '</span>';
         }
         blueslip.error(ex);
@@ -217,6 +221,15 @@ function python_to_js_filter(pattern, url) {
         });
         pattern = pattern.replace(inline_flag_re, "");
     }
+    // Ideally we should have been checking that realm filters
+    // begin with certain characters but since there is no
+    // support for negative lookbehind in javascript, we check
+    // for this condition in `contains_backend_only_syntax()`
+    // function. If the condition is satisfied then the message
+    // is rendered locally, otherwise, we return false there and
+    // message is rendered on the backend which has proper support
+    // for negative lookbehind.
+    pattern = pattern + /(?![\w])/.source;
     return [new RegExp(pattern, js_flags), url];
 }
 

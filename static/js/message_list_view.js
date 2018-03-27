@@ -85,6 +85,22 @@ function add_display_time(group, message_container, prev) {
     }
 }
 
+function set_topic_edit_properties(group, message) {
+    group.always_visible_topic_edit = false;
+    group.on_hover_topic_edit = false;
+    if (!page_params.realm_allow_message_editing) {
+        return;
+    }
+
+    // Messages with no topics should always have an edit icon visible
+    // to encourage updating them. Admins can also edit any topic.
+    if (message.subject === compose.empty_topic_placeholder()) {
+        group.always_visible_topic_edit = true;
+    } else if (page_params.is_admin) {
+        group.on_hover_topic_edit = true;
+    }
+}
+
 function populate_group_from_message_container(group, message_container) {
     group.is_stream = message_container.msg.is_stream;
     group.is_private = message_container.msg.is_private;
@@ -112,9 +128,9 @@ function populate_group_from_message_container(group, message_container) {
         group.display_reply_to = message_store.get_pm_full_names(message_container.msg);
     }
     group.display_recipient = message_container.msg.display_recipient;
-    group.always_visible_topic_edit = message_container.msg.always_visible_topic_edit;
-    group.on_hover_topic_edit = message_container.msg.on_hover_topic_edit;
     group.subject_links = message_container.msg.subject_links;
+
+    set_topic_edit_properties(group, message_container.msg);
 
     var time = new XDate(message_container.msg.timestamp * 1000);
     var today = new XDate();
@@ -247,9 +263,7 @@ MessageListView.prototype = {
                     stream_data.get_color(message_container.msg.stream);
             }
 
-            message_container.contains_mention =
-                notifications.speaking_at_me(message_container.msg);
-            message_container.msg.unread = unread.message_unread(message_container.msg);
+            message_container.contains_mention = message_container.msg.mentioned;
             self._maybe_format_me_message(message_container);
 
             prev = message_container;
@@ -455,7 +469,15 @@ MessageListView.prototype = {
         // all messages lists. To prevent having both list views overwriting
         // each others data we will make a new message object to add data to
         // for rendering.
-        message_containers = _.map(messages, function (message) { return {msg: message}; });
+        message_containers = _.map(messages, function (message) {
+            if (message.starred) {
+                message.starred_status = i18n.t("Unstar");
+            } else {
+                message.starred_status = i18n.t("Star");
+            }
+
+            return {msg: message};
+        });
 
         function save_scroll_position() {
             if (orig_scrolltop_offset === undefined && self.selected_row().length > 0) {
@@ -686,6 +708,17 @@ MessageListView.prototype = {
             return;
         }
 
+        if (!activity.has_focus) {
+            // Don't autoscroll if the window hasn't had focus
+            // recently.  This in intended to help protect us from
+            // auto-scrolling downwards when the window is in the
+            // background and might be having some functionality
+            // throttled by modern Chrome's aggressive power-saving
+            // features.
+            blueslip.log("Suppressing scrolldown due to inactivity");
+            return;
+        }
+
         // This next decision is fairly debatable.  For a big message that
         // would push the pointer off the screen, we do a partial autoscroll,
         // which has the following implications:
@@ -833,6 +866,9 @@ MessageListView.prototype = {
         this._add_msg_timestring(message_container);
         this._maybe_format_me_message(message_container);
 
+        // Make sure the right thing happens if the message was edited to mention us.
+        message_container.contains_mention = message_container.msg.mentioned;
+
         var rendered_msg = $(this._get_message_template(message_container));
         if (message_content_edited) {
             rendered_msg.addClass("fade-in-message");
@@ -905,6 +941,9 @@ MessageListView.prototype = {
             this.render(slice_to_render, 'top', false);
             this._render_win_start -= slice_to_render.length;
         }
+
+        // See comment for maybe_rerender call in the append code path
+        this.maybe_rerender();
     },
 
     rerender_the_whole_thing: function MessageListView__rerender_the_whole_thing() {
@@ -934,10 +973,10 @@ MessageListView.prototype = {
     },
 
     render_trailing_bookend: function MessageListView_render_trailing_bookend(
-                                trailing_bookend_content, subscribed) {
+                                trailing_bookend_content, subscribed, show_button) {
         var rendered_trailing_bookend = $(templates.render('bookend', {
             bookend_content: trailing_bookend_content,
-            trailing: true,
+            trailing: show_button,
             subscribed: subscribed,
         }));
         rows.get_table(this.table_name).append(rendered_trailing_bookend);

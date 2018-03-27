@@ -3,7 +3,9 @@ add_dependencies({
 });
 
 var people = require("js/people.js");
-set_global('blueslip', {});
+set_global('blueslip', {
+    error: function () { return undefined; },
+});
 set_global('page_params', {});
 
 var _ = global._;
@@ -62,11 +64,28 @@ initialize();
     assert.equal(_.size(realm_persons), 1);
     assert.equal(realm_persons[0].full_name, 'Isaac Newton');
 
+    var human_user_ids = people.get_realm_human_user_ids();
+    assert.deepEqual(human_user_ids, [isaac.user_id]);
+    assert.equal(people.realm_user_is_active_human_or_bot(isaac.user_id), true);
+
     // Now deactivate isaac
     people.deactivate(isaac);
     person = people.realm_get(email);
     assert(!person);
     assert.equal(people.get_realm_count(), 0);
+    assert.equal(people.realm_user_is_active_human_or_bot(isaac.user_id), false);
+
+    var bot_botson = {
+        email: 'botson-bot@example.com',
+        user_id: 35,
+        full_name: 'Bot Botson',
+        is_bot: true,
+    };
+    people.add(bot_botson);
+    assert.equal(people.realm_user_is_active_human_or_bot(bot_botson.user_id), true);
+
+    // Invalid user ID just returns false
+    assert.equal(people.realm_user_is_active_human_or_bot(123412), false);
 
     // We can still get their info for non-realm needs.
     person = people.get_by_email(email);
@@ -84,6 +103,12 @@ initialize();
     assert.equal(people.is_my_user_id(me.user_id), true);
     assert.equal(people.is_my_user_id(isaac.user_id), false);
     assert.equal(people.is_my_user_id(undefined), false);
+}());
+
+(function test_pm_lookup_key() {
+    assert.equal(people.pm_lookup_key('30'), '30');
+    assert.equal(people.pm_lookup_key('32,30'), '32');
+    assert.equal(people.pm_lookup_key('101,32,30'), '32,101');
 }());
 
 (function test_get_recipients() {
@@ -213,11 +238,23 @@ initialize();
         user_id: 304,
         full_name: 'Linus Torvalds',
     };
+    var noah = {
+        email: 'emnoa@example.com',
+        user_id: 305,
+        full_name: 'Nöôáàh Ëmerson',
+    };
+    var plain_noah = {
+        email: 'otheremnoa@example.com',
+        user_id: 306,
+        full_name: 'Nooaah Emerson',
+    };
 
     people.add_in_realm(charles);
     people.add_in_realm(maria);
     people.add_in_realm(ashton);
     people.add_in_realm(linus);
+    people.add_in_realm(noah);
+    people.add_in_realm(plain_noah);
 
     var search_term = 'a';
     var users = people.get_rest_of_realm();
@@ -238,6 +275,18 @@ initialize();
     assert.equal(filtered_people.num_items(), 2);
     assert(filtered_people.has(charles.user_id));
     assert(filtered_people.has(maria.user_id));
+
+    // Test filtering of names with diacritics
+    // This should match Nöôáàh by ignoring diacritics, and also match Nooaah
+    filtered_people = people.filter_people_by_search_terms(users, ['noOa']);
+    assert.equal(filtered_people.num_items(), 2);
+    assert(filtered_people.has(noah.user_id));
+    assert(filtered_people.has(plain_noah.user_id));
+
+    // This should match ëmerson, but not emerson
+    filtered_people = people.filter_people_by_search_terms(users, ['ëm']);
+    assert.equal(filtered_people.num_items(), 1);
+    assert(filtered_people.has(noah.user_id));
 
     // Test filtering with undefined user
     var foo = {
@@ -518,7 +567,7 @@ initialize();
     people.add(person);
 
     global.blueslip.error = function (msg) {
-        assert.equal(msg, 'No userid found for person@example.com');
+        assert.equal(msg, 'No user_id found for person@example.com');
     };
     var user_id = people.get_user_id('person@example.com');
     assert.equal(user_id, undefined);
@@ -542,6 +591,7 @@ initialize();
         assert.equal(msg, 'Empty recipient list in message');
     };
     people.pm_with_user_ids(message);
+    people.group_pm_with_user_ids(message);
 
     var charles = {
         email: 'charles@example.com',
@@ -609,4 +659,3 @@ initialize();
     assert.equal(global.page_params.realm_users, undefined);
     assert.equal(global.page_params.cross_realm_bots, undefined);
 }());
-

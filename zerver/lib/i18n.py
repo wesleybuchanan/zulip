@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 import operator
 
 from django.conf import settings
 from django.utils import translation
 from django.utils.translation import ugettext as _
+from django.utils.lru_cache import lru_cache
 
 from six.moves import urllib, zip_longest, zip, range
 from typing import Any, List, Dict, Optional, Text
@@ -14,24 +14,23 @@ import ujson
 
 def with_language(string, language):
     # type: (Text, Text) -> Text
+    """
+    This is an expensive function. If you are using it in a loop, it will
+    make your code slow.
+    """
     old_language = translation.get_language()
     translation.activate(language)
     result = _(string)
     translation.activate(old_language)
     return result
 
+@lru_cache()
 def get_language_list():
     # type: () -> List[Dict[str, Any]]
-    path = os.path.join(settings.STATIC_ROOT, 'locale', 'language_options.json')
+    path = os.path.join(settings.STATIC_ROOT, 'locale', 'language_name_map.json')
     with open(path, 'r') as reader:
         languages = ujson.load(reader)
-        lang_list = []
-        for lang_info in languages['languages']:
-            name = lang_info['name']
-            lang_info['name'] = with_language(name, lang_info['code'])
-            lang_list.append(lang_info)
-
-        return sorted(lang_list, key=lambda i: i['name'])
+        return languages['name_map']
 
 def get_language_list_for_templates(default_language):
     # type: (Text) -> List[Dict[str, Dict[str, str]]]
@@ -56,11 +55,15 @@ def get_language_list_for_templates(default_language):
             if 'percent_translated' in lang:
                 percent = u"{} ({}%)".format(name, lang['percent_translated'])
 
+            selected = False
+            if default_language in (lang['code'], lang['locale']):
+                selected = True
+
             item[position] = {
                 'name': name,
                 'code': lang['code'],
                 'percent': percent,
-                'selected': True if default_language == lang['code'] else False
+                'selected': selected
             }
 
         formatted_list.append(item)
@@ -70,7 +73,7 @@ def get_language_list_for_templates(default_language):
 def get_language_name(code):
     # type: (str) -> Optional[Text]
     for lang in get_language_list():
-        if lang['code'] == code:
+        if code in (lang['code'], lang['locale']):
             return lang['name']
     return None
 

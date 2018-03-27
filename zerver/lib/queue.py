@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 
 from django.conf import settings
 import pika
@@ -9,12 +8,12 @@ import ujson
 import random
 import time
 import threading
-import atexit
 from collections import defaultdict
 
 from zerver.lib.utils import statsd
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Union
 
+MAX_REQUEST_RETRIES = 3
 Consumer = Callable[[BlockingChannel, Basic.Deliver, pika.BasicProperties, str], None]
 
 # This simple queuing library doesn't expose much of the power of
@@ -29,7 +28,7 @@ class SimpleQueueClient(object):
         self.channel = None  # type: Optional[BlockingChannel]
         self.consumers = defaultdict(set)  # type: Dict[str, Set[Consumer]]
         # Disable RabbitMQ heartbeats since BlockingConnection can't process them
-        self.rabbitmq_heartbeat = 0
+        self.rabbitmq_heartbeat = 0  # type: Optional[int]
         self._connect()
 
     def _connect(self):
@@ -136,7 +135,7 @@ class SimpleQueueClient(object):
                                                              consumer_tag=self._generate_ctag(queue_name)))
 
     def register_json_consumer(self, queue_name, callback):
-        # type: (str, Callable[[Mapping[str, Any]], None]) -> None
+        # type: (str, Callable[[Dict[str, Any]], None]) -> None
         def wrapped_callback(ch, method, properties, body):
             # type: (BlockingChannel, Basic.Deliver, pika.BasicProperties, str) -> None
             callback(ujson.loads(body))
@@ -291,12 +290,6 @@ def get_queue_client():
 
     return queue_client
 
-def setup_tornado_rabbitmq():
-    # type: () -> None
-    # When tornado is shut down, disconnect cleanly from rabbitmq
-    if settings.USING_RABBITMQ:
-        atexit.register(lambda: queue_client.close())
-
 # We using a simple lock to prevent multiple RabbitMQ messages being
 # sent to the SimpleQueueClient at the same time; this is a workaround
 # for an issue with the pika BlockingConnection where using
@@ -304,11 +297,24 @@ def setup_tornado_rabbitmq():
 # randomly close.
 queue_lock = threading.RLock()
 
-def queue_json_publish(queue_name, event, processor):
-    # type: (str, Union[Mapping[str, Any], str], Callable[[Any], None]) -> None
+def queue_json_publish(queue_name, event, processor, call_consume_in_tests=False):
+    # type: (str, Union[Dict[str, Any], str], Callable[[Any], None], bool) -> None
     # most events are dicts, but zerver.middleware.write_log_line uses a str
     with queue_lock:
         if settings.USING_RABBITMQ:
             get_queue_client().json_publish(queue_name, event)
+        elif call_consume_in_tests:
+            # Must be imported here: A top section import leads to obscure not-defined-ish errors.
+            from zerver.worker.queue_processors import get_worker
+            get_worker(queue_name).consume_wrapper(event)  # type: ignore # https://github.com/python/mypy/issues/3360
         else:
             processor(event)
+
+def retry_event(queue_name, event, failure_processor):
+    # type: (str, Dict[str, Any], Callable[[Dict[str, Any]], None]) -> None
+    assert 'failed_tries' in event
+    event['failed_tries'] += 1
+    if event['failed_tries'] > MAX_REQUEST_RETRIES:
+        failure_processor(event)
+    else:
+        queue_json_publish(queue_name, event, lambda x: None)

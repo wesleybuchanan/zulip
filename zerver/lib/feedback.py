@@ -1,10 +1,10 @@
-from __future__ import absolute_import
 
 from django.conf import settings
 from django.core.mail import EmailMessage
 from typing import Any, Mapping, Optional, Text
 
 from zerver.lib.actions import internal_send_message
+from zerver.lib.send_email import FromAddress
 from zerver.lib.redis_utils import get_redis_client
 from zerver.models import get_realm, get_system_bot, \
     UserProfile, Realm
@@ -19,7 +19,7 @@ def has_enough_time_expired_since_last_message(sender_email, min_delay):
     # of noting that a new message was received.
     key = 'zilencer:feedback:%s' % (sender_email,)
     t = int(time.time())
-    last_time = client.getset(key, t)
+    last_time = client.getset(key, t)  # type: Optional[bytes]
     if last_time is None:
         return True
     delay = t - int(last_time)
@@ -75,7 +75,7 @@ def handle_feedback(event):
         to_email = settings.FEEDBACK_EMAIL
         subject = "Zulip feedback from %s" % (event["sender_email"],)
         content = event["content"]
-        from_email = '"%s" <%s>' % (event["sender_full_name"], settings.ZULIP_ADMINISTRATOR)
+        from_email = '"%s" <%s>' % (event["sender_full_name"], FromAddress.SUPPORT)
         headers = {'Reply-To': '"%s" <%s>' % (event["sender_full_name"], event["sender_email"])}
         msg = EmailMessage(subject, content, from_email, [to_email], headers=headers)
         msg.send()

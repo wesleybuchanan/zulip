@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
@@ -8,8 +7,9 @@ from zerver.forms import email_is_not_mit_mailing_list
 
 from zerver.lib.rate_limiter import (
     add_ratelimit_rule,
-    clear_user_history,
+    clear_history,
     remove_ratelimit_rule,
+    RateLimitedUser,
 )
 
 from zerver.lib.actions import compute_mit_user_fullname
@@ -20,10 +20,8 @@ from zerver.lib.test_classes import (
 import DNS
 import mock
 import time
-import ujson
 
 from six.moves import urllib
-from six.moves import range
 from typing import Text
 
 class MITNameTest(ZulipTestCase):
@@ -78,7 +76,7 @@ class RateLimitTests(ZulipTestCase):
         # type: () -> None
         user = self.example_user('hamlet')
         email = user.email
-        clear_user_history(user)
+        clear_history(RateLimitedUser(user))
 
         result = self.send_api_message(email, "some stuff")
         self.assertTrue('X-RateLimit-Remaining' in result)
@@ -89,7 +87,7 @@ class RateLimitTests(ZulipTestCase):
         # type: () -> None
         user = self.example_user('hamlet')
         email = user.email
-        clear_user_history(user)
+        clear_history(RateLimitedUser(user))
         result = self.send_api_message(email, "some stuff")
         limit = int(result['X-RateLimit-Remaining'])
 
@@ -101,7 +99,7 @@ class RateLimitTests(ZulipTestCase):
         # type: () -> None
         user = self.example_user('cordelia')
         email = user.email
-        clear_user_history(user)
+        clear_history(RateLimitedUser(user))
 
         start_time = time.time()
         for i in range(6):
@@ -109,7 +107,7 @@ class RateLimitTests(ZulipTestCase):
                 result = self.send_api_message(email, "some stuff %s" % (i,))
 
         self.assertEqual(result.status_code, 429)
-        json = ujson.loads(result.content)
+        json = result.json()
         self.assertEqual(json.get("result"), "error")
         self.assertIn("API usage exceeded rate limit", json.get("msg"))
         self.assertEqual(json.get('retry-after'), 0.5)

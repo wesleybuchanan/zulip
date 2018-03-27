@@ -2,11 +2,11 @@ var stream_edit = (function () {
 
 var exports = {};
 
-function setup_subscriptions_stream_hash(sub, stream_id) {
+function setup_subscriptions_stream_hash(sub) {
+    var id = sub.stream_id;
     subs.change_state.prevent_once();
-    window.location.hash = "#streams" + "/" +
-        stream_id + "/" +
-        hash_util.encodeHashComponent(sub.name);
+
+    window.location.hash = "#streams" + "/" + id + "/" + hash_util.encodeHashComponent(sub.name);
 }
 
 function settings_for_sub(sub) {
@@ -14,23 +14,37 @@ function settings_for_sub(sub) {
     return $("#subscription_overlay .subscription_settings[data-stream-id='" + id + "']");
 }
 
-exports.collapse = function (sub) {
-    // I am not sure whether this code is really correct; it was extracted
-    // from subs.update_settings_for_unsubscribed() and possibly pre-dates
-    // our big streams re-design in late 2016.
-    var stream_settings = settings_for_sub(sub);
-    if (stream_settings.hasClass('in')) {
-        stream_settings.collapse('hide');
-    }
+function get_email_of_subscribers(subscribers) {
+    var emails = [];
+    subscribers.each(function (o, i) {
+        var email = people.get_person_from_user_id(i).email;
+        emails.push(email);
+    });
+    return emails;
+}
 
-    var sub_row = stream_settings.closest('.stream-row');
-    sub_row.find(".regular_subscription_settings").removeClass('in');
+exports.rerender_subscribers_list = function (sub) {
+    var emails = get_email_of_subscribers(sub.subscribers);
+    var subscribers_list = list_render.get("stream_subscribers/" + sub.stream_id);
+
+    // Changing the data clears the rendered list and the list needs to be re-rendered.
+    // Perform re-rendering only when the stream settings form of the corresponding
+    // stream is open.
+    if (subscribers_list) {
+        subscribers_list.data(emails);
+        subscribers_list.render();
+        ui.update_scrollbar($(".subscriber_list_container"));
+    }
 };
 
-exports.show_sub = function (sub) {
-    var stream_settings = settings_for_sub(sub);
-    var sub_row = stream_settings.closest('.stream-row');
-    sub_row.find(".regular_subscription_settings").addClass('in');
+exports.hide_sub_settings = function (sub) {
+    var $settings = $(".subscription_settings[data-stream-id='" + sub.stream_id + "']");
+    $settings.find(".regular_subscription_settings").removeClass('in');
+};
+
+exports.show_sub_settings = function (sub) {
+    var $settings = $(".subscription_settings[data-stream-id='" + sub.stream_id + "']");
+    $settings.find(".regular_subscription_settings").addClass('in');
 };
 
 exports.add_me_to_member_list = function (sub) {
@@ -153,11 +167,7 @@ function show_subscription_settings(sub_row) {
     alerts.addClass("hide");
     list.empty();
 
-    var emails = [];
-    sub.subscribers.each(function (o, i) {
-        var email = people.get_person_from_user_id(i).email;
-        emails.push(email);
-    });
+    var emails = get_email_of_subscribers(sub.subscribers);
 
     list_render(list, emails.sort(), {
         name: "stream_subscribers/" + stream_id,
@@ -179,12 +189,13 @@ function show_subscription_settings(sub_row) {
         },
     }).init();
 
+    ui.set_up_scrollbar($(".subscriber_list_container"));
+
     sub_settings.find('input[name="principal"]').typeahead({
         source: people.get_realm_persons, // This is a function.
         items: 5,
         highlighter: function (item) {
-            var item_formatted = typeahead_helper.render_person(item);
-            return typeahead_helper.highlight_with_escaping(this.query, item_formatted);
+            return typeahead_helper.render_person(item);
         },
         matcher: function (item) {
             var query = $.trim(this.query.toLowerCase());
@@ -192,8 +203,10 @@ function show_subscription_settings(sub_row) {
                 return false;
             }
             // Case-insensitive.
-            return (item.email.toLowerCase().indexOf(query) !== -1) ||
-                (item.full_name.toLowerCase().indexOf(query) !== -1);
+            var item_matches = (item.email.toLowerCase().indexOf(query) !== -1) ||
+                               (item.full_name.toLowerCase().indexOf(query) !== -1);
+            var is_subscribed = stream_data.user_is_subscribed(sub.name, item.email);
+            return item_matches && !is_subscribed;
         },
         sorter: function (matches) {
             var current_stream = compose_state.stream_name();
@@ -217,6 +230,9 @@ exports.show_settings_for = function (node) {
     var sub_settings = settings_for_sub(sub);
 
     $(".nothing-selected").hide();
+
+    ui.update_scrollbar($("#subscription_overlay .settings"));
+
     sub_settings.addClass("show");
 
     show_subscription_settings(sub_settings);
@@ -237,7 +253,7 @@ function stream_home_view_clicked(e) {
     if (sub.in_home_view) {
         sub_settings.find(".mute-note").addClass("hide-mute-note");
         notification_checkboxes.removeClass("muted-sub");
-        notification_checkboxes.find("input[type='checkbox']").removeAttr("disabled");
+        notification_checkboxes.find("input[type='checkbox']").prop("disabled", false);
     } else {
         sub_settings.find(".mute-note").removeClass("hide-mute-note");
         notification_checkboxes.addClass("muted-sub");
@@ -255,20 +271,12 @@ exports.set_stream_property = function (sub, property, value) {
     });
 };
 
-function set_notification_setting_for_all_streams(notification_type, new_setting) {
+exports.set_notification_setting_for_all_streams = function (notification_type, new_setting) {
     _.each(stream_data.subscribed_subs(), function (sub) {
         if (sub[notification_type] !== new_setting) {
             exports.set_stream_property(sub, notification_type, new_setting);
         }
     });
-}
-
-exports.set_all_stream_desktop_notifications_to = function (new_setting) {
-    set_notification_setting_for_all_streams("desktop_notifications", new_setting);
-};
-
-exports.set_all_stream_audible_notifications_to = function (new_setting) {
-    set_notification_setting_for_all_streams("audible_notifications", new_setting);
 };
 
 function redraw_privacy_related_stuff(sub_row, sub) {
@@ -293,7 +301,7 @@ function redraw_privacy_related_stuff(sub_row, sub) {
             .html("");
     }
 
-    stream_list.redraw_stream_privacy(sub.name);
+    stream_list.redraw_stream_privacy(sub);
 }
 
 function change_stream_privacy(e) {
@@ -338,6 +346,12 @@ function stream_audible_notifications_clicked(e) {
     var sub = get_sub_for_target(e.target);
     sub.audible_notifications = ! sub.audible_notifications;
     exports.set_stream_property(sub, 'audible_notifications', sub.audible_notifications);
+}
+
+function stream_push_notifications_clicked(e) {
+    var sub = get_sub_for_target(e.target);
+    sub.push_notifications = ! sub.push_notifications;
+    exports.set_stream_property(sub, 'push_notifications', sub.push_notifications);
 }
 
 function stream_pin_clicked(e) {
@@ -446,6 +460,8 @@ $(function () {
                                  stream_desktop_notifications_clicked);
     $("#subscriptions_table").on("click", "#sub_audible_notifications_setting",
                                  stream_audible_notifications_clicked);
+    $("#subscriptions_table").on("click", "#sub_push_notifications_setting",
+                                 stream_push_notifications_clicked);
     $("#subscriptions_table").on("click", "#sub_pin_setting",
                                  stream_pin_clicked);
 
@@ -543,7 +559,6 @@ $(function () {
     $("#subscriptions_table").on("click", ".sub_unsub_button", function (e) {
         var sub = get_sub_for_target(e.target);
         var stream_row = $(this).parent();
-        var stream_id = stream_row.attr("data-stream-id");
         subs.sub_or_unsub(sub);
         var sub_settings = settings_for_sub(sub);
         var regular_sub_settings = sub_settings.find(".regular_subscription_settings");
@@ -554,7 +569,7 @@ $(function () {
             regular_sub_settings.removeClass("in");
         }
 
-        setup_subscriptions_stream_hash(sub, stream_id);
+        setup_subscriptions_stream_hash(sub);
         e.preventDefault();
         e.stopPropagation();
     });
@@ -564,24 +579,18 @@ $(function () {
             exports.show_stream_row(this, true);
             var stream_id = $(this).attr("data-stream-id");
             var sub = stream_data.get_sub_by_id(stream_id);
-            setup_subscriptions_stream_hash(sub, stream_id);
+            setup_subscriptions_stream_hash(sub);
         }
     });
 
     $(document).on('peer_subscribe.zulip', function (e, data) {
         var sub = stream_data.get_sub(data.stream_name);
-        var sub_row = settings_for_sub(sub);
-        exports.prepend_subscriber(sub_row, data.user_email);
+        exports.rerender_subscribers_list(sub);
     });
 
     $(document).on('peer_unsubscribe.zulip', function (e, data) {
         var sub = stream_data.get_sub(data.stream_name);
-
-        var sub_row = settings_for_sub(sub);
-        var tr = sub_row.find("tr[data-subscriber-email='" +
-                              data.user_email +
-                              "']");
-        tr.remove();
+        exports.rerender_subscribers_list(sub);
     });
 
 });

@@ -47,15 +47,6 @@ function process_result(messages, opts) {
 }
 
 function get_old_messages_success(data, opts) {
-    if (tutorial.is_running()) {
-        // Don't actually process the messages until the tutorial is
-        // finished, but do disable the loading indicator so it isn't
-        // distracting in the background
-        loading.destroy_indicator($('#page_loading_indicator'));
-        tutorial.defer(function () { get_old_messages_success(data, opts); });
-        return;
-    }
-
     if (opts.msg_list.narrowed && opts.msg_list !== current_msg_list) {
         // We unnarrowed before receiving new messages so
         // don't bother processing the newly arrived messages.
@@ -156,7 +147,7 @@ exports.load_more_messages = function load_more_messages(msg_list) {
     });
 };
 
-util.execute_early(function () {
+exports.initialize = function () {
     // get the initial message list
     function load_more(messages) {
 
@@ -213,7 +204,7 @@ util.execute_early(function () {
     } else {
         server_events.home_view_loaded();
     }
-});
+};
 
 
 return exports;

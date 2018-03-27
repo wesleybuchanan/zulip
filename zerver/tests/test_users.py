@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
-from typing import (Any, Dict, Iterable, List,
+from typing import (Any, Dict, Iterable, List, Mapping,
                     Optional, TypeVar, Text, Union)
 
 from django.http import HttpResponse
@@ -10,7 +8,7 @@ from django.test import TestCase
 
 from zerver.lib.test_helpers import (
     queries_captured, simulated_empty_cache,
-    tornado_redirected_to_list,
+    tornado_redirected_to_list, get_subscription,
     most_recent_message, make_client, avatar_disk_path,
     get_test_image_file
 )
@@ -21,19 +19,25 @@ from zerver.lib.test_runner import slow
 
 from zerver.models import UserProfile, Recipient, \
     Realm, RealmDomain, UserActivity, \
-    get_user, get_realm, get_client, get_stream, \
-    Message, get_context_for_message
+    get_user, get_realm, get_client, get_stream, get_recipient, \
+    Message, get_context_for_message, ScheduledEmail
 
 from zerver.lib.avatar import avatar_url
 from zerver.lib.email_mirror import create_missed_message_address
+from zerver.lib.send_email import send_future_email
 from zerver.lib.actions import (
     get_emails_from_user_ids,
+    get_recipient_info,
     do_deactivate_user,
     do_reactivate_user,
     do_change_is_admin,
 )
+from zerver.lib.topic_mutes import add_topic_mute
+from zerver.lib.stream_topic import StreamTopicTarget
 
 from django.conf import settings
+
+import datetime
 import os
 import sys
 import time
@@ -79,7 +83,7 @@ class PermissionTest(ZulipTestCase):
         # Make sure we see is_admin flag in /json/users
         result = self.client_get('/json/users')
         self.assert_json_success(result)
-        members = ujson.loads(result.content)['members']
+        members = result.json()['members']
         hamlet = find_dict(members, 'email', self.example_email("hamlet"))
         self.assertTrue(hamlet['is_admin'])
         othello = find_dict(members, 'email', self.example_email("othello"))
@@ -88,7 +92,7 @@ class PermissionTest(ZulipTestCase):
         # Giveth
         req = dict(is_admin=ujson.dumps(True))
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_patch('/json/users/othello@zulip.com', req)
         self.assert_json_success(result)
@@ -339,6 +343,112 @@ class ActivateTest(ZulipTestCase):
         result = self.client_post('/json/users/hamlet@zulip.com/reactivate')
         self.assert_json_error(result, 'Insufficient permission')
 
+    def test_clear_scheduled_jobs(self):
+        # type: () -> None
+        user = self.example_user('hamlet')
+        send_future_email('zerver/emails/followup_day1', to_user_id=user.id, delay=datetime.timedelta(hours=1))
+        self.assertEqual(ScheduledEmail.objects.count(), 1)
+        do_deactivate_user(user)
+        self.assertEqual(ScheduledEmail.objects.count(), 0)
+
+class RecipientInfoTest(ZulipTestCase):
+    def test_stream_recipient_info(self):
+        # type: () -> None
+        hamlet = self.example_user('hamlet')
+        cordelia = self.example_user('cordelia')
+        othello = self.example_user('othello')
+
+        realm = hamlet.realm
+
+        stream_name = 'Test Stream'
+        topic_name = 'test topic'
+
+        for user in [hamlet, cordelia, othello]:
+            self.subscribe(user, stream_name)
+
+        stream = get_stream(stream_name, realm)
+        recipient = get_recipient(Recipient.STREAM, stream.id)
+
+        stream_topic = StreamTopicTarget(
+            stream_id=stream.id,
+            topic_name=topic_name,
+        )
+
+        sub = get_subscription(stream_name, hamlet)
+        sub.push_notifications = True
+        sub.save()
+
+        info = get_recipient_info(
+            recipient=recipient,
+            sender_id=hamlet.id,
+            stream_topic=stream_topic,
+        )
+
+        all_user_ids = {hamlet.id, cordelia.id, othello.id}
+
+        expected_info = dict(
+            active_user_ids=all_user_ids,
+            push_notify_user_ids=set(),
+            stream_push_user_ids={hamlet.id},
+            um_eligible_user_ids=all_user_ids,
+            long_term_idle_user_ids=set(),
+            service_bot_tuples=[],
+        )
+
+        self.assertEqual(info, expected_info)
+
+        # Now mute Hamlet to omit him from stream_push_user_ids.
+        add_topic_mute(
+            user_profile=hamlet,
+            stream_id=stream.id,
+            recipient_id=recipient.id,
+            topic_name=topic_name,
+        )
+
+        info = get_recipient_info(
+            recipient=recipient,
+            sender_id=hamlet.id,
+            stream_topic=stream_topic,
+        )
+
+        self.assertEqual(info['stream_push_user_ids'], set())
+
+class BulkUsersTest(ZulipTestCase):
+    def test_client_gravatar_option(self):
+        # type: () -> None
+        self.login(self.example_email('cordelia'))
+
+        hamlet = self.example_user('hamlet')
+
+        def get_hamlet_avatar(client_gravatar):
+            # type: (bool) -> Optional[Text]
+            data = dict(client_gravatar=ujson.dumps(client_gravatar))
+            result = self.client_get('/json/users', data)
+            self.assert_json_success(result)
+            rows = result.json()['members']
+            hamlet_data = [
+                row for row in rows
+                if row['user_id'] == hamlet.id
+            ][0]
+            return hamlet_data['avatar_url']
+
+        self.assertEqual(
+            get_hamlet_avatar(client_gravatar=True),
+            None
+        )
+
+        '''
+        The main purpose of this test is to make sure we
+        return None for avatar_url when client_gravatar is
+        set to True.  And we do a sanity check for when it's
+        False, but we leave it to other tests to validate
+        the specific URL.
+        '''
+        self.assertIn(
+            'gravatar.com',
+            get_hamlet_avatar(client_gravatar=False),
+        )
+
 class GetProfileTest(ZulipTestCase):
 
     def common_update_pointer(self, email, pointer):
@@ -358,7 +468,7 @@ class GetProfileTest(ZulipTestCase):
         max_id = most_recent_message(user_profile).id
 
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
+        json = result.json()
 
         self.assertIn("client_id", json)
         self.assertIn("max_message_id", json)
@@ -373,18 +483,22 @@ class GetProfileTest(ZulipTestCase):
         self.login(email)
         result = self.client_get("/json/users/me/pointer")
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
-        self.assertIn("pointer", json)
+        self.assertIn("pointer", result.json())
 
     def test_cache_behavior(self):
         # type: () -> None
+        """Tests whether fetching a user object the normal way, with
+        `get_user`, makes 1 cache query and 1 database query.
+        """
+        realm = get_realm("zulip")
+        email = self.example_email("hamlet")
         with queries_captured() as queries:
             with simulated_empty_cache() as cache_queries:
-                user_profile = self.example_user('hamlet')
+                user_profile = get_user(email, realm)
 
         self.assert_length(queries, 1)
         self.assert_length(cache_queries, 1)
-        self.assertEqual(user_profile.email, self.example_email("hamlet"))
+        self.assertEqual(user_profile.email, email)
 
     def test_get_user_profile(self):
         # type: () -> None
@@ -439,9 +553,8 @@ class GetProfileTest(ZulipTestCase):
         user_profile = self.example_user('hamlet')
         result = self.client_get("/api/v1/users", **self.api_auth(self.example_email("hamlet")))
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
 
-        for user in json['members']:
+        for user in result.json()['members']:
             if user['email'] == self.example_email("hamlet"):
                 self.assertEqual(
                     user['avatar_url'],

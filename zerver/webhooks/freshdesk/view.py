@@ -1,11 +1,10 @@
 """Webhooks for external integrations."""
-from __future__ import absolute_import
 
 from django.http import HttpRequest, HttpResponse
 from django.utils.translation import ugettext as _
 
 from zerver.models import get_client, UserProfile
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success, json_error
 from zerver.lib.notifications import convert_html_to_markdown
 from zerver.decorator import REQ, has_request_variables, authenticated_rest_api_view
@@ -133,11 +132,7 @@ def api_freshdesk_webhook(request, user_profile, payload=REQ(argument_type='body
     ticket = TicketDict(ticket_data)
 
     subject = "#%s: %s" % (ticket.id, ticket.subject)
-
-    try:
-        event_info = parse_freshdesk_event(ticket.triggered_event)
-    except ValueError:
-        return json_error(_("Malformed event %s") % (ticket.triggered_event,))
+    event_info = parse_freshdesk_event(ticket.triggered_event)
 
     if event_info[1] == "created":
         content = format_freshdesk_ticket_creation_message(ticket)
@@ -149,6 +144,6 @@ def api_freshdesk_webhook(request, user_profile, payload=REQ(argument_type='body
         # Not an event we know handle; do nothing.
         return json_success()
 
-    check_send_message(user_profile, get_client("ZulipFreshdeskWebhook"), "stream",
-                       [stream], subject, content)
+    check_send_stream_message(user_profile, get_client("ZulipFreshdeskWebhook"),
+                              stream, subject, content)
     return json_success()

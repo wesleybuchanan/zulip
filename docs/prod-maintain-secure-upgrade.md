@@ -23,10 +23,9 @@ To upgrade to a new version of the zulip server, download the appropriate
 release tarball from <https://www.zulip.org/dist/releases/>.
 
 You also have the option of creating your own release tarballs from a
-copy of the zulip.git repository using
-`tools/build-release-tarball`. And, starting with Zulip version 1.4,
-you can upgrade Zulip [to a version in a Git repository
-directly](#upgrading-from-a-git-repository).
+copy of the [zulip.git repository](https://github.com/zulip/zulip)
+using `tools/build-release-tarball` or upgrade Zulip
+[to a version in a Git repository directly](#upgrading-from-a-git-repository).
 
 Next, run as root:
 
@@ -77,14 +76,16 @@ upgrade.
 
 The Zulip upgrade process works by creating a new deployment under
 `/home/zulip/deployments/` containing a complete copy of the Zulip server code,
-and then moving the symlinks at `/home/zulip/deployments/current` and
-`/root/zulip` as part of the upgrade process.
+and then moving the symlinks at `/home/zulip/deployments/{current,last,next}`
+as part of the upgrade process.
 
 This means that if the new version isn't working,
-you can quickly downgrade to the old version by using
-`/home/zulip/deployments/<date>/scripts/restart-server` to return to
-a previous version that you've deployed (the version is specified
-via the path to the copy of `restart-server` you call).
+you can quickly downgrade to the old version by running
+`/home/zulip/deployments/last/scripts/restart-server`, or to an
+earlier previous version by running
+`/home/zulip/deployments/DATE/scripts/restart-server`.  The
+`restart-server` script stops any running Zulip server, and starts
+the version corresponding to the `restart-server` path you call.
 
 ### Updating settings
 
@@ -94,9 +95,15 @@ restart the server.
 
 ### Applying Ubuntu system updates
 
-While the Zulip upgrade script runs `apt-get upgrade`, you are responsible for
-running this on your system on a regular basis between Zulip upgrades to
-ensure that it is up to date with the latest security patches.
+The Zulip upgrade script will automatically run `apt-get update` and
+then `apt-get upgrade`.  If you'd like to minimize downtime, you
+should do an apt upgrade before running the Zulip upgrade script (and
+then restart the server and check everything is working) before
+running the upgrade script.
+
+Also note that you are responsible for running this on your system on
+a regular basis between Zulip upgrades to ensure that your system is
+up to date with the latest upstream security patches.
 
 ### API and your Zulip URL
 
@@ -126,20 +133,10 @@ precise configuration.
 
 ## Upgrading from a git repository
 
-Starting with version 1.4, the Zulip server supports doing deployments
-from a Git repository.  To configure this, you will need to add
-`zulip::static_asset_compiler` to your `/etc/zulip/zulip.conf` file's
-`puppet_classes` entry, like this:
-
-```
-puppet_classes = zulip::voyager, zulip::static_asset_compiler
-```
-
-Then, run `scripts/zulip-puppet-apply` to install the dependencies for
-building Zulip's static assets.  You can configure the `git`
-repository that you'd like to use by adding a section like this to
-`/etc/zulip/zulip.conf`; by default it uses the main `zulip`
-repository (shown below).
+Starting with version 1.4, the Zulip server supports upgrading to a
+commit in Git.  You can configure the `git` repository that you'd like
+to use by adding a section like this to `/etc/zulip/zulip.conf`; by
+default it uses the main `zulip` repository (shown below).
 
 ```
 [deployment]
@@ -147,17 +144,32 @@ git_repo_url = https://github.com/zulip/zulip.git
 ```
 
 Once that is done (and assuming the currently installed version of
-Zulip is new enough that this script exists), you can do deployments
-by running as root:
+Zulip is 1.7 or newer), you can do deployments by running as root:
 
 ```
 /home/zulip/deployments/current/scripts/upgrade-zulip-from-git <branch>
 ```
 
 and Zulip will automatically fetch the relevant branch from the
-specified repository, build the static assets, and deploy that
-version.  Currently, the upgrade process is slow, but it doesn't need
-to be; there is ongoing work on optimizing it.
+specified repository to a directory under `/home/zulip/deployments`
+(where release tarball are unpacked), build the compiled static assets
+from source, and switches to the new version.
+
+### Upgrading from Zulip 1.6 and older
+
+If you're currently using Zulip older than 1.7, you will need to
+add `zulip::static_asset_compiler` to your `/etc/zulip/zulip.conf`
+file's `puppet_classes` entry, like this:
+
+```
+puppet_classes = zulip::voyager, zulip::static_asset_compiler
+```
+
+Then, run `scripts/zulip-puppet-apply` to install the dependencies for
+building Zulip's static assets.  Once you've upgraded to Zulip 1.7 or
+above, you can safely remove `zulip::static_asset_compiler` from
+`puppet_classes` to clean it up; in Zulip 1.7 and above, it is a
+dependency of `zulip::voyager`.
 
 ## Backups
 
@@ -416,9 +428,13 @@ the `knight` management command:
 
 If you need to manage the IRC, Jabber, or Zephyr mirrors, you will
 need to create API super users.  To do this, use `./manage.py knight`
-with the `--permission=api_super_user` argument.  See
-`api/integrations/irc-mirror.py` and
-`api/integrations/jabber_mirror.py` for further detail on these.
+with the `--permission=api_super_user` argument.  See the respective
+integration scripts for these mirrors (under
+[`zulip/integrations/`][integrations-source] in the [Zulip Python API
+repo][python-api-repo]) for further detail on these.
+
+[integrations-source]: https://github.com/zulip/python-zulip-api/tree/master/zulip/integrations
+[python-api-repo]: https://github.com/zulip/python-zulip-api
 
 #### Exporting users and realms with manage.py export
 
@@ -443,3 +459,7 @@ server, and suggested procedure.
 There are a large number of useful management commands under
 `zerver/management/commands/`; you can also see them listed using
 `./manage.py` with no arguments.
+
+## Hosting multiple Zulip organizations
+
+This is explained in detail on [its own page](prod-multiple-organizations.html).

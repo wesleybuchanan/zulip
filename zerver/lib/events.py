@@ -1,10 +1,7 @@
 # See http://zulip.readthedocs.io/en/latest/events-system.html for
 # high-level documentation on how this system works.
-from __future__ import absolute_import
-from __future__ import print_function
 
 import copy
-import six
 import ujson
 
 from django.utils.translation import ugettext as _
@@ -12,7 +9,7 @@ from django.conf import settings
 from importlib import import_module
 from six.moves import filter, map
 from typing import (
-    Any, Dict, Iterable, List, Optional, Sequence, Set, Text, Tuple
+    cast, Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Text, Tuple, Union
 )
 
 session_engine = import_module(settings.SESSION_ENGINE)
@@ -21,19 +18,30 @@ from zerver.lib.alert_words import user_alert_words
 from zerver.lib.attachments import user_attachments
 from zerver.lib.avatar import avatar_url, avatar_url_from_dict
 from zerver.lib.hotspots import get_next_hotspots
+from zerver.lib.integrations import EMBEDDED_BOTS
+from zerver.lib.message import (
+    aggregate_unread_data,
+    apply_unread_message_event,
+    get_raw_unread_data,
+)
 from zerver.lib.narrow import check_supported_events_narrow_filter
+from zerver.lib.soft_deactivation import maybe_catch_up_soft_deactivated_user
 from zerver.lib.realm_icon import realm_icon_url
 from zerver.lib.request import JsonableError
-from zerver.lib.actions import validate_user_access_to_subscribers_helper, \
-    do_get_streams, get_default_streams_for_realm, \
-    gather_subscriptions_helper, get_cross_realm_dicts, \
+from zerver.lib.topic_mutes import get_topic_mutes
+from zerver.lib.actions import (
+    validate_user_access_to_subscribers_helper,
+    do_get_streams, get_default_streams_for_realm,
+    gather_subscriptions_helper, get_cross_realm_dicts,
     get_status_dict, streams_to_dicts_sorted
+)
+from zerver.lib.upload import get_total_uploads_size_for_user
 from zerver.tornado.event_queue import request_event_queue, get_user_events
 from zerver.models import Client, Message, Realm, UserPresence, UserProfile, \
     get_user_profile_by_id, \
     get_active_user_dicts_in_realm, realm_filters_for_realm, get_user,\
     get_owned_bot_dicts, custom_profile_fields_for_realm, get_realm_domains
-from zproject.backends import password_auth_enabled
+from zproject.backends import email_auth_enabled, password_auth_enabled
 from version import ZULIP_VERSION
 
 
@@ -46,7 +54,18 @@ def get_realm_user_dicts(user_profile):
              'is_bot': userdict['is_bot'],
              'full_name': userdict['full_name'],
              'timezone': userdict['timezone']}
-            for userdict in get_active_user_dicts_in_realm(user_profile.realm)]
+            for userdict in get_active_user_dicts_in_realm(user_profile.realm_id)]
+
+def always_want(msg_type):
+    # type: (str) -> bool
+    '''
+    This function is used as a helper in
+    fetch_initial_state_data, when the user passes
+    in None for event_types, and we want to fetch
+    info for every event type.  Defining this at module
+    level makes it easier to mock.
+    '''
+    return True
 
 # Fetch initial data.  When event_types is not specified, clients want
 # all event types.  Whenever you add new code to this function, you
@@ -58,7 +77,8 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
     state = {'queue_id': queue_id}  # type: Dict[str, Any]
 
     if event_types is None:
-        want = lambda msg_type: True
+        # return True always
+        want = always_want  # type: Callable[[str], bool]
     else:
         want = set(event_types).__contains__
 
@@ -71,6 +91,12 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
 
     if want('attachments'):
         state['attachments'] = user_attachments(user_profile)
+
+    if want('upload_quota'):
+        state['upload_quota'] = user_profile.quota
+
+    if want('total_uploads_size'):
+        state['total_uploads_size'] = get_total_uploads_size_for_user(user_profile)
 
     if want('hotspots'):
         state['hotspots'] = get_next_hotspots(user_profile)
@@ -86,7 +112,7 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
             state['max_message_id'] = -1
 
     if want('muted_topics'):
-        state['muted_topics'] = ujson.loads(user_profile.muted_topics)
+        state['muted_topics'] = get_topic_mutes(user_profile)
 
     if want('pointer'):
         state['pointer'] = user_profile.pointer
@@ -97,6 +123,10 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
     if want('realm'):
         for property_name in Realm.property_types:
             state['realm_' + property_name] = getattr(user_profile.realm, property_name)
+
+        # Most state is handled via the property_types framework;
+        # these manual entries are for those realm settings that don't
+        # fit into that framework.
         state['realm_authentication_methods'] = user_profile.realm.authentication_methods_dict()
         state['realm_allow_message_editing'] = user_profile.realm.allow_message_editing
         state['realm_message_content_edit_limit_seconds'] = user_profile.realm.message_content_edit_limit_seconds
@@ -106,9 +136,9 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
         state['realm_bot_domain'] = user_profile.realm.get_bot_domain()
         state['realm_uri'] = user_profile.realm.uri
         state['realm_presence_disabled'] = user_profile.realm.presence_disabled
-        state['realm_mandatory_topics'] = user_profile.realm.mandatory_topics
         state['realm_show_digest_email'] = user_profile.realm.show_digest_email
         state['realm_is_zephyr_mirror_realm'] = user_profile.realm.is_zephyr_mirror_realm
+        state['realm_email_auth_enabled'] = email_auth_enabled(user_profile.realm)
         state['realm_password_auth_enabled'] = password_auth_enabled(user_profile.realm)
         if user_profile.realm.notifications_stream and not user_profile.realm.notifications_stream.deactivated:
             notifications_stream = user_profile.realm.notifications_stream
@@ -141,9 +171,10 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
     if want('realm_bot'):
         state['realm_bots'] = get_owned_bot_dicts(user_profile)
 
-    if want('referral'):
-        state['referrals'] = {'granted': user_profile.invites_granted,
-                              'used': user_profile.invites_used}
+    # This does not yet have an apply_event counterpart, since currently,
+    # new entries for EMBEDDED_BOTS can only be added directly in the codebase.
+    if want('realm_embedded_bots'):
+        state['realm_embedded_bots'] = list(bot.name for bot in EMBEDDED_BOTS)
 
     if want('subscription'):
         subscriptions, unsubscribed, never_subscribed = gather_subscriptions_helper(
@@ -152,15 +183,17 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
         state['unsubscribed'] = unsubscribed
         state['never_subscribed'] = never_subscribed
 
-    if want('update_message_flags'):
-        # There's no initial data for message flag updates, client will
-        # get any updates during a session from get_events()
-        pass
+    if want('update_message_flags') and want('message'):
+        # Keeping unread_msgs updated requires both message flag updates and
+        # message updates. This is due to the fact that new messages will not
+        # generate a flag update so we need to use the flags field in the
+        # message event.
+        state['raw_unread_msgs'] = get_raw_unread_data(user_profile)
 
     if want('stream'):
         state['streams'] = do_get_streams(user_profile)
     if want('default_streams'):
-        state['realm_default_streams'] = streams_to_dicts_sorted(get_default_streams_for_realm(user_profile.realm))
+        state['realm_default_streams'] = streams_to_dicts_sorted(get_default_streams_for_realm(user_profile.realm_id))
 
     if want('update_display_settings'):
         for prop in UserProfile.property_types:
@@ -177,6 +210,17 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
         state['zulip_version'] = ZULIP_VERSION
 
     return state
+
+
+def remove_message_id_from_unread_mgs(state, message_id):
+    # type: (Dict[str, Dict[str, Any]], int) -> None
+    raw_unread = state['raw_unread_msgs']
+
+    for key in ['pm_dict', 'stream_dict', 'huddle_dict']:
+        raw_unread[key].pop(message_id, None)
+
+    raw_unread['unmuted_stream_msgs'].discard(message_id)
+    raw_unread['mentions'].discard(message_id)
 
 def apply_events(state, events, user_profile, include_subscribers=True,
                  fetch_event_types=None):
@@ -198,6 +242,14 @@ def apply_event(state, event, user_profile, include_subscribers):
     # type: (Dict[str, Any], Dict[str, Any], UserProfile, bool) -> None
     if event['type'] == "message":
         state['max_message_id'] = max(state['max_message_id'], event['message']['id'])
+        if 'raw_unread_msgs' in state:
+            apply_unread_message_event(
+                user_profile,
+                state['raw_unread_msgs'],
+                event['message'],
+                event['flags'],
+            )
+
     elif event['type'] == "hotspots":
         state['hotspots'] = event['hotspots']
     elif event['type'] == "custom_profile_fields":
@@ -320,20 +372,13 @@ def apply_event(state, event, user_profile, include_subscribers):
                 # is enabled on this server.
                 if key == 'authentication_methods':
                     state['realm_password_auth_enabled'] = (value['Email'] or value['LDAP'])
+                    state['realm_email_auth_enabled'] = value['Email']
     elif event['type'] == "subscription":
         if not include_subscribers and event['op'] in ['peer_add', 'peer_remove']:
             return
 
         if event['op'] in ["add"]:
-            if include_subscribers:
-                # Convert the emails to user_profile IDs since that's what register() returns
-                # TODO: Clean up this situation by making the event also have IDs
-                for item in event["subscriptions"]:
-                    item["subscribers"] = [
-                        get_user(email, user_profile.realm).id
-                        for email in item["subscribers"]
-                    ]
-            else:
+            if not include_subscribers:
                 # Avoid letting 'subscribers' entries end up in the list
                 for i, sub in enumerate(event['subscriptions']):
                     event['subscriptions'][i] = copy.deepcopy(event['subscriptions'][i])
@@ -400,8 +445,15 @@ def apply_event(state, event, user_profile, include_subscribers):
         presence_user_profile = get_user(event['email'], user_profile.realm)
         state['presences'][event['email']] = UserPresence.get_status_dict_by_user(presence_user_profile)[event['email']]
     elif event['type'] == "update_message":
-        # The client will get the updated message directly
-        pass
+        # We don't return messages in /register, so we don't need to
+        # do anything for content updates, but we may need to update
+        # the unread_msgs data if the topic of an unread message changed.
+        if 'subject' in event:
+            stream_dict = state['raw_unread_msgs']['stream_dict']
+            topic = event['subject']
+            for message_id in event['message_ids']:
+                if message_id in stream_dict:
+                    stream_dict[message_id]['topic'] = topic
     elif event['type'] == "delete_message":
         max_message = Message.objects.filter(
             usermessage__user_profile=user_profile).order_by('-id').first()
@@ -409,17 +461,22 @@ def apply_event(state, event, user_profile, include_subscribers):
             state['max_message_id'] = max_message.id
         else:
             state['max_message_id'] = -1
+
+        remove_id = event['message_id']
+        remove_message_id_from_unread_mgs(state, remove_id)
     elif event['type'] == "reaction":
         # The client will get the message with the reactions directly
         pass
-    elif event['type'] == "referral":
-        state['referrals'] = event['referrals']
     elif event['type'] == 'typing':
         # Typing notification events are transient and thus ignored
         pass
     elif event['type'] == "update_message_flags":
-        # The client will get the message with the updated flags directly
-        pass
+        # We don't return messages in `/register`, so most flags we
+        # can ignore, but we do need to update the unread_msgs data if
+        # unread state is changed.
+        if event['flag'] == 'read' and event['operation'] == 'add':
+            for remove_id in event['messages']:
+                remove_message_id_from_unread_mgs(state, remove_id)
     elif event['type'] == "realm_domains":
         if event['op'] == 'add':
             state['realm_domains'].append(event['realm_domain'])
@@ -439,37 +496,11 @@ def apply_event(state, event, user_profile, include_subscribers):
     elif event['type'] == "realm_filters":
         state['realm_filters'] = event["realm_filters"]
     elif event['type'] == "update_display_settings":
-        if event['setting_name'] == "twenty_four_hour_time":
-            state['twenty_four_hour_time'] = event["setting"]
-        if event['setting_name'] == 'left_side_userlist':
-            state['left_side_userlist'] = event["setting"]
-        if event['setting_name'] == 'emoji_alt_code':
-            state['emoji_alt_code'] = event["setting"]
-        if event['setting_name'] == 'emojiset':
-            state['emojiset'] = event["setting"]
-        if event['setting_name'] == 'default_language':
-            state['default_language'] = event["setting"]
-        if event['setting_name'] == 'timezone':
-            state['timezone'] = event["setting"]
+        assert event['setting_name'] in UserProfile.property_types
+        state[event['setting_name']] = event['setting']
     elif event['type'] == "update_global_notifications":
-        if event['notification_name'] == "enable_stream_desktop_notifications":
-            state['enable_stream_desktop_notifications'] = event['setting']
-        elif event['notification_name'] == "enable_stream_sounds":
-            state['enable_stream_sounds'] = event['setting']
-        elif event['notification_name'] == "enable_desktop_notifications":
-            state['enable_desktop_notifications'] = event['setting']
-        elif event['notification_name'] == "enable_sounds":
-            state['enable_sounds'] = event['setting']
-        elif event['notification_name'] == "enable_offline_email_notifications":
-            state['enable_offline_email_notifications'] = event['setting']
-        elif event['notification_name'] == "enable_offline_push_notifications":
-            state['enable_offline_push_notifications'] = event['setting']
-        elif event['notification_name'] == "enable_online_push_notifications":
-            state['enable_online_push_notifications'] = event['setting']
-        elif event['notification_name'] == "enable_digest_emails":
-            state['enable_digest_emails'] = event['setting']
-        elif event['notification_name'] == "pm_content_in_desktop_notifications":
-            state['pm_content_in_desktop_notifications'] = event['setting']
+        assert event['notification_name'] in UserProfile.notification_setting_types
+        state[event['notification_name']] = event['setting']
     else:
         raise AssertionError("Unexpected event type %s" % (event['type'],))
 
@@ -499,6 +530,9 @@ def do_events_register(user_profile, user_client, apply_markdown=True,
     else:
         event_types_set = None
 
+    # Fill up the UserMessage rows if a soft-deactivated user has returned
+    maybe_catch_up_soft_deactivated_user(user_profile)
+
     ret = fetch_initial_state_data(user_profile, event_types_set, queue_id,
                                    include_subscribers=include_subscribers)
 
@@ -506,6 +540,22 @@ def do_events_register(user_profile, user_client, apply_markdown=True,
     events = get_user_events(user_profile, queue_id, -1)
     apply_events(ret, events, user_profile, include_subscribers=include_subscribers,
                  fetch_event_types=fetch_event_types)
+
+    '''
+    NOTE:
+
+    Below is an example of post-processing initial state data AFTER we
+    apply events.  For large payloads like `unread_msgs`, it's helpful
+    to have an intermediate data structure that is easy to manipulate
+    with O(1)-type operations as we apply events.
+
+    Then, only at the end, we put it in the form that's more appropriate
+    for client.
+    '''
+    if 'raw_unread_msgs' in ret:
+        ret['unread_msgs'] = aggregate_unread_data(ret['raw_unread_msgs'])
+        del ret['raw_unread_msgs']
+
     if len(events) > 0:
         ret['last_event_id'] = events[-1]['id']
     else:

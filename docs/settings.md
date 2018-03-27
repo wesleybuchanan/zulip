@@ -2,12 +2,15 @@
 
 The page documents the Zulip settings system, and hopefully should
 help you decide how to correctly implement new settings you're adding
-to Zulip.  We have two types of administrative settings in Zulip:
-server settings (which are set via configuration files are apply to
-the whole Zulip installation), and realm settings (which are usually
-set via the /#organization page in the Zulip web application) and
-apply to a single Zulip realm/organization (which for most Zulip
-servers is the only realm on the server).
+to Zulip.
+
+We have two types of administrative settings in Zulip:
+* **Server settings** are set via configuration files, and apply to
+  the whole Zulip installation.
+* **Realm settings** (or **organization settings**) are usually
+  set via the /#organization page in the Zulip web application, and
+  apply to a single Zulip realm/organization. (Which, for most Zulip
+  servers, is the only realm on the server).
 
 Philosophically, the goals of the settings system are to make it
 convenient for:
@@ -72,8 +75,8 @@ In a production environment, we have:
   user would set in `/etc/zulip/settings.py` (you can look at the
   `DEFAULT_SETTINGS` dictionary to easily review the settings
   available).  `zproject/settings.py` has a line `from prod_settings
-  import *`, which has the effect of importing
-  `/etc/zulip/settings.py` in a prod environment (via a symlink).
+  import *`, which in a prod environment has the effect of importing
+  `/etc/zulip/settings.py` (via a symlink).
 
 In a development environment, we have `zproject/settings.py`, and
 additionally:
@@ -96,17 +99,59 @@ in two or three places:
   user will add the value when they configure the feature).
 
 * In an appropriate section of `zproject/prod_settings_template.py`,
-  with documentation in the comments explaining the settings's
+  with documentation in the comments explaining the setting's
   purpose and effect.
 
-* Possibly also `zproject/dev_settings.py`, if the desired value of
-  the setting for Zulip development environments is different from the
-  default for production (and similarly for `zproject/test_settings.py`).
+* Possibly also `zproject/dev_settings.py` and/or
+  `zproject/test_settings.py`, if the desired value of the setting for
+  Zulip development and/or test environments is different from the
+  default for production.
 
 Most settings should be enabled in the development environment, to
 maximize convenience of testing all of Zulip's features; they should
 be enabled by default in production if we expect most Zulip sites to
 want those settings.
+
+#### Testing Google & GitHub authentication
+
+In order to set up Google or GitHub authentication in the development
+environment, you'll have to go through the steps detailed in
+`prod_settings_template.py` with some changes. Here is the full
+procedure:
+
+##### Google
+
+* Visit https://console.developers.google.com, click on Credentials on
+the left sidebar and create a Oauth2 client ID that allows redirects
+to `https://localhost:9991/accounts/login/google/done/`.
+
+* Go to the Library (left sidebar), then under "Social APIs" click on
+"Google+ API" and click the button to enable the API.
+
+* Uncomment `'zproject.backends.GoogleMobileOauth2Backend'` in
+`AUTHENTICATION_BACKENDS` in `dev_settings.py`.
+
+* Uncomment `GOOGLE_OAUTH2_CLIENT_ID` in `prod_settings_template.py` &
+assign it the Client ID you got from Google.
+
+* Put the Client Secret you got from Google as
+`google_oauth2_client_secret` in `dev-secrets.conf`.
+
+##### GitHub
+
+* Register an OAuth2 application with GitHub at one of
+https://github.com/settings/developers or
+https://github.com/organizations/ORGNAME/settings/developers.
+Specify `http://localhost:9991/complete/github/` as the callback URL.
+
+* Uncomment `'zproject.backends.GitHubAuthBackend'` in
+`AUTHENTICATION_BACKENDS` in `dev_settings.py`.
+
+* Uncomment `SOCIAL_AUTH_GITHUB_KEY` in `prod_settings_template.py` &
+assign it the Client ID you got from GitHub.
+
+* Put the Client Secret you got from GitHub as
+`social_auth_github_secret` in `dev-secrets.conf`.
 
 #### Testing non-default settings
 

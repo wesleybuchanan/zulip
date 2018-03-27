@@ -15,11 +15,12 @@ add_dependencies({
 
 var stream_data = require('js/stream_data.js');
 
-stream_data = {
-    canonicalized_name: stream_data.canonicalized_name,
-};
 set_global('stream_data', stream_data);
 set_global('blueslip', {});
+set_global('page_params', {});
+set_global('feature_flags', {
+    load_server_counts: true,
+});
 
 var Dict = global.Dict;
 var muting = global.muting;
@@ -49,9 +50,8 @@ var zero_counts = {
     home_unread_messages: 0,
     mentioned_message_count: 0,
     stream_count: new Dict(),
-    subject_count: new Dict(),
+    topic_count: new Dict(),
     pm_count: new Dict(),
-    unread_in_current_view: 0,
 };
 
 (function test_empty_counts_while_narrowed() {
@@ -81,7 +81,7 @@ var zero_counts = {
 (function test_changing_subjects() {
     // Summary: change the subject of a message from 'lunch'
     // to 'dinner' using update_unread_topics().
-    var count = unread.num_unread_for_subject('social', 'lunch');
+    var count = unread.num_unread_for_topic('social', 'lunch');
     assert.equal(count, 0);
 
     var stream_id = 100;
@@ -91,22 +91,28 @@ var zero_counts = {
         id: 15,
         type: 'stream',
         stream_id: stream_id,
-        subject: 'lunch',
+        subject: 'luNch',
     };
 
     var other_message = {
         id: 16,
         type: 'stream',
         stream_id: stream_id,
-        subject: 'lunch',
+        subject: 'lunCH',
     };
 
+    assert(!unread.id_flagged_as_unread(15));
     unread.process_loaded_messages([message, other_message]);
+    assert(unread.id_flagged_as_unread(15));
 
-    count = unread.num_unread_for_subject(stream_id, 'lunch');
+    count = unread.num_unread_for_topic(stream_id, 'Lunch');
     assert.equal(count, 2);
     assert(unread.topic_has_any_unread(stream_id, 'lunch'));
     assert(!unread.topic_has_any_unread(wrong_stream_id, 'lunch'));
+    assert(!unread.topic_has_any_unread(stream_id, 'NOT lunch'));
+
+    count = unread.num_unread_for_topic(stream_id, 'NOT lunch');
+    assert.equal(count, 0);
 
     var event = {
         subject: 'dinner',
@@ -114,10 +120,10 @@ var zero_counts = {
 
     unread.update_unread_topics(message, event);
 
-    count = unread.num_unread_for_subject(stream_id, 'lunch');
+    count = unread.num_unread_for_topic(stream_id, 'lUnch');
     assert.equal(count, 1);
 
-    count = unread.num_unread_for_subject(stream_id, 'dinner');
+    count = unread.num_unread_for_topic(stream_id, 'dinner');
     assert.equal(count, 1);
 
     event = {
@@ -126,12 +132,12 @@ var zero_counts = {
 
     unread.update_unread_topics(other_message, event);
 
-    count = unread.num_unread_for_subject(stream_id, 'lunch');
+    count = unread.num_unread_for_topic(stream_id, 'lunch');
     assert.equal(count, 0);
     assert(!unread.topic_has_any_unread(stream_id, 'lunch'));
     assert(!unread.topic_has_any_unread(wrong_stream_id, 'lunch'));
 
-    count = unread.num_unread_for_subject(stream_id, 'snack');
+    count = unread.num_unread_for_topic(stream_id, 'snack');
     assert.equal(count, 1);
     assert(unread.topic_has_any_unread(stream_id, 'snack'));
     assert(!unread.topic_has_any_unread(wrong_stream_id, 'snack'));
@@ -143,16 +149,37 @@ var zero_counts = {
     };
     unread.update_unread_topics(other_message, event);
 
-    // cleanup
-    message.subject = 'dinner';
-    unread.process_read_message(message);
-    count = unread.num_unread_for_subject(stream_id, 'dinner');
+    // Update a message that was never marked as unread.
+    var sticky_message = {
+        id: 17,
+        type: 'stream',
+        stream_id: stream_id,
+        subject: 'sticky',
+    };
+
+    unread.process_loaded_messages([sticky_message]);
+    count = unread.num_unread_for_topic(stream_id, 'sticky');
+    assert.equal(count, 1);
+
+    unread.mark_as_read(sticky_message.id);
+    count = unread.num_unread_for_topic(stream_id, 'sticky');
     assert.equal(count, 0);
 
-    other_message.subject = 'snack';
-    unread.process_read_message(other_message);
-    count = unread.num_unread_for_subject(stream_id, 'snack');
+    unread.update_unread_topics(sticky_message, {subject: 'sticky'});
+    count = unread.num_unread_for_topic(stream_id, 'sticky');
     assert.equal(count, 0);
+
+    // cleanup
+    unread.mark_as_read(message.id);
+    count = unread.num_unread_for_topic(stream_id, 'dinner');
+    assert.equal(count, 0);
+
+    unread.mark_as_read(other_message.id);
+    count = unread.num_unread_for_topic(stream_id, 'snack');
+    assert.equal(count, 0);
+
+    // test coverage
+    unread.update_unread_topics(sticky_message, {});
 }());
 
 stream_data.get_stream_id = function () {
@@ -201,13 +228,13 @@ stream_data.get_stream_id = function () {
     assert.equal(unread.num_unread_for_stream(unknown_stream_id), 0);
 }());
 
-(function test_num_unread_for_subject() {
-    // Test the num_unread_for_subject() function using many
+(function test_num_unread_for_topic() {
+    // Test the num_unread_for_topic() function using many
     // messages.
     unread.declare_bankruptcy();
 
     var stream_id = 301;
-    var count = unread.num_unread_for_subject(stream_id, 'lunch');
+    var count = unread.num_unread_for_topic(stream_id, 'lunch');
     assert.equal(count, 0);
 
     var message = {
@@ -223,15 +250,15 @@ stream_data.get_stream_id = function () {
         unread.process_loaded_messages([message]);
     }
 
-    count = unread.num_unread_for_subject(stream_id, 'lunch');
+    count = unread.num_unread_for_topic(stream_id, 'lunch');
     assert.equal(count, num_msgs);
 
     for (i = 0; i < num_msgs; i += 1) {
         message.id = i+1;
-        unread.process_read_message(message);
+        unread.mark_as_read(message.id);
     }
 
-    count = unread.num_unread_for_subject(stream_id, 'lunch');
+    count = unread.num_unread_for_topic(stream_id, 'lunch');
     assert.equal(count, 0);
 }());
 
@@ -274,7 +301,7 @@ stream_data.get_stream_id = function () {
     counts = unread.get_counts();
     assert.equal(counts.home_unread_messages, 1);
     assert.equal(counts.stream_count.get(stream_id), 1);
-    unread.process_read_message(message);
+    unread.mark_as_read(message.id);
     counts = unread.get_counts();
     assert.equal(counts.home_unread_messages, 0);
 
@@ -301,7 +328,7 @@ stream_data.get_stream_id = function () {
 
     stream_data.get_sub_by_id = function () { return; };
 
-    unread.process_read_message(message);
+    unread.mark_as_read(message.id);
     var counts = unread.get_counts();
     assert.equal(counts.home_unread_messages, 0);
 }());
@@ -338,7 +365,7 @@ stream_data.get_stream_id = function () {
     counts = unread.get_counts();
     assert.equal(counts.private_message_count, 1);
     assert.equal(counts.pm_count.get('999'), 1);
-    unread.process_read_message(message);
+    unread.mark_as_read(message.id);
     counts = unread.get_counts();
     assert.equal(counts.private_message_count, 0);
     assert.equal(counts.pm_count.get('999'), 0);
@@ -401,51 +428,105 @@ stream_data.get_stream_id = function () {
 
     counts = unread.get_counts();
     assert.equal(counts.mentioned_message_count, 1);
-    unread.process_read_message(message);
+    unread.mark_as_read(message.id);
     counts = unread.get_counts();
     assert.equal(counts.mentioned_message_count, 0);
 }());
 
 (function test_declare_bankruptcy() {
+    var message = {
+        id: 16,
+        type: 'whatever',
+        stream_id: 1999,
+        subject: 'whatever',
+        mentioned: true,
+    };
+
+    unread.process_loaded_messages([message]);
+
     unread.declare_bankruptcy();
 
     var counts = unread.get_counts();
     assert.deepEqual(counts, zero_counts);
 }());
 
-(function test_num_unread_current_messages() {
-    var count = unread.num_unread_current_messages();
-    assert.equal(count, 0);
-
-    var message = {
-        id: 15,
-    };
-    current_msg_list.all_messages = function () {
-        return [message];
-    };
-
-    // It's a little suspicious that num_unread_current_messages()
-    // is using the pointer as a hint for filtering out unread
-    // messages, but right now, it's impossible for unread messages
-    // to be above the pointer in a narrowed view, so unread.js uses
-    // this for optimization purposes.
-    current_msg_list.selected_id = function () {
-        return 11; // less than our message's id
-    };
-
-    count = unread.num_unread_current_messages();
-    assert.equal(count, 1);
-}());
-
-
 (function test_message_unread() {
+    var message = {flags: ['starred'], unread: true};
+    assert(unread.message_unread(message));
+
+    unread.set_read_flag(message);
+    assert(!unread.message_unread(message));
+    assert(!message.unread);
+
+    // idempotency
+    unread.set_read_flag(message);
+    assert(!unread.message_unread(message));
+    assert.deepEqual(message.flags, ['starred', 'read']);
+
     // Test some code that might be overly defensive, for line coverage sake.
     assert(!unread.message_unread(undefined));
     assert(unread.message_unread({flags: []}));
     assert(!unread.message_unread({flags: ['read']}));
 }());
 
+(function test_server_counts() {
+    // note that user_id 30 is "me"
+
+    page_params.unread_msgs = {
+        pms: [
+            {
+                sender_id: 101,
+                unread_message_ids: [
+                    31, 32, 60, 61, 62, 63,
+                ],
+            },
+        ],
+        huddles: [
+            {
+                user_ids_string: "4,6,30,101",
+                unread_message_ids: [
+                    34, 50,
+                ],
+            },
+        ],
+        streams: [
+            {
+                stream_id: 1,
+                topic: "test",
+                unread_message_ids: [
+                    33, 35, 36,
+                ],
+            },
+        ],
+        mentions: [31, 34, 40, 41],
+    };
+
+    unread.declare_bankruptcy();
+    unread.initialize();
+
+    assert.equal(unread.num_unread_for_person('101'), 6);
+    assert.equal(unread.num_unread_for_person('4,6,101'), 2);
+    assert.equal(unread.num_unread_for_person('30'), 0);
+
+    assert.equal(unread.num_unread_for_topic(0, 'bogus'), 0);
+    assert.equal(unread.num_unread_for_topic(1, 'bogus'), 0);
+    assert.equal(unread.num_unread_for_topic(1, 'test'), 3);
+
+    assert.equal(unread.unread_mentions_counter.count(), 4);
+
+    unread.mark_as_read(40);
+    assert.equal(unread.unread_mentions_counter.count(), 3);
+
+    unread.mark_as_read(35);
+    assert.equal(unread.num_unread_for_topic(1, 'test'), 2);
+
+    unread.mark_as_read(34);
+    assert.equal(unread.num_unread_for_person('4,6,101'), 1);
+}());
+
 (function test_errors() {
+    unread.declare_bankruptcy();
+
     global.blueslip.warn = function () {};
 
     // Test unknown message leads to zero count
@@ -455,7 +536,7 @@ stream_data.get_stream_id = function () {
         display_recipient: [{id: 9999}],
     };
 
-    unread.process_read_message(message);
+    unread.mark_as_read(message.id);
     var counts = unread.get_counts();
     assert.equal(counts.private_message_count, 0);
 }());

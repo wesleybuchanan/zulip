@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -e
+
+# Make sure the Zulip dev virtualenv exists, and operate within it.
+if [ ! -d /srv/zulip-py3-venv ]; then
+    ./tools/setup/setup_venvs.py
+fi
+source /srv/zulip-py3-venv/bin/activate
+
+compile_requirements () {
+    source="$1"
+    output="$2"
+
+    pip-compile --output-file "$output" "$source"
+
+    # Remove the editable flag.  It's there because pip-compile can't
+    # yet do without it (see
+    # https://github.com/jazzband/pip-tools/issues/272 upstream), but
+    # in the output of pip-compile it's no longer needed.
+    sed -i 's/-e //' "$output"
+
+    # pip-tools bug; future, futures are obsolete in python3
+    sed -i '/futures==/d' "$output"
+    sed -i '/future==/d' "$output"
+
+    (
+        cat <<EOF
+#
+# This file is GENERATED.  Don't edit directly.
+#
+# To update, edit the non-"lock" files in requirements/*.txt, then:
+#
+#    tools/update-locked-requirements
+#
+# For details, see requirements/README.md .
+#
+EOF
+        # This perl invocation strips the existing block of header comments.
+        perl -0pe 's/\A(^#.*\n)*//m' "$output"
+    ) | sponge "$output"
+}
+
+OUTPUT_PROD_FILE='requirements/prod_lock.txt'
+OUTPUT_DEV_FILE='requirements/dev_lock.txt'
+
+# Parse arguments.
+if [ $# -gt 0 ]; then
+    while [ "$1" != "" ]; do
+        case $1 in
+            --prod)
+                shift
+                OUTPUT_PROD_FILE="$1"
+                ;;
+            --dev)
+                shift
+                OUTPUT_DEV_FILE="$1"
+                ;;
+            *)
+                echo "Invalid arguments passed."
+                echo "Usage: $0 [--prod <prod-lock-file-path> --dev <dev-lock-file-path>]"
+                exit
+                ;;
+        esac
+        shift
+    done
+fi
+
+compile_requirements requirements/prod.txt $OUTPUT_PROD_FILE
+compile_requirements requirements/dev.txt $OUTPUT_DEV_FILE

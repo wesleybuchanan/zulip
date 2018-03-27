@@ -20,6 +20,22 @@ function can_admin_emoji(emoji) {
     return false;
 }
 
+exports.update_custom_emoji_ui = function () {
+    var tip = templates.render("emoji-settings-tip", {
+        realm_add_emoji_by_admins_only: page_params.realm_add_emoji_by_admins_only,
+    });
+    $('#emoji-settings').find('.emoji-settings-tip-container').html(tip);
+    if (page_params.realm_add_emoji_by_admins_only && !page_params.is_admin) {
+        $('.admin-emoji-form').hide();
+        $('#emoji-settings').removeClass('can_edit');
+    } else {
+        $('.admin-emoji-form').show();
+        $('#emoji-settings').addClass('can_edit');
+    }
+
+    exports.populate_emoji(page_params.realm_emoji);
+};
+
 exports.reset = function () {
     meta.loaded = false;
 };
@@ -32,14 +48,16 @@ exports.populate_emoji = function (emoji_data) {
     var emoji_table = $('#admin_emoji_table').expectOne();
     emoji_table.find('tr.emoji_row').remove();
     _.each(emoji_data, function (data, name) {
-        emoji_table.append(templates.render('admin_emoji_list', {
-            emoji: {
-                name: name, source_url: data.source_url,
-                display_url: data.source_url,
-                author: data.author || '',
-                can_admin_emoji: can_admin_emoji(data),
-            },
-        }));
+        if (data.deactivated !== true) {
+            emoji_table.append(templates.render('admin_emoji_list', {
+                emoji: {
+                    name: name, source_url: data.source_url,
+                    display_url: data.source_url,
+                    author: data.author || '',
+                    can_admin_emoji: can_admin_emoji(data),
+                },
+            }));
+        }
     });
     loading.destroy_indicator($('#admin_page_emoji_loading_indicator'));
 };
@@ -89,7 +107,7 @@ exports.set_up = function () {
         $.each($('#emoji_file_input')[0].files, function (i, file) {
             formData.append('file-' + i, file);
         });
-        channel.put({
+        channel.post({
             url: "/json/realm/emoji/" + encodeURIComponent(emoji.name),
             data: formData,
             cache: false,

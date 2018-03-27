@@ -1,4 +1,3 @@
-from __future__ import absolute_import  # Python 2 only
 
 from typing import Any
 
@@ -20,14 +19,14 @@ def environment(**options):
     env.globals.update({
         'static': staticfiles_storage.url,
         'url': reverse,
+        'render_markdown_path': render_markdown_path,
         'minified_js': minified_js,
     })
 
-    env.install_gettext_translations(translation, True)  # type: ignore # https://github.com/python/typeshed/issues/927
+    env.install_gettext_translations(translation, True)
 
     env.filters['slugify'] = slugify
     env.filters['pluralize'] = pluralize
     env.filters['display_list'] = display_list
-    env.filters['render_markdown_path'] = render_markdown_path
 
     return env

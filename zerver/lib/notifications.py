@@ -1,23 +1,22 @@
-from __future__ import print_function
 
 from typing import cast, Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Text
 
-from confirmation.models import Confirmation
+from confirmation.models import Confirmation, create_confirmation_link
 from django.conf import settings
 from django.template import loader
 from django.utils.timezone import now as timezone_now
 from zerver.decorator import statsd_increment
-from zerver.lib.send_email import send_future_email, display_email, \
-    send_email_from_dict
+from zerver.lib.send_email import send_future_email, \
+    send_email_from_dict, FromAddress
 from zerver.lib.queue import queue_json_publish
 from zerver.models import (
     Recipient,
-    ScheduledJob,
+    ScheduledEmail,
     UserMessage,
     Stream,
     get_display_recipient,
     UserProfile,
-    get_user_profile_by_email,
+    get_user,
     get_user_profile_by_id,
     receives_offline_notifications,
     get_context_for_message,
@@ -26,27 +25,23 @@ from zerver.models import (
 )
 
 import datetime
+from email.utils import formataddr
+import lxml.html
 import re
 import subprocess
 import ujson
 from six.moves import urllib
 from collections import defaultdict
 
-def unsubscribe_token(user_profile):
-    # type: (UserProfile) -> Text
-    # Leverage the Django confirmations framework to generate and track unique
-    # unsubscription tokens.
-    return Confirmation.objects.get_link_for_object(user_profile).split("/")[-1]
-
-def one_click_unsubscribe_link(user_profile, endpoint):
-    # type: (UserProfile, Text) -> Text
+def one_click_unsubscribe_link(user_profile, email_type):
+    # type: (UserProfile, str) -> str
     """
     Generate a unique link that a logged-out user can visit to unsubscribe from
     Zulip e-mails without having to first log in.
     """
-    token = unsubscribe_token(user_profile)
-    resource_path = "accounts/unsubscribe/%s/%s" % (endpoint, token)
-    return "%s/%s" % (user_profile.realm.uri.rstrip("/"), resource_path)
+    return create_confirmation_link(user_profile, user_profile.realm.host,
+                                    Confirmation.UNSUBSCRIBE,
+                                    url_args = {'email_type': email_type})
 
 def hash_util_encode(string):
     # type: (Text) -> Text
@@ -73,6 +68,52 @@ def topic_narrow_url(realm, stream, topic):
     return u"%s%s/topic/%s" % (base_url, hash_util_encode(stream),
                                hash_util_encode(topic))
 
+def relative_to_full_url(base_url, content):
+    # type: (Text, Text) -> Text
+    # Convert relative URLs to absolute URLs.
+    fragment = lxml.html.fromstring(content)  # type: ignore # https://github.com/python/typeshed/issues/525
+
+    # We handle narrow URLs separately because of two reasons:
+    # 1: 'lxml' seems to be having an issue in dealing with URLs that begin
+    # `#` due to which it doesn't add a `/` before joining the base_url to
+    # the relative URL.
+    # 2: We also need to update the title attribute in the narrow links which
+    # is not possible with `make_links_absolute()`.
+    for link_info in fragment.iterlinks():
+        elem, attrib, link, pos = link_info
+        match = re.match("/?#narrow/", link)
+        if match is not None:
+            link = re.sub(r"^/?#narrow/", base_url + "/#narrow/", link)
+            elem.set(attrib, link)
+            # Only manually linked narrow URLs have title attribute set.
+            if elem.get('title') is not None:
+                elem.set('title', link)
+
+    # Inline images can't be displayed in the emails as the request
+    # from the mail server can't be authenticated because it has no
+    # user_profile object linked to it. So we scrub the inline image
+    # container.
+    inline_image_containers = fragment.find_class("message_inline_image")
+    for container in inline_image_containers:
+        container.drop_tree()
+
+    fragment.make_links_absolute(base_url)
+    content = lxml.html.tostring(fragment).decode("utf-8")  # type: ignore # https://github.com/python/typeshed/issues/525
+
+    return content
+
+def fix_emojis(content, base_url):
+    # type: (Text, Text) -> Text
+    # Convert the emoji spans to img tags.
+    content = re.sub(
+        r'<span class=\"emoji emoji-(\S+)\" title=\"([^\"]+)\">(\S+)</span>',
+        r'<img src="' + base_url + r'/static/generated/emoji/images-google-64/\1.png" ' +
+        r'title="\2" alt="\3" style="height: 20px;">',
+        content)
+    content = content.replace(' class="emoji"', ' style="height: 20px;"')
+
+    return content
+
 def build_message_list(user_profile, messages):
     # type: (UserProfile, List[Message]) -> List[Dict[str, Any]]
     """
@@ -89,32 +130,6 @@ def build_message_list(user_profile, messages):
         else:
             return ''
 
-    def relative_to_full_url(content):
-        # type: (Text) -> Text
-        # URLs for uploaded content are of the form
-        # "/user_uploads/abc.png". Make them full paths.
-        #
-        # There's a small chance of colliding with non-Zulip URLs containing
-        # "/user_uploads/", but we don't have much information about the
-        # structure of the URL to leverage.
-        content = re.sub(
-            r"/user_uploads/(\S*)",
-            user_profile.realm.uri + r"/user_uploads/\1", content)
-
-        # Our proxying user-uploaded images seems to break inline images in HTML
-        # emails, so scrub the image but leave the link.
-        content = re.sub(
-            r"<img src=(\S+)/user_uploads/(\S+)>", "", content)
-
-        # URLs for emoji are of the form
-        # "static/generated/emoji/images/emoji/snowflake.png".
-        content = re.sub(
-            r"/static/generated/emoji/images/emoji/",
-            user_profile.realm.uri + r"/static/generated/emoji/images/emoji/",
-            content)
-
-        return content
-
     def fix_plaintext_image_urls(content):
         # type: (Text) -> Text
         # Replace image URLs in plaintext content of the form
@@ -122,20 +137,23 @@ def build_message_list(user_profile, messages):
         # with a simple hyperlink.
         return re.sub(r"\[(\S*)\]\((\S*)\)", r"\2", content)
 
-    def fix_emoji_sizes(html):
-        # type: (Text) -> Text
-        return html.replace(' class="emoji"', ' height="20px"')
-
     def build_message_payload(message):
         # type: (Message) -> Dict[str, Text]
         plain = message.content
         plain = fix_plaintext_image_urls(plain)
-        plain = relative_to_full_url(plain)
+        # There's a small chance of colliding with non-Zulip URLs containing
+        # "/user_uploads/", but we don't have much information about the
+        # structure of the URL to leverage. We can't use `relative_to_full_url()`
+        # function here because it uses a stricter regex which will not work for
+        # plain text.
+        plain = re.sub(
+            r"/user_uploads/(\S*)",
+            user_profile.realm.uri + r"/user_uploads/\1", plain)
 
         assert message.rendered_content is not None
         html = message.rendered_content
-        html = relative_to_full_url(html)
-        html = fix_emoji_sizes(html)
+        html = relative_to_full_url(user_profile.realm.uri, html)
+        html = fix_emojis(html, user_profile.realm.uri)
 
         return {'plain': plain, 'html': html}
 
@@ -273,7 +291,11 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
         })
 
     from zerver.lib.email_mirror import create_missed_message_address
-    address = create_missed_message_address(user_profile, missed_messages[0])
+    reply_to_address = create_missed_message_address(user_profile, missed_messages[0])
+    if reply_to_address == FromAddress.NOREPLY:
+        reply_to_name = None
+    else:
+        reply_to_name = "Zulip"
 
     senders = list(set(m.sender for m in missed_messages))
     if (missed_messages[0].recipient.type == Recipient.HUDDLE):
@@ -309,8 +331,8 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
         'realm_str': user_profile.realm.name,
     })
 
-    from_email = None
-
+    from_name = "Zulip missed messages"  # type: Text
+    from_address = FromAddress.NOREPLY
     if len(senders) == 1 and settings.SEND_MISSED_MESSAGE_EMAILS_AS_USER:
         # If this setting is enabled, you can reply to the Zulip
         # missed message emails directly back to the original sender.
@@ -318,7 +340,7 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
         # record for the domain, or there will be spam/deliverability
         # problems.
         sender = senders[0]
-        from_email = '"%s" <%s>' % (sender.full_name, sender.email)
+        from_name, from_address = (sender.full_name, sender.email)
         context.update({
             'reply_warning': False,
             'reply_to_zulip': False,
@@ -326,9 +348,10 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
 
     email_dict = {
         'template_prefix': 'zerver/emails/missed_message',
-        'to_email': display_email(user_profile),
-        'from_email': from_email,
-        'reply_to_email': address,
+        'to_user_id': user_profile.id,
+        'from_name': from_name,
+        'from_address': from_address,
+        'reply_to_email': formataddr((reply_to_name, reply_to_address)),
         'context': context}
     queue_json_publish("missedmessage_email_senders", email_dict, send_email_from_dict)
 
@@ -355,7 +378,11 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
 
     messages_by_recipient_subject = defaultdict(list)  # type: Dict[Tuple[int, Text], List[Message]]
     for msg in messages:
-        messages_by_recipient_subject[(msg.recipient_id, msg.topic_name())].append(msg)
+        if msg.recipient.type == Recipient.PERSONAL:
+            # For PM's group using (recipient, sender).
+            messages_by_recipient_subject[(msg.recipient_id, msg.sender_id)].append(msg)
+        else:
+            messages_by_recipient_subject[(msg.recipient_id, msg.topic_name())].append(msg)
 
     message_count_by_recipient_subject = {
         recipient_subject: len(msgs)
@@ -376,12 +403,19 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
             message_count_by_recipient_subject[recipient_subject],
         )
 
-def clear_followup_emails_queue(email):
-    # type: (Text) -> None
-    """
-    Clear out queued emails that would otherwise be sent to a specific email address.
-    """
-    items = ScheduledJob.objects.filter(type=ScheduledJob.EMAIL, filter_string__iexact = email)
+def clear_scheduled_invitation_emails(email):
+    # type: (str) -> None
+    """Unlike most scheduled emails, invitation emails don't have an
+    existing user object to key off of, so we filter by address here."""
+    items = ScheduledEmail.objects.filter(address__iexact=email,
+                                          type=ScheduledEmail.INVITATION_REMINDER)
+    items.delete()
+
+def clear_scheduled_emails(user_id, email_type=None):
+    # type: (int, Optional[int]) -> None
+    items = ScheduledEmail.objects.filter(user_id=user_id)
+    if email_type is not None:
+        items = items.filter(type=email_type)
     items.delete()
 
 def log_digest_event(msg):
@@ -390,29 +424,31 @@ def log_digest_event(msg):
     logging.basicConfig(filename=settings.DIGEST_LOG_PATH, level=logging.INFO)
     logging.info(msg)
 
-def enqueue_welcome_emails(email, name):
-    # type: (Text, Text) -> None
+def enqueue_welcome_emails(user):
+    # type: (UserProfile) -> None
     from zerver.context_processors import common_context
     if settings.WELCOME_EMAIL_SENDER is not None:
         # line break to avoid triggering lint rule
-        from_email = '%(name)s <%(email)s>' % \
-                     settings.WELCOME_EMAIL_SENDER
+        from_name = settings.WELCOME_EMAIL_SENDER['name']
+        from_address = settings.WELCOME_EMAIL_SENDER['email']
     else:
-        from_email = settings.ZULIP_ADMINISTRATOR
+        from_name = None
+        from_address = FromAddress.SUPPORT
 
-    user_profile = get_user_profile_by_email(email)
-    unsubscribe_link = one_click_unsubscribe_link(user_profile, "welcome")
-    context = common_context(user_profile)
+    unsubscribe_link = one_click_unsubscribe_link(user, "welcome")
+    context = common_context(user)
     context.update({
-        'verbose_support_offers': settings.VERBOSE_SUPPORT_OFFERS,
-        'unsubscribe_link': unsubscribe_link
+        'unsubscribe_link': unsubscribe_link,
+        'organization_setup_advice_link':
+        user.realm.uri + '%s/help/getting-your-organization-started-with-zulip',
+        'is_realm_admin': user.is_realm_admin,
     })
     send_future_email(
-        "zerver/emails/followup_day1", '%s <%s>' % (name, email),
-        from_email=from_email, context=context, delay=datetime.timedelta(hours=1))
+        "zerver/emails/followup_day1", to_user_id=user.id, from_name=from_name,
+        from_address=from_address, context=context)
     send_future_email(
-        "zerver/emails/followup_day2", '%s <%s>' % (name, email),
-        from_email=from_email, context=context, delay=datetime.timedelta(days=1))
+        "zerver/emails/followup_day2", to_user_id=user.id, from_name=from_name,
+        from_address=from_address, context=context, delay=datetime.timedelta(days=1))
 
 def convert_html_to_markdown(html):
     # type: (Text) -> Text

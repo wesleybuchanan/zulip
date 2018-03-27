@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
 from django.http import HttpResponse
+from django.test import override_settings
 from django.utils.timezone import now as timezone_now
 from mock import mock
 
@@ -19,6 +18,7 @@ from zerver.lib.timestamp import datetime_to_timestamp
 from zerver.models import (
     email_to_domain,
     Client,
+    PushDeviceToken,
     UserActivity,
     UserProfile,
     UserPresence,
@@ -26,7 +26,6 @@ from zerver.models import (
 )
 
 import datetime
-import ujson
 
 class ActivityTest(ZulipTestCase):
     def test_activity(self):
@@ -48,7 +47,7 @@ class ActivityTest(ZulipTestCase):
         with queries_captured() as queries:
             self.client_get('/activity')
 
-        self.assert_length(queries, 2)
+        self.assert_length(queries, 4)
 
 class TestClientModel(ZulipTestCase):
     def test_client_stringification(self):
@@ -93,6 +92,36 @@ class UserPresenceModelTests(ZulipTestCase):
         presence_dct = UserPresence.get_status_dict_by_realm(user_profile.realm_id)
         self.assertEqual(len(presence_dct), 0)
 
+    def test_push_tokens(self):
+        # type: () -> None
+        UserPresence.objects.all().delete()
+
+        user_profile = self.example_user('hamlet')
+        email = user_profile.email
+
+        self.login(email)
+        result = self.client_post("/json/users/me/presence", {'status': 'active'})
+        self.assert_json_success(result)
+
+        def pushable():
+            # type: () -> bool
+            presence_dct = UserPresence.get_status_dict_by_realm(user_profile.realm_id)
+            self.assertEqual(len(presence_dct), 1)
+            return presence_dct[email]['website']['pushable']
+
+        self.assertFalse(pushable())
+
+        user_profile.enable_offline_push_notifications = True
+        user_profile.save()
+
+        self.assertFalse(pushable())
+
+        PushDeviceToken.objects.create(
+            user=user_profile,
+            kind=PushDeviceToken.APNS
+        )
+        self.assertTrue(pushable())
+
 class UserPresenceTests(ZulipTestCase):
     def test_invalid_presence(self):
         # type: () -> None
@@ -109,7 +138,7 @@ class UserPresenceTests(ZulipTestCase):
 
         result = self.client_post("/json/users/me/presence", {'status': 'idle'})
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
+        json = result.json()
         self.assertEqual(json['presences'][email][client]['status'], 'idle')
         self.assertIn('timestamp', json['presences'][email][client])
         self.assertIsInstance(json['presences'][email][client]['timestamp'], int)
@@ -119,7 +148,7 @@ class UserPresenceTests(ZulipTestCase):
         email = self.example_email("othello")
         self.login(email)
         result = self.client_post("/json/users/me/presence", {'status': 'idle'})
-        json = ujson.loads(result.content)
+        json = result.json()
         self.assertEqual(json['presences'][email][client]['status'], 'idle')
         self.assertEqual(json['presences'][self.example_email("hamlet")][client]['status'], 'idle')
         self.assertEqual(sorted(json['presences'].keys()), [self.example_email("hamlet"), self.example_email("othello")])
@@ -134,20 +163,19 @@ class UserPresenceTests(ZulipTestCase):
         result = self.client_post("/json/users/me/presence", {'status': 'idle'})
 
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
-        self.assertEqual(json['presences'][self.example_email("hamlet")][client]['status'], 'idle')
+        self.assertEqual(result.json()['presences'][self.example_email("hamlet")][client]['status'], 'idle')
 
         email = self.example_email("othello")
         self.login(self.example_email("othello"))
         result = self.client_post("/json/users/me/presence", {'status': 'idle'})
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
+        json = result.json()
         self.assertEqual(json['presences'][email][client]['status'], 'idle')
         self.assertEqual(json['presences'][self.example_email("hamlet")][client]['status'], 'idle')
 
         result = self.client_post("/json/users/me/presence", {'status': 'active'})
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
+        json = result.json()
         self.assertEqual(json['presences'][email][client]['status'], 'active')
         self.assertEqual(json['presences'][self.example_email("hamlet")][client]['status'], 'idle')
 
@@ -155,10 +183,10 @@ class UserPresenceTests(ZulipTestCase):
         # type: () -> None
         """Zephyr mirror realms such as MIT never get a list of users"""
         self.login(self.mit_email("espuser"))
-        result = self.client_post("/json/users/me/presence", {'status': 'idle'})
+        result = self.client_post("/json/users/me/presence", {'status': 'idle'},
+                                  subdomain="zephyr")
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
-        self.assertEqual(json['presences'], {})
+        self.assertEqual(result.json()['presences'], {})
 
     def test_mirror_presence(self):
         # type: () -> None
@@ -169,9 +197,10 @@ class UserPresenceTests(ZulipTestCase):
 
         def post_presence():
             # type: () -> Dict[str, Any]
-            result = self.client_post("/json/users/me/presence", {'status': 'idle'})
+            result = self.client_post("/json/users/me/presence", {'status': 'idle'},
+                                      subdomain="zephyr")
             self.assert_json_success(result)
-            json = ujson.loads(result.content)
+            json = result.json()
             return json
 
         json = post_presence()
@@ -197,14 +226,15 @@ class UserPresenceTests(ZulipTestCase):
     def test_same_realm(self):
         # type: () -> None
         self.login(self.mit_email("espuser"))
-        self.client_post("/json/users/me/presence", {'status': 'idle'})
+        self.client_post("/json/users/me/presence", {'status': 'idle'},
+                         subdomain="zephyr")
         self.logout()
 
         # Ensure we don't see hamlet@zulip.com information leakage
         self.login(self.example_email("hamlet"))
         result = self.client_post("/json/users/me/presence", {'status': 'idle'})
         self.assert_json_success(result)
-        json = ujson.loads(result.content)
+        json = result.json()
         self.assertEqual(json['presences'][self.example_email("hamlet")]["website"]['status'], 'idle')
         # We only want @zulip.com emails
         for email in json['presences'].keys():
@@ -240,13 +270,14 @@ class SingleUserPresenceTests(ZulipTestCase):
         self.assert_json_error(result, "Presence is not supported for bot users.")
 
         self.login(self.mit_email("sipbtest"))
-        result = self.client_get("/json/users/othello@zulip.com/presence")
+        result = self.client_get("/json/users/othello@zulip.com/presence",
+                                 subdomain="zephyr")
         self.assert_json_error(result, "No such user")
 
         # Then, we check everything works
         self.login(self.example_email("hamlet"))
         result = self.client_get("/json/users/othello@zulip.com/presence")
-        result_dict = ujson.loads(result.content)
+        result_dict = result.json()
         self.assertEqual(
             set(result_dict['presence'].keys()),
             {"ZulipAndroid", "website", "aggregated"})

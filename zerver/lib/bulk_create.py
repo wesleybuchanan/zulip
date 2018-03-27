@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Text
 
 from zerver.lib.initial_password import initial_password
@@ -6,8 +5,8 @@ from zerver.models import Realm, Stream, UserProfile, Huddle, \
     Subscription, Recipient, Client, RealmAuditLog, get_huddle_hash
 from zerver.lib.create_user import create_user_profile
 
-def bulk_create_users(realm, users_raw, bot_type=None, tos_version=None, timezone=u""):
-    # type: (Realm, Set[Tuple[Text, Text, Text, bool]], Optional[int], Optional[Text], Text) -> None
+def bulk_create_users(realm, users_raw, bot_type=None, bot_owner=None, tos_version=None, timezone=u""):
+    # type: (Realm, Set[Tuple[Text, Text, Text, bool]], Optional[int], Optional[UserProfile], Optional[Text], Text) -> None
     """
     Creates and saves a UserProfile with the given email.
     Has some code based off of UserManage.create_user, but doesn't .save()
@@ -20,7 +19,7 @@ def bulk_create_users(realm, users_raw, bot_type=None, tos_version=None, timezon
     for (email, full_name, short_name, active) in users:
         profile = create_user_profile(realm, email,
                                       initial_password(email), active, bot_type,
-                                      full_name, short_name, None, False, tos_version,
+                                      full_name, short_name, bot_owner, False, tos_version,
                                       timezone, tutorial_status=UserProfile.TUTORIAL_FINISHED,
                                       enter_sends=True)
         profiles_to_create.append(profile)
@@ -65,9 +64,19 @@ def bulk_create_streams(realm, stream_dict):
             streams_to_create.append(
                 Stream(
                     realm=realm, name=name, description=options["description"],
-                    invite_only=options["invite_only"]
+                    invite_only=options["invite_only"],
+                    is_in_zephyr_realm=realm.is_zephyr_mirror_realm,
                 )
             )
+    # Sort streams by name before creating them so that we can have a
+    # reliable ordering of `stream_id` across different python versions.
+    # This is required for test fixtures which contain `stream_id`. Prior
+    # to python 3.3 hashes were not randomized but after a security fix
+    # hash randomization was enabled in python 3.3 which made iteration
+    # of dictionaries and sets completely unpredictable. Here the order
+    # of elements while iterating `stream_dict` will be completely random
+    # for python 3.3 and later versions.
+    streams_to_create.sort(key=lambda x: x.name)
     Stream.objects.bulk_create(streams_to_create)
 
     recipients_to_create = []  # type: List[Recipient]

@@ -1,4 +1,3 @@
-from __future__ import print_function
 
 import os
 import subprocess
@@ -8,7 +7,7 @@ import time
 from contextlib import contextmanager
 
 if False:
-    from typing import (Any, Iterator)
+    from typing import (Any, Iterator, Optional)
 
 # Verify the Zulip venv is available.
 from tools.lib import sanity_check
@@ -32,7 +31,7 @@ def set_up_django(external_host):
     os.environ['PYTHONUNBUFFERED'] = 'y'
 
 def assert_server_running(server, log_file):
-    # type: (subprocess.Popen, str) -> None
+    # type: (subprocess.Popen, Optional[str]) -> None
     """Get the exit code of the server, or None if it is still running."""
     if server.poll() is not None:
         message = 'Server died unexpectedly!'
@@ -41,7 +40,7 @@ def assert_server_running(server, log_file):
         raise RuntimeError(message)
 
 def server_is_up(server, log_file):
-    # type: (subprocess.Popen, str) -> bool
+    # type: (subprocess.Popen, Optional[str]) -> bool
     assert_server_running(server, log_file)
     try:
         # We could get a 501 error if the reverse proxy is up but the Django app isn't.
@@ -53,14 +52,13 @@ def server_is_up(server, log_file):
 def test_server_running(force=False, external_host='testserver',
                         log_file=None, dots=False, use_db=True):
     # type: (bool, str, str, bool, bool) -> Iterator[None]
+    log = sys.stdout
     if log_file:
         if os.path.exists(log_file) and os.path.getsize(log_file) < 100000:
             log = open(log_file, 'a')
             log.write('\n\n')
         else:
             log = open(log_file, 'w')
-    else:
-        log = sys.stdout  # type: ignore # BinaryIO vs. IO[str]
 
     set_up_django(external_host)
 

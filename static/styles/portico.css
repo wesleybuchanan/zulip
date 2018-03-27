@@ -1,3 +1,7 @@
+body {
+    background-color: #fafafa;
+}
+
 .container-fluid {
     padding: 0px;
     min-height: 100%;
@@ -9,13 +13,16 @@
     margin: 0 auto -56px;
 }
 
-/* This is a hack so that our main content
-   remains centered in the middle 1440px or so
-   on wide monitors, but that our little color
-   bars can extend to the edges of the screen */
-.content {
-    max-width: 1440px;
-    margin: 0px auto;
+.normal {
+    font-weight: normal;
+}
+
+.why-page h3.normal {
+    font-size: 1.2em;
+    margin-top: 20px;
+    margin-bottom: 5px;
+
+    color: #888;
 }
 
 .navbar {
@@ -29,26 +36,15 @@
 }
 
 .header {
+    position: relative;
+
     padding: 6px 0px;
     height: 29px;
-}
 
-.header .stripes,
-.header .darker {
-    position: absolute;
-    height: 100%;
-    width: 100%;
-    top: 0px;
+    background-color: #fff;
+    box-shadow: 0px 0px 4px rgba(0,0,0,0.1);
 
-    background: repeating-linear-gradient(
-      75deg,
-      rgba(255,255,255,0) 0px,
-      rgba(255,255,255,0.06) 200px
-    );
-}
-
-.header .darker {
-    background: -webkit-linear-gradient(top left, transparent , rgba(0,0,0,0.3));
+    z-index: 100;
 }
 
 .navbar.footer .nav > li {
@@ -60,7 +56,6 @@
     padding-bottom: 0;
 }
 
-.footer,
 .push {
     height: 56px;
 }
@@ -74,7 +69,7 @@ html {
 }
 
 body {
-    font-family: 'Humbug', Helvetica, Arial, sans-serif;
+    font-family: 'Source Sans Pro', Helvetica, Arial, sans-serif;
     line-height: 150%;
     height: 100%;
     font-weight: 300;
@@ -83,15 +78,128 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+.app.help {
+    position: fixed;
+    width: 100vw;
+    height: calc(100vh - 64px);
+    left: 0px;
+
+    box-shadow: 0px -20px 50px rgba(0, 0, 0, 0.04);
+    overflow: auto;
+
+    color: hsl(222, 33%, 33%);
+}
+
+.help .sidebar {
+    width: 300px;
+
+    position: fixed;
+    z-index: 1;
+    /* 100vh - navbar - paddingTop - paddingBottom - bottomNav */
+    height: calc(100vh - 64px - 10px - 10px);
+    padding: 10px 20px 10px 20px;
+
+    border-right: 1px solid hsl(219, 10%, 97%);
+    overflow: auto;
+
+    background: hsl(219, 10%, 97%);
+
+    -webkit-overflow-scrolling: touch;
+}
+
+.help .sidebar h1,
+.help .sidebar h2 {
+    font-size: 1.2em;
+    font-weight: 400;
+    margin-bottom: 0px;
+    line-height: 100%;
+    cursor: pointer;
+}
+
+.help .sidebar h2::before {
+    display: inline-block;
+    font: normal normal normal 14px/1 FontAwesome;
+    font-size: inherit;
+    text-rendering: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    content: "\f107";
+    margin-right: 5px;
+
+    opacity: 0.5;
+}
+
+.help .sidebar h2.no-arrow::before {
+    content: "";
+}
+
+.help .sidebar h2.no-arrow {
+    margin-left: 12px;
+}
+
+.help .sidebar h2.no-arrow a {
+    color: inherit;
+}
+
+.help .sidebar h3 {
+    font-size: 1em;
+    font-weight: 400;
+    text-transform: uppercase;
+    color: #badcd6;
+
+    line-height: 1;
+    margin: 10px 0 5px 10px;
+}
+
+.help .sidebar ul {
+    display: none;
+    margin: 10px 0px 10px 19px;
+}
+
+.help .sidebar li {
+    list-style-type: none;
+    font-size: 0.95em;
+    font-weight: 400;
+    line-height: 1.7;
+
+    cursor: pointer;
+}
+
+.help .sidebar li a,
+.help .sidebar h1 a {
+    color: inherit;
+    display: block;
+}
+
+/* show two of them by default */
+.help .sidebar #guides + ul {
+    display: block;
+}
+
+.app.help .hamburger {
+    display: none;
+}
+
 .markdown h1[id]:before,
 .markdown h2[id]:before,
 .markdown h3[id]:before,
 .markdown h4[id]:before {
     display: block;
     content: " ";
-    margin-top: -40px;
-    height: 40px;
     visibility: hidden;
+}
+
+.markdown h1[id]:before {
+    margin-top: -30px;
+    height: 30px;
+}
+
+.markdown h2[id]:before,
+.markdown h3[id]:before,
+.markdown h4[id]:before {
+    margin-top: -10px;
+    height: 10px;
 }
 
 .markdown ul,
@@ -121,7 +229,7 @@ body {
     vertical-align: top;
     padding: 3px 6.5px 3px 7.5px;
     margin-right: 5px;
-    background-color: #52c2af;
+    background-color: hsl(170, 47%, 54%);
     color: white;
     border-radius: 100%;
     font-size: 0.9em;
@@ -170,11 +278,6 @@ body {
     max-width: 100%;
 }
 
-.for_you {
-    font-size: 30px;
-    font-style: italic;
-}
-
 .help-box {
     max-width: 500px;
 
@@ -182,14 +285,14 @@ body {
     margin: 10px 0px;
 
     font-size: 0.9rem;
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1.2;
 
-    color: #444;
+    color: hsl(0, 0%, 27%);
 
-    border: 1px solid #ddd;
+    border: 1px solid hsl(0, 0%, 86%);
     border-radius: 4px;
-    background-color: #FAFAFA;
+    background-color: hsl(0, 0%, 98%);
 }
 
 .display-none {
@@ -201,12 +304,12 @@ body {
 }
 
 .help-inline {
-    font-weight: 500;
+    font-weight: 400;
     font-size: 0.9rem;
 }
 
 .help-inline.text-error {
-    color: #b94a48;
+    color: hsl(1, 54%, 61%);
 }
 
 a.title {
@@ -349,11 +452,11 @@ img.screenshot {
 }
 
 .shaded-background {
-    background-color: #ededed;
+    background-color: hsl(0, 0%, 93%);
 }
 
 .darker-background {
-    background-color: #474747;
+    background-color: hsl(0, 0%, 28%);
     color: white;
 }
 
@@ -372,20 +475,74 @@ input.text-error {
     outline-color: red;
 }
 
-.header,
-.footer {
-    position: absolute;
-    z-index: 100;
-    width: 100%;
-    background-color: #52c2af;
+.portico-container {
+    position: relative;
+}
+
+.portico-container .if-zulip-electron {
+    display: none;
+}
+
+/* detect if the platform is `ZulipDesktop` and if so, hide this tag! */
+.portico-container[data-platform="ZulipElectron"] .if-zulip-electron {
+    display: block;
 }
 
 .footer {
-    background-color: transparent;
+    margin: 20px;
+    z-index: 100;
+    width: calc(100% - 40px);
+
+    text-align: center;
 }
 
 .footer .footer-navigation {
     margin-left: 0px;
+    margin-right: 0px;
+}
+
+/* -- new footer -- */
+.footer {
+    font-size: 0.9em;
+}
+
+.footer a {
+    color: inherit !important;
+}
+
+.footer section {
+    width: calc(25% - 40px);
+    margin: 0px 20px;
+    max-width: 150px;
+
+    display: inline-block;
+    vertical-align: top;
+
+    text-align: left;
+}
+
+.footer section h3 {
+    text-transform: uppercase;
+    font-size: 1em;
+    font-weight: 600;
+    line-height: 1.2;
+
+    margin-bottom: 5px;
+}
+
+.footer section ul {
+    color: #aaa;
+
+    list-style-type: none;
+    margin-left: 0;
+
+    font-weight: 400;
+}
+
+/* -- end new footer -- */
+
+.header {
+    padding: 20px 0 15px;
 }
 
 .header-main .logo {
@@ -393,6 +550,23 @@ input.text-error {
     text-decoration: none;
     position: relative;
     line-height: 0.8;
+}
+
+
+.header-main .logo .light {
+    display: inline-block;
+    vertical-align: top;
+    margin-top: 8px;
+
+    font-size: 1.2em;
+    font-weight: 400;
+    color: #333;
+    opacity: 0.5;
+}
+
+.header-main .logo pipe {
+    position: relative;
+    top: -1px;
 }
 
 .header-main .logo .brand-logo {
@@ -425,70 +599,10 @@ input.text-error {
 }
 
 .main-headline {
-    background-color: #bad2fa;
+    background-color: hsl(218, 84%, 85%);
     background: url("/static/images/landing-page/gg.jpg");
     background-position: center;
     background-size: cover;
-}
-
-
-.feature-block {
-    width: 49%;
-    display: inline-block;
-    vertical-align: top;
-    margin-bottom: 20px;
-}
-
-.feature-block h4 {
-    font-size: 22px;
-    font-weight: 300;
-    margin-left: 60px;
-    margin-top: 0px;
-}
-
-.feature-block i {
-    float: left;
-    color: #7e98ad;
-}
-
-.feature-block p {
-    margin-left: 60px;
-}
-
-.feature-block.left p,
-.feature-block.left h4 {
-    margin-right: 40px;
-}
-
-.feature-line.dark {
-    background: #ddedf6;
-    color: black;
-}
-
-.feature-line.light {
-    background: white;
-}
-
-
-.feature-line .feature-text {
-    width: 49%;
-    display: inline-block;
-    vertical-align: middle;
-    margin-top: 30px;
-    margin-bottom: 30px;
-}
-
-.feature-line .platform-text {
-    width: 39%;
-    text-align: left;
-    display: inline-block;
-    padding-top: 30px;
-    padding-bottom: 30px;
-    vertical-align: middle;
-}
-
-.feature-line .centered-content {
-    text-align: center;
 }
 
 a.bottom-signup-button {
@@ -499,76 +613,6 @@ a.bottom-signup-button {
     margin-top: 30px;
     margin-bottom: 30px;
     font-weight: 300;
-}
-
-.feature-line .platform {
-    margin-left: 50px;
-    text-align: center;
-    display: inline-block;
-    padding-top: 30px;
-    padding-bottom: 30px;
-}
-
-.feature-line .platform-icons {
-    display: inline-block;
-    width: 60%;
-    vertical-align: middle;
-    text-align: right;
-}
-
-.platform-icon {
-    font-size: 40px;
-    display: block;
-    padding-top: 30px;
-    padding-bottom: 30px;
-}
-
-.feature-line .tagline {
-    display: block;
-    font-weight: 300;
-    font-size: 30px;
-    line-height: 32px;
-}
-
-.feature-line .description {
-    display: block;
-    font-size: 18px;
-    line-height: 23px;
-    padding-top: 20px;
-}
-
-.feature-illustration {
-    width: 50%;
-    display: inline-block;
-    text-align: right;
-}
-
-.feature-image {
-    display: inline-block;
-    width: 100%;
-    max-width: 422px;
-    height: auto;
-    margin-top: 30px;
-    margin-bottom: 30px;
-}
-
-.feature-image.shadow {
-    border-radius: 6px;
-    box-shadow: 0px 0px 4px rgba(0,0,0,0.4);
-}
-
-.login-page,
-.apps-page,
-.register-page,
-.portico-page,
-.api-page {
-    min-height: 100%;
-    height: auto;
-}
-
-.portico-page {
-    /* height of the white portico navbar */
-    min-height: calc(100% - 87px);
 }
 
 .signup-signature {
@@ -582,19 +626,6 @@ a.bottom-signup-button {
     padding-top: 0px;
     text-align: center;
     font-size: 16px;
-}
-
-.terms-page-container,
-.feature-page-container,
-.apps-page-container,
-.integrations-page-container,
-.portico-page-container,
-.api-page-container {
-    padding-top: 50px !important;
-}
-
-.portico-page-container {
-    padding-top: 0px !important;
 }
 
 .portico-page-header {
@@ -611,7 +642,7 @@ a.bottom-signup-button {
 
 .portico-page-header a,
 .portico-page-header a:hover {
-    color: #000;
+    color: hsl(0, 0%, 0%);
     text-decoration: none;
     display: inline-block;
 }
@@ -626,38 +657,62 @@ a.bottom-signup-button {
     font-size: 25px;
 }
 
+.table.table-striped {
+    background: #fff;
+    box-shadow: 0px 0px 4px rgba(0,0,0,0.1);
+}
+
 .authors_row {
     width: 100%;
     table-layout: fixed;
 }
 
-.authors_row a {
+.contributors .person a {
     color: inherit;
 }
 
-.authors_row td {
-    width: 100%;
-    height: 100%;
-    height: 120px;
+.contributors .person {
+    width: calc(33% - 20px - 2px);
+    display: inline-block;
+    vertical-align: top;
+
     padding: 10px;
-    transition: box-shadow 0.3s ease-in-out;
+    margin: 5px 0px;
+
+    border: 1px solid #eee;
+
+    border-radius: 4px;
+    transition: all 0.3s ease;
 }
 
-.authors_row td:hover {
-    color: #00796B;
-    box-shadow: 0px 0px 30px #B2DFDB;
+.contributors .person:hover {
+    border: 1px solid #bbb;
 }
 
-.authors_row .avatar {
-    width: 50%;
+.contributors .person td:hover {
+    color: hsl(173, 100%, 24%);
+    box-shadow: 0px 0px 30px hsl(175, 41%, 78%);
+}
+
+.contributors .person .avatar {
+    width: 55px;
     text-align: center;
+    display: inline-block;
     vertical-align: top;
 }
 
-.authors_row .info {
+.contributors .person .info {
     width: 50%;
     text-align: left;
+    display: inline-block;
     vertical-align: top;
+    margin-left: 10px;
+}
+
+.contributors .last-updated {
+    color: #aaa;
+    font-size: 0.8em;
+    text-align: center;
 }
 
 .avatar_img {
@@ -666,19 +721,6 @@ a.bottom-signup-button {
     max-width: 80%;
     max-height: 80%;
     border-radius: 20%;
-}
-
-.integration-lozenges {
-    text-align: center;
-}
-
-.integration-lozenge {
-    width: 125px;
-    background: #ededed;
-    border-radius: 10px;
-    margin: 15px 5px 0px 5px;
-    display: inline-block;
-    vertical-align: top;
 }
 
 .integration-instruction-block .integration-lozenge {
@@ -692,17 +734,11 @@ a.bottom-signup-button {
 
 .integration-lozenge-static:hover {
     box-shadow: none;
-    background: #ededed;
+    background: hsl(0, 0%, 93%);
 }
 
 .integration-lozenge .integration-link:hover {
     text-decoration: none;
-}
-
-.integration-lozenge .integration-logo {
-    width: 125px;
-    height: auto;
-    display: block;
 }
 
 .integration-lozenge .integration-label {
@@ -712,26 +748,12 @@ a.bottom-signup-button {
     padding-top: 10px;
 }
 
-.integration-lozenge .integration-label-secondary {
-    display: block;
-    font-size: 14px;
-    font-weight: 500;
-    text-align: center;
-    padding-bottom: 5px;
-    color: #aaa;
-}
-
 .integration-instructions {
-    margin-left: 150px;
-}
-
-#integration-instructions-group {
-    display: none;
+    margin-left: 220px;
 }
 
 .api-page-header,
 .authors-page-header,
-.feature-page-header,
 .integrations-page-header,
 .register-page-header {
     font-weight: 300;
@@ -741,6 +763,10 @@ a.bottom-signup-button {
     width: 360px;
     text-align: center;
     margin-bottom: 50px;
+}
+
+.register-page-header {
+    text-align: left;
 }
 
 .login-page-header {
@@ -760,7 +786,6 @@ a.bottom-signup-button {
 
 .api-page-header,
 .authors-page-header,
-.feature-page-header,
 .integrations-page-header {
     padding-top: 56px;
 }
@@ -794,12 +819,12 @@ a.bottom-signup-button {
 
 .integration-instruction-block {
     position: relative;
-    margin-top: 15px;
 }
 
 #integration-list-link {
     position: absolute;
     top: 200px;
+    left: 30px;
     text-align: center;
     display: none;
     margin-left: 5px;
@@ -837,20 +862,16 @@ a.bottom-signup-button {
 
 .btn-user {
     background-color: #ffffff;
-    border-color: #55bdaa;
+    border-color: hsl(169, 44%, 54%);
     border-style: solid;
-    color: #3f9486;
+    color: hsl(170, 40%, 41%);
 }
 
 .btn-admin {
     background-color: #ffffff;
-    border-color: #00a9f4;
+    border-color: hsl(198, 100%, 48%);
     border-style: solid;
-    color: #2196f3;
-}
-
-.feature-page-header {
-    width: auto;
+    color: hsl(207, 89%, 54%);
 }
 
 .login-page {
@@ -873,8 +894,7 @@ a.bottom-signup-button {
 }
 
 .register-form {
-    margin: auto;
-    width: 100%;
+    display: inline-block;
     text-align: center;
 }
 
@@ -923,7 +943,7 @@ input.new-organization-button {
     min-width: 300px;
     margin: auto;
     text-align: center;
-    margin-top: 20px;
+    margin-top: 10px;
 }
 
 .login-google-button,
@@ -984,7 +1004,6 @@ input.new-organization-button {
 .app-main,
 .header-main,
 .footer-main {
-    max-width: 1200px;
     min-width: 350px;
     margin: 0px auto;
     padding: 0px 20px 0px 20px;
@@ -1010,14 +1029,14 @@ input.new-organization-button {
 .footer-navigation li a {
     display: inline-block;
     vertical-align: middle;
-    color: #888;
+    color: hsl(0, 0%, 46%);
     font-size: 0.9em;
     font-weight: 400;
     cursor: pointer;
 }
 
 .footer-navigation li:hover a {
-    color: #444;
+    color: hsl(0, 0%, 27%);
     text-decoration: none;
 }
 
@@ -1054,8 +1073,8 @@ input.new-organization-button {
 
 .top-links a:hover {
     text-decoration: none;
-    background-color: rgba(255,255,255,1);
-    color: #339a89;
+    background-color: hsla(0, 0%, 100%, 1.0);
+    color: hsl(170, 50%, 40%);
 }
 
 .centered-button {
@@ -1065,7 +1084,7 @@ input.new-organization-button {
 .button-muted {
     display: block;
     font-size: 12px;
-    color: #ddd;
+    color: hsl(0, 0%, 86%);
 }
 
 /* -- password reset container -- */
@@ -1188,24 +1207,37 @@ input.new-organization-button {
 }
 
 /* -- markdown styling -- */
-
 .markdown {
-    max-width: 800px;
-    margin: 20px auto 0px auto;
-    padding: 20px;
+    position: absolute;
+    right: 0px;
+    /* 100vw - sidebar width - paddingTop - paddingBottom */
+    width: calc(100vw - 340px - 30px);
+    padding: 0px 30px 0px 30px;
 
+    height: calc(100vh - 64px);
     font-weight: 400;
     font-size: 1rem;
     line-height: 1.5;
-    color: #666;
+
+    background-color: #fff;
+
+    overflow: auto;
 
     -webkit-font-smoothing: antialiased;
-    outline: 10000px solid rgba(240,240,240,0.5);
-    box-shadow: 0px 0px 30px rgba(0,0,0,0.2);
+}
+
+.markdown .content {
+    padding: 30px;
+    max-width: 768px;
+    margin-left: 0px;
+
+    min-height: calc(100% - 60px);
+
+    background: #fff;
 }
 
 .markdown a {
-    color: #399993;
+    color: hsl(176, 46%, 41%);
     font-weight: 600;
 }
 
@@ -1231,18 +1263,38 @@ input.new-organization-button {
 
 .markdown h1,
 .markdown h2,
-.markdown h3 {
-    font-weight: 400;
+.markdown h3,
+.why-page h1,
+.why-page h2,
+.why-page h3 {
+    font-weight: 700;
 }
 
-.markdown h3 {
-    margin-top: 30px;
-    margin-bottom: 5px;
+.markdown h1,
+.why-page .main h1 {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.markdown h2,
+.why-page h2 {
+    font-size: 1.4em;
+    margin: 5px 0 0 0;
+}
+
+.markdown h3,
+.why-page h3 {
+    font-size: 1.1em;
+    opacity: 1;
+    margin-bottom: 0px;
 }
 
 .markdown img {
     vertical-align: top;
-    box-shadow: 0px 0px 40px rgba(0,0,0,0.1);
+    box-shadow: 0px 0px 4px hsla(0, 0%, 0%, 0.05);
+    border: 1px solid #ddd;
+    border-radius: 4px;
 }
 
 .markdown img.inline {
@@ -1254,16 +1306,16 @@ input.new-organization-button {
 .markdown .tip {
     position: relative;
     display: block;
-    background-color: #f5f7f9;
-    border: 1px solid #eee;
+    background-color: hsl(210, 22%, 96%);
+    border: 1px solid hsl(210, 22%, 90%);
     border-radius: 4px;
     padding: 10px;
-    margin-bottom: 10px;
+    margin: 5px 0px;
 }
 
 .markdown .tip {
-    background-color: #fbf7ea;
-    border: 1px solid #e0ddd0;
+    background-color: hsl(46, 63%, 95%);
+    border: 1px solid hsl(46, 63%, 84%);
 }
 
 .markdown .warn p,
@@ -1274,7 +1326,7 @@ input.new-organization-button {
 .markdown .tip::before {
     display: inline;
     content: "\f0eb   Tip:  ";
-    font-family: FontAwesome, "Yantramanav", Humbug;
+    font-family: FontAwesome, "Yantramanav", Source Sans Pro;
     font-weight: 600;
 }
 
@@ -1284,7 +1336,11 @@ input.new-organization-button {
 
 .markdown ol > li > div.tip,
 .markdown ol > li > div.warn {
-    margin: 0px 30px 15px;
+    margin: 5px 25px 5px;
+}
+
+.markdown ol p {
+    margin: 0 0 2px;
 }
 
 .markdown .indicator {
@@ -1296,21 +1352,21 @@ input.new-organization-button {
 }
 
 .markdown .indicator.grey {
-    border: 1px solid #CCC;
+    border: 1px solid hsl(0, 0%, 80%);
 }
 
 .markdown .indicator.orange {
-    border: 1px solid #ec7e18;
-    background: linear-gradient(to bottom,rgba(255,255,255,0) 50%,rgba(236,126,24,1) 50%);
+    border: 1px solid hsl(29, 84%, 51%);
+    background: linear-gradient(to bottom,hsla(0, 0%, 100%, 0.0) 50%,hsla(29, 84%, 51%, 1.0) 50%);
 }
 
 .markdown .indicator.green {
-    border: 1px solid #44c21d;
-    background-color: rgba(68,194,29,0.3);
+    border: 1px solid hsl(106, 74%, 44%);
+    background-color: hsla(106, 74%, 44%, 0.3);
 }
 
 .markdown .indicator.green.solid {
-    background-color: #44c21d;
+    background-color: hsl(106, 74%, 44%);
 }
 
 /* make sure that it doesn't wrap and disappear around the line.. odd bug. */
@@ -1326,43 +1382,116 @@ input.new-organization-button {
     margin: 5px 0px;
 }
 
-@media (max-height: 678px) {
-    .portico-page {
-        /* the footer becomes two lines */
-        min-height: calc(100% - 96px);
-    }
+.markdown .footer {
+    position: relative;
+    margin-top: -240px;
+    height: auto;
+    width: calc(100% - 40px);
+    max-width: calc(768px + 20px);
 }
 
-@media (max-height: 600px) {
-    .password-container {
-        margin-top: 10px;
+.error_page {
+    padding: 20px 0px;
+    min-height: calc(100vh - 290px);
+    background-color: #c9e9e0;
+    font-family: 'Source Sans Pro', Helvetica, Arial, sans-serif;
+}
+
+.error_page .row-fluid {
+    margin-top: 60px;
+}
+
+.error_page img {
+    display: block;
+    clear: right;
+    margin: 0 auto;
+    max-width: 500px;
+    width: 100%;
+}
+
+.error_page .errorbox {
+    margin: auto;
+    border: 2px solid #44A98C;
+    max-width: 500px;
+    background-color: white;
+    box-shadow: 0 0 4px #44A98C;
+    font-size: 18px;
+}
+
+.error_page .errorbox.config-error {
+    max-width: 750px;
+}
+
+.error_page p {
+    color: #333333;
+}
+
+.error_page .errorcontent {
+    text-align: left;
+    padding: 40px 40px 30px 40px;
+}
+
+.error_page .lead {
+    color: #39a688;
+    font-size: 40px;
+    margin-bottom: 20px;
+    line-height: normal;
+}
+
+@media (max-width: 1000px) {
+    .app.help .markdown {
+        width: calc(100vw - 50px);
+        height: calc(100vh - 64px);
+        left: 50px;
+        padding: 0px;
+    }
+
+    .app.help .markdown .content {
+        max-width: none;
+    }
+
+    .app.help .hamburger {
+        display: block;
+        position: fixed;
+        top: 70px;
+        left: 9px;
+        fill: hsl(222, 33%, 33%);
+        z-index: 2;
+
+
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+
+    .app.help .sidebar {
+        right: calc(100vw - 50px);
+        padding-right: 80px;
+        transform: translateX(0);
+        transition: all 0.3s ease;
+        overflow: hidden;
+        height: 100vh;
+    }
+
+    .app.help .sidebar.show {
+        padding-right: 20px;
+        transform: translateX(280px);
+        overflow: auto !important;
+    }
+
+    .app.help .sidebar.show + .hamburger {
+        transform: translateX(280px);
+    }
+
+    .app.help .sidebar.show ~ .markdown {
+        -webkit-filter: brightness(0.7);
+    }
+
+    .contributors .person {
+        width: calc(50% - 20px - 4px);
     }
 }
 
 @media (max-width: 950px) {
-
-    .feature-line .feature-text {
-        width: 100%;
-        display: inline-block;
-        vertical-align: middle;
-    }
-
-    .feature-line .tagline {
-        text-align: center;
-    }
-
-    .feature-illustration {
-        width: 100%;
-        display: block;
-        text-align: center;
-    }
-
-    .feature-image {
-        width: 422px;
-        max-width: 100%;
-        margin-top: 0px;
-    }
-
     .footer-main {
         text-align: center;
     }
@@ -1373,24 +1502,14 @@ input.new-organization-button {
 
 }
 
-@media (max-width: 1000px) {
-    .feature-line .platform-text {
-        display: block;
-        width: 100%;
-        text-align: center;
+@media (max-width: 815px) {
+    .footer {
+        width: 450px;
+        margin-left: auto;
+        margin-right: auto;
     }
-
-    .feature-line .platform-icons {
-        display: block;
-        width: 100%;
-        text-align: center;
-    }
-
-    .feature-line .platform {
-        float: none;
-        margin-left: 20px;
-        margin-right: 20px;
-        display: inline-block;
+    .footer section {
+        width: calc(50% - 40px);
     }
 }
 
@@ -1432,22 +1551,67 @@ input.new-organization-button {
         display: inline-block;
         margin-top: 10px;
     }
+}
 
-    .feature-block {
-        width: 100%;
-        display: block;
+@media (max-width: 648px) {
+    /* this is when the .markdown .footer collapses to two lines. */
+    .markdown .footer {
+        margin-top: -95px;
     }
+}
 
-    .feature-block.left p,
-    .feature-block.left h4 {
-        margin-right: 0px;
+@media (max-height: 600px) {
+    .password-container {
+        margin-top: 10px;
     }
-
 }
 
 @media (max-width: 500px) {
+    .error_page .lead {
+        font-size: 1.5em;
+        margin-bottom: 10px;
+    }
+
+    .markdown .content {
+        padding: 30px 10px 80px 10px;
+    }
+
+    .brand.logo .light {
+        display: none;
+    }
+
     .center-container {
         display: block;
+    }
+
+    .app.help {
+        position: absolute;
+        height: calc(100vh - 40px);
+    }
+
+    .app.help .sidebar {
+        width: calc(100% - 40px);
+        height: calc(100vh - 40px - 10px - 9px);
+    }
+
+    .app.help .sidebar.show {
+        transform: translateX(calc(100% - 50px));
+    }
+
+    .app.help .sidebar.show + .hamburger {
+        transform: translateX(calc(100vw - 50px));
+    }
+
+    .app.help .hamburger {
+        top: 50px;
+    }
+
+    .app.help .markdown {
+        height: 100%;
+    }
+
+    .app.help .footer-main {
+        padding: 0;
     }
 
     .app-main,
@@ -1476,10 +1640,6 @@ input.new-organization-button {
         font-size: 12px;
     }
 
-    .app-main .markdown {
-        max-width: 85%;
-    }
-
     .markdown a {
         white-space: pre-wrap;
     }
@@ -1498,6 +1658,25 @@ input.new-organization-button {
         padding-right: 6px;
     }
 
+}
+
+@media (max-width: 475px) {
+    .footer {
+        width: auto;
+    }
+
+    .footer section {
+        margin: 0px 3px;
+        width: calc(50% - 8px);
+    }
+}
+
+@media (max-width: 400px) {
+    .footer section {
+        width: calc(100% - 40px);
+        max-width: none;
+        text-align: center;
+    }
 }
 
 @font-face {
@@ -1547,7 +1726,7 @@ input.new-organization-button {
 
 .input-group.grid {
     padding: 10px 0px;
-    border-bottom: 1px solid #DDD;
+    border-bottom: 1px solid hsl(0, 0%, 86%);
 }
 
 label.label-title {
@@ -1579,7 +1758,7 @@ input.new-organization-button {
 
     font-weight: 400;
 
-    background-color: #478fca;
+    background-color: hsl(207, 55%, 53%);
     color: #FFF;
     outline: none;
     border: none;
@@ -1603,7 +1782,7 @@ input.new-organization-button {
 }
 
 .button-new.sea-green {
-    background-color: #24cac2;
+    background-color: hsl(177, 70%, 46%);
     color: #fff;
 }
 
@@ -1615,16 +1794,33 @@ input.new-organization-button {
     float: right;
 }
 
-#find_my_team .form-control {
+#find_account .form-control {
     height: 30px;
 }
 
-#find_my_team .btn {
+#find_account .btn {
     height: 40px;
     border-radius: 5px;
 }
 
 .documentation-footer {
     font-size: .85rem;
-    color: #AAA;
+    color: hsl(0, 0%, 66%);
+}
+
+#devtools-wrapper {
+    text-align: right;
+}
+
+#devtools-page {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.portico-page.error {
+    padding-bottom: 0px;
+}
+
+.portico-page.error .portico-page-container {
+    padding: 0;
 }

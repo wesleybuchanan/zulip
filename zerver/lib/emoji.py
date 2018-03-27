@@ -1,24 +1,34 @@
-from __future__ import absolute_import
 
 import os
 import re
+import ujson
 
+from django.conf import settings
 from django.utils.translation import ugettext as _
-from typing import Optional, Text
-from zerver.lib.bugdown import name_to_codepoint
+from typing import Optional, Text, Tuple
+
 from zerver.lib.request import JsonableError
 from zerver.lib.upload import upload_backend
-from zerver.models import Realm, RealmEmoji, UserProfile
+from zerver.models import Reaction, Realm, RealmEmoji, UserProfile
+
+NAME_TO_CODEPOINT_PATH = os.path.join(settings.STATIC_ROOT, "generated", "emoji", "name_to_codepoint.json")
+with open(NAME_TO_CODEPOINT_PATH) as fp:
+    name_to_codepoint = ujson.load(fp)
+
+def emoji_name_to_emoji_code(realm, emoji_name):
+    # type: (Realm, Text) -> Tuple[Text, Text]
+    realm_emojis = realm.get_emoji()
+    if emoji_name in realm_emojis and not realm_emojis[emoji_name]['deactivated']:
+        return emoji_name, Reaction.REALM_EMOJI
+    if emoji_name == 'zulip':
+        return emoji_name, Reaction.ZULIP_EXTRA_EMOJI
+    if emoji_name in name_to_codepoint:
+        return name_to_codepoint[emoji_name], Reaction.UNICODE_EMOJI
+    raise JsonableError(_("Emoji '%s' does not exist" % (emoji_name,)))
 
 def check_valid_emoji(realm, emoji_name):
     # type: (Realm, Text) -> None
-    if emoji_name in set(realm.get_emoji().keys()):
-        return
-    if emoji_name in name_to_codepoint:
-        return
-    if emoji_name == 'zulip':
-        return
-    raise JsonableError(_("Emoji '%s' does not exist" % (emoji_name,)))
+    emoji_name_to_emoji_code(realm, emoji_name)
 
 def check_emoji_admin(user_profile, emoji_name=None):
     # type: (UserProfile, Optional[Text]) -> None

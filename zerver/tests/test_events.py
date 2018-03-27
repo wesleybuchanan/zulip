@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 # See http://zulip.readthedocs.io/en/latest/events-system.html for
 # high-level documentation on how this system works.
-from __future__ import absolute_import
-from __future__ import print_function
-from typing import Any, Callable, Dict, List, Optional, Union, Text, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Text, Tuple, Union
 import os
 import shutil
+import sys
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
@@ -15,68 +14,77 @@ from django.utils.timezone import now as timezone_now
 from zerver.models import (
     get_client, get_realm, get_recipient, get_stream, get_user,
     Message, RealmDomain, Recipient, UserMessage, UserPresence, UserProfile,
-    Realm,
+    Realm, Subscription, Stream, flush_per_request_caches,
 )
 
 from zerver.lib.actions import (
     bulk_add_subscriptions,
     bulk_remove_subscriptions,
-    do_add_alert_words,
     check_add_realm_emoji,
     check_send_typing_notification,
-    notify_realm_custom_profile_fields,
-    do_add_realm_filter,
+    do_add_alert_words,
+    do_add_default_stream,
     do_add_reaction,
-    do_remove_reaction,
+    do_add_realm_domain,
+    do_add_realm_filter,
     do_change_avatar_fields,
+    do_change_bot_owner,
     do_change_default_all_public_streams,
     do_change_default_events_register_stream,
     do_change_default_sending_stream,
     do_change_full_name,
-    do_change_bot_owner,
+    do_change_icon_source,
     do_change_is_admin,
+    do_change_notification_settings,
+    do_change_realm_domain,
     do_change_stream_description,
     do_change_subscription_property,
     do_create_user,
     do_deactivate_stream,
     do_deactivate_user,
+    do_delete_message,
     do_mark_hotspot_as_read,
+    do_mute_topic,
     do_reactivate_user,
-    do_refer_friend,
     do_regenerate_api_key,
     do_remove_alert_words,
+    do_remove_default_stream,
+    do_remove_reaction,
+    do_remove_realm_domain,
     do_remove_realm_emoji,
     do_remove_realm_filter,
     do_rename_stream,
-    do_add_default_stream,
-    do_remove_default_stream,
-    do_set_muted_topics,
-    do_set_realm_property,
     do_set_realm_authentication_methods,
     do_set_realm_message_editing,
+    do_set_realm_property,
+    do_set_user_display_setting,
+    do_set_realm_notifications_stream,
+    do_unmute_topic,
     do_update_embedded_data,
     do_update_message,
     do_update_message_flags,
-    do_update_muted_topic,
     do_update_pointer,
     do_update_user_presence,
-    do_set_user_display_setting,
-    do_change_notification_settings,
-    do_add_realm_domain,
-    do_change_realm_domain,
-    do_remove_realm_domain,
-    do_change_icon_source,
     log_event,
-    do_delete_message,
+    notify_realm_custom_profile_fields,
 )
 from zerver.lib.events import (
     apply_events,
     fetch_initial_state_data,
 )
-from zerver.lib.message import render_markdown
-from zerver.lib.test_helpers import POSTRequestMock, get_subscription
+from zerver.lib.message import (
+    get_unread_message_ids_per_recipient,
+    render_markdown,
+    UnreadMessagesResult,
+)
+from zerver.lib.test_helpers import POSTRequestMock, get_subscription, \
+    stub_event_queue_user_events, queries_captured
 from zerver.lib.test_classes import (
     ZulipTestCase,
+)
+from zerver.lib.test_runner import slow
+from zerver.lib.topic_mutes import (
+    add_topic_mute,
 )
 from zerver.lib.validator import (
     check_bool, check_dict, check_dict_only, check_float, check_int, check_list, check_string,
@@ -85,21 +93,24 @@ from zerver.lib.validator import (
 
 from zerver.views.events_register import _default_all_public_streams, _default_narrow
 
-from zerver.tornado.event_queue import allocate_client_descriptor, EventQueue
+from zerver.tornado.event_queue import (
+    allocate_client_descriptor,
+    clear_client_event_queues_for_testing,
+    EventQueue,
+)
 from zerver.tornado.views import get_events_backend
 
 from collections import OrderedDict
 import mock
 import time
 import ujson
-from six.moves import range
 
 
 class LogEventsTest(ZulipTestCase):
     def test_with_missing_event_log_dir_setting(self):
         # type: () -> None
         with self.settings(EVENT_LOG_DIR=None):
-            log_event(None)
+            log_event(dict())
 
     def test_log_event_mkdir(self):
         # type: () -> None
@@ -133,45 +144,51 @@ class EventsEndpointTest(ZulipTestCase):
             result = self.client_post('/json/register', **self.api_auth(email))
         self.assert_json_error(result, "Could not allocate event queue")
 
-        with mock.patch('zerver.lib.events.request_event_queue', return_value='15:11'):
-            with mock.patch('zerver.lib.events.get_user_events',
-                            return_value=[]):
+        return_event_queue = '15:11'
+        return_user_events = []  # type: (List[Any])
+
+        # Test that call is made to deal with a returning soft deactivated user.
+        with mock.patch('zerver.lib.events.maybe_catch_up_soft_deactivated_user') as fa:
+            with stub_event_queue_user_events(return_event_queue, return_user_events):
                 result = self.client_post('/json/register', dict(event_types=ujson.dumps(['pointer'])),
                                           **self.api_auth(email))
+                self.assertEqual(fa.call_count, 1)
+
+        with stub_event_queue_user_events(return_event_queue, return_user_events):
+            result = self.client_post('/json/register', dict(event_types=ujson.dumps(['pointer'])),
+                                      **self.api_auth(email))
         self.assert_json_success(result)
-        result_dict = ujson.loads(result.content)
+        result_dict = result.json()
         self.assertEqual(result_dict['last_event_id'], -1)
         self.assertEqual(result_dict['queue_id'], '15:11')
 
-        with mock.patch('zerver.lib.events.request_event_queue', return_value='15:12'):
-            with mock.patch('zerver.lib.events.get_user_events',
-                            return_value=[{
-                                'id': 6,
-                                'type': 'pointer',
-                                'pointer': 15,
-                            }]):
-                result = self.client_post('/json/register', dict(event_types=ujson.dumps(['pointer'])),
-                                          **self.api_auth(email))
+        return_event_queue = '15:12'
+        return_user_events = [
+            {
+                'id': 6,
+                'type': 'pointer',
+                'pointer': 15,
+            }
+        ]
+        with stub_event_queue_user_events(return_event_queue, return_user_events):
+            result = self.client_post('/json/register', dict(event_types=ujson.dumps(['pointer'])),
+                                      **self.api_auth(email))
+
         self.assert_json_success(result)
-        result_dict = ujson.loads(result.content)
+        result_dict = result.json()
         self.assertEqual(result_dict['last_event_id'], 6)
         self.assertEqual(result_dict['pointer'], 15)
         self.assertEqual(result_dict['queue_id'], '15:12')
 
         # Now test with `fetch_event_types` not matching the event
-        with mock.patch('zerver.lib.events.request_event_queue', return_value='15:13'):
-            with mock.patch('zerver.lib.events.get_user_events',
-                            return_value=[{
-                                'id': 6,
-                                'type': 'pointer',
-                                'pointer': 15,
-                            }]):
-                result = self.client_post('/json/register',
-                                          dict(event_types=ujson.dumps(['pointer']),
-                                               fetch_event_types=ujson.dumps(['message'])),
-                                          **self.api_auth(email))
+        return_event_queue = '15:13'
+        with stub_event_queue_user_events(return_event_queue, return_user_events):
+            result = self.client_post('/json/register',
+                                      dict(event_types=ujson.dumps(['pointer']),
+                                           fetch_event_types=ujson.dumps(['message'])),
+                                      **self.api_auth(email))
         self.assert_json_success(result)
-        result_dict = ujson.loads(result.content)
+        result_dict = result.json()
         self.assertEqual(result_dict['last_event_id'], 6)
         # Check that the message event types data is in there
         self.assertIn('max_message_id', result_dict)
@@ -180,19 +197,13 @@ class EventsEndpointTest(ZulipTestCase):
         self.assertEqual(result_dict['queue_id'], '15:13')
 
         # Now test with `fetch_event_types` matching the event
-        with mock.patch('zerver.lib.events.request_event_queue', return_value='15:13'):
-            with mock.patch('zerver.lib.events.get_user_events',
-                            return_value=[{
-                                'id': 6,
-                                'type': 'pointer',
-                                'pointer': 15,
-                            }]):
-                result = self.client_post('/json/register',
-                                          dict(fetch_event_types=ujson.dumps(['pointer']),
-                                               event_types=ujson.dumps(['message'])),
-                                          **self.api_auth(email))
+        with stub_event_queue_user_events(return_event_queue, return_user_events):
+            result = self.client_post('/json/register',
+                                      dict(fetch_event_types=ujson.dumps(['pointer']),
+                                           event_types=ujson.dumps(['message'])),
+                                      **self.api_auth(email))
         self.assert_json_success(result)
-        result_dict = ujson.loads(result.content)
+        result_dict = result.json()
         self.assertEqual(result_dict['last_event_id'], 6)
         # Check that we didn't fetch the messages data
         self.assertNotIn('max_message_id', result_dict)
@@ -395,6 +406,14 @@ class EventsRegisterTest(ZulipTestCase):
     def do_test(self, action, event_types=None, include_subscribers=True, state_change_expected=True,
                 num_events=1):
         # type: (Callable[[], Any], Optional[List[str]], bool, bool, int) -> List[Dict[str, Any]]
+
+        '''
+        Make sure we have a clean slate of client descriptors for these tests.
+        If we don't do this, then certain failures will only manifest when you
+        run multiple tests.
+        '''
+        clear_client_event_queues_for_testing()
+
         client = allocate_client_descriptor(
             dict(user_profile_id = self.user_profile.id,
                  user_profile_email = self.user_profile.email,
@@ -427,7 +446,7 @@ class EventsRegisterTest(ZulipTestCase):
                 raise AssertionError('Test is invalid--state actually does change here.')
 
         normal_state = fetch_initial_state_data(self.user_profile, event_types, "", include_subscribers=include_subscribers)
-        self.match_states(hybrid_state, normal_state)
+        self.match_states(hybrid_state, normal_state, events)
         return events
 
     def assert_on_error(self, error):
@@ -435,11 +454,14 @@ class EventsRegisterTest(ZulipTestCase):
         if error:
             raise AssertionError(error)
 
-    def match_states(self, state1, state2):
-        # type: (Dict[str, Any], Dict[str, Any]) -> None
+    def match_states(self, state1, state2, events):
+        # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]) -> None
         def normalize(state):
             # type: (Dict[str, Any]) -> None
             state['realm_users'] = {u['email']: u for u in state['realm_users']}
+            for u in state['never_subscribed']:
+                if 'subscribers' in u:
+                    u['subscribers'].sort()
             for u in state['subscriptions']:
                 if 'subscribers' in u:
                     u['subscribers'].sort()
@@ -449,14 +471,88 @@ class EventsRegisterTest(ZulipTestCase):
                 state['realm_bots'] = {u['email']: u for u in state['realm_bots']}
         normalize(state1)
         normalize(state2)
-        self.assertEqual(state1, state2)
+
+        # If this assertions fails, we have unusual problems.
+        self.assertEqual(state1.keys(), state2.keys())
+
+        # The far more likely scenario is that some section of
+        # our enormous payload does not get updated properly.  We
+        # want the diff here to be developer-friendly, hence
+        # the somewhat tedious code to provide useful output.
+        if state1 != state2:  # nocoverage
+            print('\n---States DO NOT MATCH---')
+            print('\nEVENTS:\n')
+
+            # Printing out the events is a big help to
+            # developers.
+            import json
+            for event in events:
+                print(json.dumps(event, indent=4))
+
+            print('\nMISMATCHES:\n')
+            for k in state1:
+                if state1[k] != state2[k]:
+                    print('\nkey = ' + k)
+                    try:
+                        self.assertEqual({k: state1[k]}, {k: state2[k]})
+                    except AssertionError as e:
+                        print(e)
+            print('''
+                NOTE:
+
+                    This is an advanced test that verifies how
+                    we apply events after fetching data.  If you
+                    do not know how to debug it, you can ask for
+                    help on chat.
+                ''')
+
+            sys.stdout.flush()
+            raise AssertionError('Mismatching states')
 
     def check_events_dict(self, required_keys):
         # type: (List[Tuple[str, Validator]]) -> Validator
         required_keys.append(('id', check_int))
         return check_dict_only(required_keys)
 
-    def test_send_message_events(self):
+    def test_mentioned_send_message_events(self):
+        # type: () -> None
+        user = self.example_user('hamlet')
+
+        for i in range(3):
+            content = 'mentioning... @**' + user.full_name + '** hello ' + str(i)
+            self.do_test(
+                lambda: self.send_message(self.example_email('cordelia'),
+                                          "Verona",
+                                          Recipient.STREAM,
+                                          content)
+
+            )
+
+    def test_pm_send_message_events(self):
+        # type: () -> None
+        self.do_test(
+            lambda: self.send_message(self.example_email('cordelia'),
+                                      self.example_email('hamlet'),
+                                      Recipient.PERSONAL,
+                                      'hola')
+
+        )
+
+    def test_huddle_send_message_events(self):
+        # type: () -> None
+        huddle = [
+            self.example_email('hamlet'),
+            self.example_email('othello'),
+        ]
+        self.do_test(
+            lambda: self.send_message(self.example_email('cordelia'),
+                                      huddle,
+                                      Recipient.HUDDLE,
+                                      'hola')
+
+        )
+
+    def test_stream_send_message_events(self):
         # type: () -> None
         schema_checker = self.check_events_dict([
             ('type', equals('message')),
@@ -467,7 +563,7 @@ class EventsRegisterTest(ZulipTestCase):
                 ('content', check_string),
                 ('content_type', equals('text/html')),
                 ('display_recipient', check_string),
-                ('is_mentioned', check_bool),
+                ('is_me_message', check_bool),
                 ('reactions', check_list(None)),
                 ('recipient_id', check_int),
                 ('sender_realm_str', check_string),
@@ -498,6 +594,11 @@ class EventsRegisterTest(ZulipTestCase):
             ('flags', check_list(None)),
             ('message_id', check_int),
             ('message_ids', check_list(check_int)),
+            ('prior_mention_user_ids', check_list(check_int)),
+            ('mention_user_ids', check_list(check_int)),
+            ('presence_idle_user_ids', check_list(check_int)),
+            ('stream_push_user_ids', check_list(check_int)),
+            ('push_notify_user_ids', check_list(check_int)),
             ('orig_content', check_string),
             ('orig_rendered_content', check_string),
             ('orig_subject', check_string),
@@ -506,6 +607,7 @@ class EventsRegisterTest(ZulipTestCase):
             ('rendered_content', check_string),
             ('sender', check_string),
             ('stream_id', check_int),
+            ('stream_name', check_string),
             ('subject', check_string),
             ('subject_links', check_list(None)),
             ('user_id', check_int),
@@ -516,10 +618,15 @@ class EventsRegisterTest(ZulipTestCase):
         propagate_mode = 'change_all'
         content = 'new content'
         rendered_content = render_markdown(message, content)
+        prior_mention_user_ids = set()  # type: Set[int]
+        mentioned_user_ids = set()  # type: Set[int]
+
         events = self.do_test(
             lambda: do_update_message(self.user_profile, message, topic,
-                                      propagate_mode, content, rendered_content),
-            state_change_expected=False,
+                                      propagate_mode, content, rendered_content,
+                                      prior_mention_user_ids,
+                                      mentioned_user_ids),
+            state_change_expected=True,
         )
         error = schema_checker('events[0]', events[0])
         self.assert_on_error(error)
@@ -558,8 +665,7 @@ class EventsRegisterTest(ZulipTestCase):
         message = self.send_message(self.example_email("cordelia"), self.example_email("hamlet"), Recipient.PERSONAL, "hello")
         user_profile = self.example_user('hamlet')
         events = self.do_test(
-            lambda: do_update_message_flags(user_profile, 'add', 'starred',
-                                            [message], False, None, None),
+            lambda: do_update_message_flags(user_profile, 'add', 'starred', [message]),
             state_change_expected=False,
         )
         error = schema_checker('events[0]', events[0])
@@ -572,12 +678,43 @@ class EventsRegisterTest(ZulipTestCase):
             ('operation', equals("remove")),
         ])
         events = self.do_test(
-            lambda: do_update_message_flags(user_profile, 'remove', 'starred',
-                                            [message], False, None, None),
+            lambda: do_update_message_flags(user_profile, 'remove', 'starred', [message]),
             state_change_expected=False,
         )
         error = schema_checker('events[0]', events[0])
         self.assert_on_error(error)
+
+    def test_update_read_flag_removes_unread_msg_ids(self):
+        # type: () -> None
+
+        user_profile = self.example_user('hamlet')
+        mention = '@**' + user_profile.full_name + '**'
+
+        for content in ['hello', mention]:
+            message = self.send_message(
+                self.example_email('cordelia'),
+                "Verona",
+                Recipient.STREAM,
+                content
+            )
+
+            self.do_test(
+                lambda: do_update_message_flags(user_profile, 'add', 'read', [message]),
+                state_change_expected=True,
+            )
+
+    def test_send_message_to_existing_recipient(self):
+        # type: () -> None
+        self.send_message(
+            self.example_email('cordelia'),
+            "Verona",
+            Recipient.STREAM,
+            "hello 1"
+        )
+        self.do_test(
+            lambda: self.send_message("cordelia@zulip.com", "Verona", Recipient.STREAM, "hello 2"),
+            state_change_expected=True,
+        )
 
     def test_send_reaction(self):
         # type: () -> None
@@ -586,6 +723,8 @@ class EventsRegisterTest(ZulipTestCase):
             ('op', equals('add')),
             ('message_id', check_int),
             ('emoji_name', check_string),
+            ('emoji_code', check_string),
+            ('reaction_type', check_string),
             ('user', check_dict_only([
                 ('email', check_string),
                 ('full_name', check_string),
@@ -610,6 +749,8 @@ class EventsRegisterTest(ZulipTestCase):
             ('op', equals('remove')),
             ('message_id', check_int),
             ('emoji_name', check_string),
+            ('emoji_code', check_string),
+            ('reaction_type', check_string),
             ('user', check_dict_only([
                 ('email', check_string),
                 ('full_name', check_string),
@@ -619,6 +760,7 @@ class EventsRegisterTest(ZulipTestCase):
 
         message_id = self.send_message(self.example_email("hamlet"), "Verona", Recipient.STREAM, "hello")
         message = Message.objects.get(id=message_id)
+        do_add_reaction(self.user_profile, message, "tada")
         events = self.do_test(
             lambda: do_remove_reaction(
                 self.user_profile, message, "tada"),
@@ -722,19 +864,6 @@ class EventsRegisterTest(ZulipTestCase):
         error = schema_checker('events[0]', events[0])
         self.assert_on_error(error)
 
-    def test_referral_events(self):
-        # type: () -> None
-        schema_checker = self.check_events_dict([
-            ('type', equals('referral')),
-            ('referrals', check_dict_only([
-                ('granted', check_int),
-                ('used', check_int),
-            ])),
-        ])
-        events = self.do_test(lambda: do_refer_friend(self.user_profile, "friend@example.com"))
-        error = schema_checker('events[0]', events[0])
-        self.assert_on_error(error)
-
     def test_register_events(self):
         # type: () -> None
         realm_user_add_checker = self.check_events_dict([
@@ -796,17 +925,15 @@ class EventsRegisterTest(ZulipTestCase):
             ('type', equals('muted_topics')),
             ('muted_topics', check_list(check_list(check_string, 2))),
         ])
-        events = self.do_test(lambda: do_set_muted_topics(self.user_profile, [[u"Denmark", u"topic"]]))
+        stream = get_stream('Denmark', self.user_profile.realm)
+        recipient = get_recipient(Recipient.STREAM, stream.id)
+        events = self.do_test(lambda: do_mute_topic(
+            self.user_profile, stream, recipient, "topic"))
         error = muted_topics_checker('events[0]', events[0])
         self.assert_on_error(error)
 
-        events = self.do_test(lambda: do_update_muted_topic(
-            self.user_profile, "Denmark", "topic", "add"))
-        error = muted_topics_checker('events[0]', events[0])
-        self.assert_on_error(error)
-
-        events = self.do_test(lambda: do_update_muted_topic(
-            self.user_profile, "Denmark", "topic", "remove"))
+        events = self.do_test(lambda: do_unmute_topic(
+            self.user_profile, stream, "topic"))
         error = muted_topics_checker('events[0]', events[0])
         self.assert_on_error(error)
 
@@ -846,25 +973,18 @@ class EventsRegisterTest(ZulipTestCase):
         # type: (str) -> None
         bool_tests = [True, False, True]  # type: List[bool]
         test_values = dict(
-            add_emoji_by_admins_only=bool_tests,
-            create_stream_by_admins_only=bool_tests,
             default_language=[u'es', u'de', u'en'],
             description=[u'Realm description', u'New description'],
-            email_changes_disabled=bool_tests,
-            invite_required=bool_tests,
-            invite_by_admins_only=bool_tests,
-            inline_image_preview=bool_tests,
-            inline_url_embed_preview=bool_tests,
             message_retention_days=[10, 20],
             name=[u'Zulip', u'New Name'],
-            name_changes_disabled=bool_tests,
-            restricted_to_domain=bool_tests,
             waiting_period_threshold=[10, 20],
         )  # type: Dict[str, Any]
 
+        vals = test_values.get(name)
         property_type = Realm.property_types[name]
         if property_type is bool:
             validator = check_bool
+            vals = bool_tests
         elif property_type is Text:
             validator = check_string
         elif property_type is int:
@@ -880,7 +1000,6 @@ class EventsRegisterTest(ZulipTestCase):
             ('value', validator),
         ])
 
-        vals = test_values.get(name)
         if vals is None:
             raise AssertionError('No test created for %s' % (name))
         do_set_realm_property(self.user_profile.realm, name, vals[0])
@@ -890,9 +1009,9 @@ class EventsRegisterTest(ZulipTestCase):
             error = schema_checker('events[0]', events[0])
             self.assert_on_error(error)
 
+    @slow("Actually runs several full-stack fetching tests")
     def test_change_realm_property(self):
         # type: () -> None
-
         for prop in Realm.property_types:
             self.do_set_realm_property_test(prop)
 
@@ -968,13 +1087,31 @@ class EventsRegisterTest(ZulipTestCase):
         ])
         # Test every transition among the four possibilities {T,F} x {0, non-0}
         for (allow_message_editing, message_content_edit_limit_seconds) in \
-            ((True, 0), (False, 0), (True, 0), (False, 1234), (True, 0), (True, 1234), (True, 0),
-             (False, 0), (False, 1234), (False, 0), (True, 1234), (False, 0),
-             (True, 1234), (True, 600), (False, 600), (False, 1234), (True, 600)):
+            ((True, 0), (False, 0), (False, 1234),
+             (True, 600), (False, 0), (True, 1234)):
             events = self.do_test(
                 lambda: do_set_realm_message_editing(self.user_profile.realm,
                                                      allow_message_editing,
                                                      message_content_edit_limit_seconds))
+            error = schema_checker('events[0]', events[0])
+            self.assert_on_error(error)
+
+    def test_change_realm_notifications_stream(self):
+        # type: () -> None
+        schema_checker = self.check_events_dict([
+            ('type', equals('realm')),
+            ('op', equals('update')),
+            ('property', equals('notifications_stream_id')),
+            ('value', check_int),
+        ])
+
+        stream = get_stream("Rome", self.user_profile.realm)
+
+        for notifications_stream, notifications_stream_id in ((stream, stream.id), (None, -1)):
+            events = self.do_test(
+                lambda: do_set_realm_notifications_stream(self.user_profile.realm,
+                                                          notifications_stream,
+                                                          notifications_stream_id))
             error = schema_checker('events[0]', events[0])
             self.assert_on_error(error)
 
@@ -995,8 +1132,16 @@ class EventsRegisterTest(ZulipTestCase):
             error = schema_checker('events[0]', events[0])
             self.assert_on_error(error)
 
-    def do_set_user_display_settings_test(self, setting_name, values_list):
-        # type: (str, List[Union[bool, Text]]) -> None
+    def do_set_user_display_settings_test(self, setting_name):
+        # type: (str) -> None
+        """Test updating each setting in UserProfile.property_types dict."""
+
+        bool_change = [True, False, True]  # type: List[bool]
+        test_changes = dict(
+            emojiset = [u'apple', u'twitter'],
+            default_language = [u'es', u'de', u'en'],
+            timezone = [u'US/Mountain', u'US/Samoa', u'Pacific/Galapogos', u'']
+        )  # type: Dict[str, Any]
 
         property_type = UserProfile.property_types[setting_name]
         if property_type is bool:
@@ -1009,9 +1154,13 @@ class EventsRegisterTest(ZulipTestCase):
         num_events = 1
         if setting_name == "timezone":
             num_events = 2
-        if property_type == bool:
-            do_set_user_display_setting(self.user_profile, setting_name, False)
-        for value in values_list:
+        values = test_changes.get(setting_name)
+        if property_type is bool:
+            values = bool_change
+        if values is None:
+            raise AssertionError('No test created for %s' % (setting_name))
+
+        for value in values:
             events = self.do_test(lambda: do_set_user_display_setting(
                 self.user_profile, setting_name, value), num_events=num_events)
 
@@ -1036,30 +1185,13 @@ class EventsRegisterTest(ZulipTestCase):
             if setting_name == "timezone":
                 error = timezone_schema_checker('events[1]', events[1])
 
-    def test_change_twenty_four_hour_time(self):
+    @slow("Actually runs several full-stack fetching tests")
+    def test_set_user_display_settings(self):
         # type: () -> None
-        self.do_set_user_display_settings_test("twenty_four_hour_time", [True, False])
+        for prop in UserProfile.property_types:
+            self.do_set_user_display_settings_test(prop)
 
-    def test_change_left_side_userlist(self):
-        # type: () -> None
-        self.do_set_user_display_settings_test("left_side_userlist", [True, False])
-
-    def test_change_emoji_alt_code(self):
-        # type: () -> None
-        self.do_set_user_display_settings_test("emoji_alt_code", [True, False])
-
-    def test_change_emojiset(self):
-        # type: () -> None
-        self.do_set_user_display_settings_test("emojiset", [u'apple', u'twitter'])
-
-    def test_change_default_language(self):
-        # type: () -> None
-        self.do_set_user_display_settings_test("default_language", [u'de', u'es', u'en'])
-
-    def test_change_timezone(self):
-        # type: () -> None
-        self.do_set_user_display_settings_test("timezone", [u'US/Mountain', u'US/Samoa', u'Pacific/Galapagos', u''])
-
+    @slow("Actually runs several full-stack fetching tests")
     def test_change_notification_settings(self):
         # type: () -> None
         for notification_setting, v in self.user_profile.notification_setting_types.items():
@@ -1096,7 +1228,7 @@ class EventsRegisterTest(ZulipTestCase):
         # type: () -> None
         schema_checker = self.check_events_dict([
             ('type', equals('realm_filters')),
-            ('realm_filters', check_list(None)), # TODO: validate tuples in the list
+            ('realm_filters', check_list(None)),  # TODO: validate tuples in the list
         ])
         events = self.do_test(lambda: do_add_realm_filter(get_realm("zulip"), "#(?P<id>[123])",
                                                           "https://realm.com/my_realm_filter/%(id)s"))
@@ -1152,6 +1284,7 @@ class EventsRegisterTest(ZulipTestCase):
             ('bot', check_dict_only([
                 ('email', check_string),
                 ('user_id', check_int),
+                ('bot_type', check_int),
                 ('full_name', check_string),
                 ('is_active', check_bool),
                 ('api_key', check_string),
@@ -1291,6 +1424,7 @@ class EventsRegisterTest(ZulipTestCase):
             ('bot', check_dict_only([
                 ('email', check_string),
                 ('user_id', check_int),
+                ('bot_type', check_int),
                 ('full_name', check_string),
                 ('is_active', check_bool),
                 ('api_key', check_string),
@@ -1310,11 +1444,19 @@ class EventsRegisterTest(ZulipTestCase):
 
     def test_do_mark_hotspot_as_read(self):
         # type: () -> None
+        self.user_profile.tutorial_status = UserProfile.TUTORIAL_WAITING
+        self.user_profile.save(update_fields=['tutorial_status'])
+
         schema_checker = self.check_events_dict([
             ('type', equals('hotspots')),
-            ('hotspots', check_list(check_string)),
+            ('hotspots', check_list(check_dict_only([
+                ('name', check_string),
+                ('title', check_string),
+                ('description', check_string),
+                ('delay', check_float),
+            ]))),
         ])
-        events = self.do_test(lambda: do_mark_hotspot_as_read(self.user_profile, 'welcome'))
+        events = self.do_test(lambda: do_mark_hotspot_as_read(self.user_profile, 'intro_reply'))
         error = schema_checker('events[0]', events[0])
         self.assert_on_error(error)
 
@@ -1322,7 +1464,7 @@ class EventsRegisterTest(ZulipTestCase):
         # type: () -> None
         stream = self.make_stream('old_name')
         new_name = u'stream with a brand new name'
-        self.subscribe_to_stream(self.user_profile.email, stream.name)
+        self.subscribe(self.user_profile, stream.name)
 
         action = lambda: do_rename_stream(stream, new_name)
         events = self.do_test(action, num_events=2)
@@ -1365,7 +1507,7 @@ class EventsRegisterTest(ZulipTestCase):
 
     def test_subscribe_other_user_never_subscribed(self):
         # type: () -> None
-        action = lambda: self.subscribe_to_stream(self.example_email("othello"), u"test_stream")
+        action = lambda: self.subscribe(self.example_user("othello"), u"test_stream")
         events = self.do_test(action, num_events=2)
         peer_add_schema_checker = self.check_events_dict([
             ('type', equals('subscription')),
@@ -1394,13 +1536,14 @@ class EventsRegisterTest(ZulipTestCase):
             ('in_home_view', check_bool),
             ('name', check_string),
             ('desktop_notifications', check_bool),
+            ('push_notifications', check_bool),
             ('audible_notifications', check_bool),
             ('stream_id', check_int),
         ]
         if include_subscribers:
             subscription_fields.append(('subscribers', check_list(check_int)))  # type: ignore
         subscription_schema_checker = check_list(
-            check_dict(subscription_fields),        # TODO: Can this be converted to check_dict_only?
+            check_dict(subscription_fields),  # TODO: Can this be converted to check_dict_only?
         )
         stream_create_schema_checker = self.check_events_dict([
             ('type', equals('stream')),
@@ -1449,14 +1592,14 @@ class EventsRegisterTest(ZulipTestCase):
         ])
 
         # Subscribe to a totally new stream, so it's just Hamlet on it
-        action = lambda: self.subscribe_to_stream(self.example_email("hamlet"), "test_stream") # type: Callable
+        action = lambda: self.subscribe(self.example_user("hamlet"), "test_stream")  # type: Callable
         events = self.do_test(action, event_types=["subscription", "realm_user"],
                               include_subscribers=include_subscribers)
         error = add_schema_checker('events[0]', events[0])
         self.assert_on_error(error)
 
         # Add another user to that totally new stream
-        action = lambda: self.subscribe_to_stream(self.example_email("othello"), "test_stream")
+        action = lambda: self.subscribe(self.example_user("othello"), "test_stream")
         events = self.do_test(action,
                               include_subscribers=include_subscribers,
                               state_change_expected=include_subscribers,
@@ -1488,7 +1631,7 @@ class EventsRegisterTest(ZulipTestCase):
         self.assert_on_error(error)
 
         # Now resubscribe a user, to make sure that works on a vacated stream
-        action = lambda: self.subscribe_to_stream(self.example_email("hamlet"), "test_stream")
+        action = lambda: self.subscribe(self.example_user("hamlet"), "test_stream")
         events = self.do_test(action,
                               include_subscribers=include_subscribers,
                               num_events=2)
@@ -1571,6 +1714,112 @@ class FetchInitialStateDataTest(ZulipTestCase):
         UserMessage.objects.filter(user_profile=user_profile).delete()
         result = fetch_initial_state_data(user_profile, None, "")
         self.assertEqual(result['max_message_id'], -1)
+
+    def test_unread_msgs(self):
+        # type: () -> None
+        def mute_stream(user_profile, stream):
+            # type: (UserProfile, Stream) -> None
+            recipient = Recipient.objects.get(type_id=stream.id, type=Recipient.STREAM)
+            subscription = Subscription.objects.get(
+                user_profile=user_profile,
+                recipient=recipient
+            )
+            subscription.in_home_view = False
+            subscription.save()
+
+        def mute_topic(user_profile, stream_name, topic_name):
+            # type: (UserProfile, Text, Text) -> None
+            stream = get_stream(stream_name, realm)
+            recipient = get_recipient(Recipient.STREAM, stream.id)
+
+            add_topic_mute(
+                user_profile=user_profile,
+                stream_id=stream.id,
+                recipient_id=recipient.id,
+                topic_name='muted-topic',
+            )
+
+        cordelia = self.example_user('cordelia')
+        sender_id = cordelia.id
+        sender_email = cordelia.email
+        user_profile = self.example_user('hamlet')
+        othello = self.example_user('othello')
+
+        realm = user_profile.realm
+
+        # our tests rely on order
+        assert(sender_email < user_profile.email)
+        assert(user_profile.email < othello.email)
+
+        pm1_message_id = self.send_message(sender_email, user_profile.email, Recipient.PERSONAL, "hello1")
+        pm2_message_id = self.send_message(sender_email, user_profile.email, Recipient.PERSONAL, "hello2")
+
+        muted_stream = self.subscribe(user_profile, 'Muted Stream')
+        mute_stream(user_profile, muted_stream)
+        mute_topic(user_profile, 'Denmark', 'muted-topic')
+
+        stream_message_id = self.send_message(sender_email, "Denmark", Recipient.STREAM, "hello")
+        muted_stream_message_id = self.send_message(sender_email, "Muted Stream", Recipient.STREAM, "hello")
+        muted_topic_message_id = self.send_message(sender_email, "Denmark", Recipient.STREAM,
+                                                   subject="muted-topic", content="hello")
+
+        huddle_message_id = self.send_message(sender_email,
+                                              [user_profile.email, othello.email],
+                                              Recipient.HUDDLE,
+                                              'hello3')
+
+        def get_unread_data():
+            # type: () -> UnreadMessagesResult
+            return get_unread_message_ids_per_recipient(user_profile)
+
+        result = get_unread_data()
+
+        # The count here reflects the count of unread messages that we will
+        # report to users in the bankruptcy dialog, and for now it excludes unread messages
+        # from muted treams, but it doesn't exclude unread messages from muted topics yet.
+        self.assertEqual(result['count'], 4)
+
+        unread_pm = result['pms'][0]
+        self.assertEqual(unread_pm['sender_id'], sender_id)
+        self.assertEqual(unread_pm['unread_message_ids'], [pm1_message_id, pm2_message_id])
+        self.assertTrue('sender_ids' not in unread_pm)
+
+        unread_stream = result['streams'][0]
+        self.assertEqual(unread_stream['stream_id'], get_stream('Denmark', user_profile.realm).id)
+        self.assertEqual(unread_stream['topic'], 'muted-topic')
+        self.assertEqual(unread_stream['unread_message_ids'], [muted_topic_message_id])
+        self.assertEqual(unread_stream['sender_ids'], [sender_id])
+
+        unread_stream = result['streams'][1]
+        self.assertEqual(unread_stream['stream_id'], get_stream('Denmark', user_profile.realm).id)
+        self.assertEqual(unread_stream['topic'], 'test')
+        self.assertEqual(unread_stream['unread_message_ids'], [stream_message_id])
+        self.assertEqual(unread_stream['sender_ids'], [sender_id])
+
+        unread_stream = result['streams'][2]
+        self.assertEqual(unread_stream['stream_id'], get_stream('Muted Stream', user_profile.realm).id)
+        self.assertEqual(unread_stream['topic'], 'test')
+        self.assertEqual(unread_stream['unread_message_ids'], [muted_stream_message_id])
+        self.assertEqual(unread_stream['sender_ids'], [sender_id])
+
+        huddle_string = ','.join(str(uid) for uid in sorted([sender_id, user_profile.id, othello.id]))
+
+        unread_huddle = result['huddles'][0]
+        self.assertEqual(unread_huddle['user_ids_string'], huddle_string)
+        self.assertEqual(unread_huddle['unread_message_ids'], [huddle_message_id])
+        self.assertTrue('sender_ids' not in unread_huddle)
+
+        self.assertEqual(result['mentions'], [])
+
+        um = UserMessage.objects.get(
+            user_profile_id=user_profile.id,
+            message_id=stream_message_id
+        )
+        um.flags |= UserMessage.flags.mentioned
+        um.save()
+
+        result = get_unread_data()
+        self.assertEqual(result['mentions'], [stream_message_id])
 
 class EventQueueTest(TestCase):
     def test_one_event(self):
@@ -1705,6 +1954,75 @@ class EventQueueTest(TestCase):
                           {'id': 1,
                            'type': 'unknown',
                            "timestamp": "1"}])
+
+class FetchQueriesTest(ZulipTestCase):
+    def test_queries(self):
+        # type: () -> None
+        user = self.example_user("hamlet")
+
+        self.login(user.email)
+
+        flush_per_request_caches()
+        with queries_captured() as queries:
+            with mock.patch('zerver.lib.events.always_want') as want_mock:
+                fetch_initial_state_data(
+                    user_profile=user,
+                    event_types=None,
+                    queue_id='x',
+                )
+
+        self.assert_length(queries, 28)
+
+        expected_counts = dict(
+            alert_words=0,
+            attachments=1,
+            custom_profile_fields=1,
+            default_streams=1,
+            hotspots=0,
+            message=1,
+            muted_topics=1,
+            pointer=0,
+            presence=3,
+            realm=0,
+            realm_bot=1,
+            realm_domains=1,
+            realm_embedded_bots=0,
+            realm_emoji=1,
+            realm_filters=1,
+            realm_user=4,
+            stream=2,
+            subscription=5,
+            total_uploads_size=1,
+            update_display_settings=0,
+            update_global_notifications=0,
+            update_message_flags=5,
+            upload_quota=0,
+            zulip_version=0,
+        )
+
+        wanted_event_types = {
+            item[0][0] for item
+            in want_mock.call_args_list
+        }
+
+        self.assertEqual(wanted_event_types, set(expected_counts))
+
+        for event_type in sorted(wanted_event_types):
+            count = expected_counts[event_type]
+            flush_per_request_caches()
+            with queries_captured() as queries:
+                if event_type == 'update_message_flags':
+                    event_types = ['update_message_flags', 'message']
+                else:
+                    event_types = [event_type]
+
+                fetch_initial_state_data(
+                    user_profile=user,
+                    event_types=event_types,
+                    queue_id='x',
+                )
+            self.assert_length(queries, count)
+
 
 class TestEventsRegisterAllPublicStreamsDefaults(ZulipTestCase):
     def setUp(self):

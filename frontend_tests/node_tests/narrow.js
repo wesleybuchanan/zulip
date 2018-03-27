@@ -1,13 +1,11 @@
-add_dependencies({
-    hash_util: 'js/hash_util.js',
-    hashchange: 'js/hashchange.js',
-    narrow_state: 'js/narrow_state.js',
-    people: 'js/people.js',
-    stream_data: 'js/stream_data.js',
-    Filter: 'js/filter.js',
-});
+zrequire('hash_util');
+zrequire('hashchange');
+zrequire('narrow_state');
+zrequire('people');
+zrequire('stream_data');
+zrequire('Filter', 'js/filter');
 
-var narrow = require('js/narrow.js');
+zrequire('narrow');
 
 var narrow_state = global.narrow_state;
 
@@ -122,6 +120,11 @@ function set_filter(operators) {
     assert.equal(hide_id,'.empty_feed_notice');
     assert.equal(show_id, '#empty_narrow_all_private_message');
 
+    set_filter([['is', 'unread']]);
+    narrow.show_empty_narrow_message();
+    assert.equal(hide_id,'.empty_feed_notice');
+    assert.equal(show_id, '#no_unread_narrow_message');
+
     set_filter([['pm-with', ['alice@example.com', 'Yo']]]);
     narrow.show_empty_narrow_message();
     assert.equal(hide_id,'.empty_feed_notice');
@@ -131,6 +134,11 @@ function set_filter(operators) {
     narrow.show_empty_narrow_message();
     assert.equal(hide_id,'.empty_feed_notice');
     assert.equal(show_id, '#empty_narrow_private_message');
+
+    set_filter([['group-pm-with', 'alice@example.com']]);
+    narrow.show_empty_narrow_message();
+    assert.equal(hide_id,'.empty_feed_notice');
+    assert.equal(show_id, '#empty_narrow_group_private_message');
 
     set_filter([['sender', 'ray@example.com']]);
     narrow.show_empty_narrow_message();

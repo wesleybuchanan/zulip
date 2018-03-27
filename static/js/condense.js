@@ -79,6 +79,29 @@ exports.collapse = function (row) {
     process_row(row);
     process_row(home_row);
 };
+
+exports.toggle_collapse = function (message) {
+    var row = current_msg_list.get_row(message.id);
+    if (!row) {
+        return;
+    }
+    var condensed = row.find(".could-be-condensed");
+    if (message.collapsed) {
+        message.condensed = true;
+        condense.uncollapse(row);
+        condensed.addClass("condensed");
+        exports.show_message_expander(row);
+        row.find(".message_condenser").hide();
+    } else if (!message.collapsed && condensed.hasClass("condensed")) {
+        message.condensed = false;
+        condensed.removeClass("condensed");
+        exports.hide_message_expander(row);
+        row.find(".message_condenser").show();
+    } else if (!message.collapsed && !condensed.hasClass("condensed")) {
+        condense.collapse(row);
+    }
+};
+
 exports.clear_message_content_height_cache = function () {
     _message_content_height_cache = new Dict();
 };

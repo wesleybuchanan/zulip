@@ -1,10 +1,6 @@
-netifaces==0.10.5
-python-dateutil==2.5.3
+# After editing this file, you MUST afterward run
+# /tools/update-locked-requirements to update requirements/prod_lock.txt.
+# See requirements/README.md for more detail.
+-r common.txt
+# Used for running the Zulip production Django server
 uWSGI==2.0.14
-
-# Install the Zulip API bindings into the virtualenv; note that this
-# won't be automatically updated for new versions of api/.  This is
-# used in production for things like Nagios checks.  While also needed
-# in development, we can't move it to common.txt due to limitations in
-# `pip compile`.
-api/

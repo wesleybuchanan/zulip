@@ -1,10 +1,9 @@
-from __future__ import print_function
 
 from functools import partial
 import random
 
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, \
-    Text, Type
+    Text, Type, cast, Union
 from unittest import loader, runner  # type: ignore  # Mypy cannot pick these up.
 from unittest.result import TestResult
 
@@ -239,11 +238,16 @@ def process_instrumented_calls(func):
     for call in test_helpers.INSTRUMENTED_CALLS:
         func(call)
 
+SerializedSubsuite = Tuple[Type[Iterable[TestCase]], List[str]]
+SubsuiteArgs = Tuple[Type['RemoteTestRunner'], int, SerializedSubsuite, bool]
+
 def run_subsuite(args):
-    # type: (Tuple[int, Tuple[Type[Iterable[TestCase]], List[str]], bool]) -> Tuple[int, Any]
+    # type: (SubsuiteArgs) -> Tuple[int, Any]
     # Reset the accumulated INSTRUMENTED_CALLS before running this subsuite.
     test_helpers.INSTRUMENTED_CALLS = []
-    subsuite_index, subsuite, failfast = args
+    # The first argument is the test runner class but we don't need it
+    # because we run our own version of the runner class.
+    _, subsuite_index, subsuite, failfast = args
     runner = RemoteTestRunner(failfast=failfast)
     result = runner.run(deserialize_suite(subsuite))
     # Now we send instrumentation related events. This data will be
@@ -251,7 +255,7 @@ def run_subsuite(args):
     # type of Partial is different from Callable. All the methods of
     # TestResult are passed TestCase as the first argument but
     # addInstrumentation does not need it.
-    process_instrumented_calls(partial(result.addInstrumentation, None))  # type: ignore
+    process_instrumented_calls(partial(result.addInstrumentation, None))
     return subsuite_index, result.events
 
 # Monkey-patch database creation to fix unnecessary sleep(1)
@@ -360,7 +364,7 @@ class TestSuite(unittest.TestSuite):
         if getattr(result, '_testRunEntered', False) is False:
             result._testRunEntered = topLevel = True
 
-        for test in self:  # type: ignore  # Mypy cannot recognize this
+        for test in self:
             # but this is correct. Taken from unittest.
             if result.shouldStop:
                 break
@@ -498,7 +502,7 @@ def get_test_names(suite):
 
 def get_tests_from_suite(suite):
     # type: (TestSuite) -> TestCase
-    for test in suite:  # type: ignore
+    for test in suite:
         if isinstance(test, TestSuite):
             for child in get_tests_from_suite(test):
                 yield child

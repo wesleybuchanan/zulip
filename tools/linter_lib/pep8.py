@@ -2,7 +2,8 @@ from __future__ import print_function
 from __future__ import absolute_import
 
 import subprocess
-import sys
+
+from .printer import print_err, colors
 
 from typing import List
 
@@ -12,14 +13,14 @@ def check_pep8(files):
     def run_pycodestyle(files, ignored_rules):
         # type: (List[str], List[str]) -> bool
         failed = False
+        color = next(colors)
         pep8 = subprocess.Popen(
             ['pycodestyle'] + files + ['--ignore={rules}'.format(rules=','.join(ignored_rules))],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        for pipe in (pep8.stdout, pep8.stderr):
-            assert(pipe is not None)  # convince mypy that pipe cannot be None
-            for ln in pipe:
-                sys.stdout.write(ln)
-                failed = True
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert pep8.stdout is not None  # Implied by use of subprocess.PIPE
+        for line in iter(pep8.stdout.readline, b''):
+            print_err('pep8', color, line)
+            failed = True
         return failed
 
     failed = False
@@ -38,6 +39,11 @@ def check_pep8(files):
         # This should possibly be cleaned up, though changing some of
         # these may make the code less readable.
         'E226',
+
+        # "multiple spaces after ':'"
+        # This is the `{}` analogue of E221, and these are similarly being used
+        # for alignment.
+        'E241',
 
         # "unexpected spaces around keyword / parameter equals"
         # Many of these should be fixed, but many are also being used for
@@ -75,40 +81,9 @@ def check_pep8(files):
         'E731',
     ]
 
-    # TODO: Clear up this list of violations.
-    IGNORE_FILES_PEPE261 = [
-        'api/zulip/__init__.py',
-        'tools/run-dev.py',
-        'zerver/lib/bugdown/__init__.py',
-        'zerver/models.py',
-        'zerver/tests/test_bugdown.py',
-        'zerver/tests/test_events.py',
-        'zerver/tests/test_messages.py',
-        'zerver/tests/test_narrow.py',
-        'zerver/tests/test_outgoing_webhook_system.py',
-        'zerver/tests/test_realm.py',
-        'zerver/tests/test_signup.py',
-        'zerver/tests/test_subs.py',
-        'zerver/tests/test_upload.py',
-        'zerver/tornado/socket.py',
-        'zerver/tornado/websocket_client.py',
-        'zerver/worker/queue_processors.py',
-        'zilencer/management/commands/populate_db.py',
-        'zproject/dev_settings.py',
-        'zproject/prod_settings_template.py',
-        'zproject/settings.py',
-    ]
-
-    filtered_files = [fn for fn in files if fn not in IGNORE_FILES_PEPE261]
-    filtered_files_E261 = [fn for fn in files if fn in IGNORE_FILES_PEPE261]
-
     if len(files) == 0:
         return False
-    if not len(filtered_files) == 0:
-        failed = run_pycodestyle(filtered_files, ignored_rules)
-    if not len(filtered_files_E261) == 0:
-        # Adding an extra ignore rule for these files since they still remain in
-        # violation of PEP-E261.
-        failed = run_pycodestyle(filtered_files_E261, ignored_rules + ['E261'])
+
+    failed = run_pycodestyle(files, ignored_rules)
 
     return failed

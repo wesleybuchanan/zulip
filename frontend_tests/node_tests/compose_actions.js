@@ -1,5 +1,6 @@
 var noop = function () {};
 var return_false = function () { return false; };
+var return_true = function () { return true; };
 
 set_global('document', {
     location: {
@@ -10,10 +11,16 @@ set_global('page_params', {
     use_websockets: false,
 });
 
-set_global('$', global.make_zjquery());
+set_global('$', function () {
+});
 
 add_dependencies({
     compose: 'js/compose',
+});
+
+set_global('$', global.make_zjquery());
+
+add_dependencies({
     compose_state: 'js/compose_state',
     people: 'js/people',
     util: 'js/util',
@@ -58,7 +65,9 @@ set_global('unread_ops', {
     mark_message_as_read: noop,
 });
 
-set_global('status_classes', 'status_classes');
+set_global('common', {
+    status_classes: 'status_classes',
+});
 
 function stub_selected_message(msg) {
     set_global('current_msg_list', {
@@ -115,6 +124,8 @@ function assert_hidden(sel) {
     opts = {
         content: 'hello',
     };
+
+    $('#new_message_content').trigger = noop;
     start('private', opts);
 
     assert_hidden('#stream-message');
@@ -204,4 +215,25 @@ function assert_hidden(sel) {
                                            subject: 'more',
                                            trigger: 'new topic button'}),
                  'subject');
+}());
+
+(function test_focus_in_empty_compose() {
+    $('#new_message_content').is = function (attr) {
+        assert.equal(attr, ':focus');
+        return $('#new_message_content').is_focused;
+    };
+
+    compose_state.composing = return_true;
+    $('#new_message_content').val('');
+    $('#new_message_content').focus();
+    assert(compose_state.focus_in_empty_compose());
+
+    compose_state.composing = return_false;
+    assert(!compose_state.focus_in_empty_compose());
+
+    $('#new_message_content').val('foo');
+    assert(!compose_state.focus_in_empty_compose());
+
+    $('#new_message_content').blur();
+    assert(!compose_state.focus_in_empty_compose());
 }());

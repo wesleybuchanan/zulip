@@ -1,56 +1,89 @@
 // commonjs code goes here
 
-(function () {
-    var i18n = window.i18n = require('i18next');
-    var XHR = require('i18next-xhr-backend');
-    var lngDetector = require('i18next-browser-languagedetector');
-    var Cache = require('i18next-localstorage-cache');
+import i18next from 'i18next';
+import XHR from 'i18next-xhr-backend';
+import LngDetector from 'i18next-browser-languagedetector';
+import Cache from 'i18next-localstorage-cache';
+import localstorage from './localstorage';
 
-    var backendOptions = {
-        loadPath: '/static/locale/__lng__/translations.json',
-    };
-    var callbacks = [];
-    var initialized = false;
+window.i18n = i18next;
 
-    var detectionOptions = {
-        order: ['htmlTag'],
-        htmlTag: document.documentElement,
-    };
+function loadPath(languages) {
+    var language = languages[0];
+    if (language.indexOf('-') >= 0) {
+        language = language.replace('-', '_');  // Change zh-Hans to zh_Hans.
+    }
 
-    var cacheOptions = {
-        enabled: true,
-        prefix: 'i18next:' + page_params.server_generation + ':',
-        expirationTime: 2*7*24*60*60*1000,  // 2 weeks
-    };
+    return '/static/locale/' + language + '/translations.json';
+}
 
-    i18n.use(XHR)
-        .use(lngDetector)
-        .use(Cache)
-        .init({
-            nsSeparator: false,
-            keySeparator: false,
-            interpolation: {
-                prefix: "__",
-                suffix: "__",
-            },
-            backend: backendOptions,
-            detection: detectionOptions,
-            cache: cacheOptions,
-            fallbackLng: 'en',
-        }, function () {
-            var i;
-            initialized = true;
-            for (i=0; i<callbacks.length; i += 1) {
-                callbacks[i]();
-            }
-        });
+var backendOptions = {
+    loadPath: loadPath,
+};
+var callbacks = [];
+var initialized = false;
 
-    i18n.ensure_i18n = function (callback) {
-        if (initialized) {
-            callback();
-        } else {
-            callbacks.push(callback);
+var detectionOptions = {
+    order: ['htmlTag'],
+    htmlTag: document.documentElement,
+};
+
+var cacheOptions = {
+    enabled: !page_params.development,
+    prefix: 'i18next:' + page_params.server_generation + ':',
+    expirationTime: 2*24*60*60*1000,  // 2 days
+};
+
+i18next.use(XHR)
+    .use(LngDetector)
+    .use(Cache)
+    .init({
+        nsSeparator: false,
+        keySeparator: false,
+        interpolation: {
+            prefix: "__",
+            suffix: "__",
+        },
+        backend: backendOptions,
+        detection: detectionOptions,
+        cache: cacheOptions,
+        fallbackLng: 'en',
+        returnEmptyString: false,  // Empty string is not a valid translation.
+    }, function () {
+        var i;
+        initialized = true;
+        for (i=0; i<callbacks.length; i += 1) {
+            callbacks[i]();
         }
-    };
+    });
 
-}());
+i18next.ensure_i18n = function (callback) {
+    if (initialized) {
+        callback();
+    } else {
+        callbacks.push(callback);
+    }
+};
+
+// garbage collect all old i18n translation maps in localStorage.
+$(function () {
+    if (!localstorage.supported()) {
+        return;
+    }
+
+    // this collects all localStorage keys that match the format of:
+    //   i18next:dddddddddd:w+ => 1484902202:en
+    // these are all language translation strings.
+    var translations = Object.keys(localStorage).filter(function (key) {
+        return /^i18next:\d{10}:\w+$/.test(key);
+    });
+
+    var current_generation_key = 'i18next:' + page_params.server_generation;
+    // remove cached translations of older versions.
+    translations.forEach(function (translation_key) {
+        if (translation_key.indexOf(current_generation_key) !== 0) {
+            localStorage.removeItem(translation_key);
+        }
+    });
+    return this;
+});

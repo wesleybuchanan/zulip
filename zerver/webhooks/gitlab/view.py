@@ -1,6 +1,5 @@
-from __future__ import absolute_import
 from functools import partial
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success
 from zerver.decorator import api_key_only_webhook_view, REQ, has_request_variables
 from zerver.lib.webhooks.git import get_push_commits_event_message, EMPTY_SHA,\
@@ -289,7 +288,7 @@ def api_gitlab_webhook(request, user_profile,
     if event is not None:
         body = get_body_based_on_event(event)(payload)
         subject = get_subject_based_on_event(event, payload)
-        check_send_message(user_profile, request.client, 'stream', [stream], subject, body)
+        check_send_stream_message(user_profile, request.client, stream, subject, body)
     return json_success()
 
 def get_body_based_on_event(event):
@@ -345,7 +344,7 @@ def get_subject_based_on_event(event, payload):
     return get_repo_name(payload)
 
 def get_event(request, payload, branches):
-    # type: (HttpRequest,  Dict[str, Any], Optional[Text]) -> Optional[str]
+    # type: (HttpRequest, Dict[str, Any], Optional[Text]) -> Optional[str]
     event = request.META['HTTP_X_GITLAB_EVENT']
     if event == 'Issue Hook':
         action = payload['object_attributes'].get('action')

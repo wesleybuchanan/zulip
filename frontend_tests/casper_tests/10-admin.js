@@ -19,6 +19,36 @@ casper.waitForSelector('#settings_overlay_container.show', function () {
     casper.test.assertUrlMatch(/^http:\/\/[^/]+\/#organization/, 'URL suggests we are on organization page');
 });
 
+casper.then(function () {
+    casper.click("li[data-section='organization-settings']");
+});
+
+// Test changing notifications stream
+casper.then(function () {
+    casper.test.info('Changing notifications stream to Verona by filtering with "verona"');
+    casper.click("#id_realm_notifications_stream > button.dropdown-toggle");
+
+    casper.waitUntilVisible('ul.dropdown-menu', function () {
+        casper.sendKeys('.dropdown-search > input[type=text]', 'verona');
+        casper.click(".dropdown-list-body li.stream_name");
+    });
+
+    casper.waitUntilVisible('#admin-realm-notifications-stream-status', function () {
+        casper.test.assertSelectorHasText('#admin-realm-notifications-stream-status',
+                                          'Notifications stream changed!');
+        casper.test.assertSelectorHasText('#realm_notifications_stream_name', '#Verona');
+    });
+});
+
+casper.then(function () {
+    casper.click(".notifications-stream-disable");
+    casper.waitUntilVisible('#admin-realm-notifications-stream-status', function () {
+        casper.test.assertSelectorHasText('#admin-realm-notifications-stream-status',
+                                          'Notifications stream disabled!');
+        casper.test.assertSelectorHasText('#realm_notifications_stream_name', 'Disabled');
+    });
+});
+
 // Test permissions setting
 casper.then(function () {
     casper.click("li[data-section='organization-permissions']");
@@ -41,7 +71,7 @@ casper.then(function () {
                                           'Only administrators may now create new streams!');
         casper.test.assertEval(function () {
             return document.querySelector('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]').checked;
-        }, 'Only admins may create streams Setting activated');
+        }, 'Prevent users from creating streams Setting activated');
     });
 });
 
@@ -57,7 +87,7 @@ casper.waitUntilVisible('#id_realm_create_stream_by_admins_only + span', functio
     // Test Setting was saved
     casper.test.assertEval(function () {
         return document.querySelector('#id_realm_create_stream_by_admins_only').checked;
-    }, 'Only admins may create streams Setting saved');
+    }, 'Prevent users from creating streams Setting saved');
 
     // Deactivate setting
 
@@ -70,7 +100,7 @@ casper.then(function () {
         casper.test.assertSelectorHasText('#admin-realm-create-stream-by-admins-only-status', 'Any user may now create new streams!');
         casper.test.assertEval(function () {
             return !(document.querySelector('input[type="checkbox"][id="id_realm_create_stream_by_admins_only"]').checked);
-        }, 'Only admins may create streams Setting deactivated');
+        }, 'Prevent users from creating streams Setting deactivated');
     });
 });
 
@@ -93,16 +123,16 @@ casper.then(function () {
 });
 
 casper.then(function () {
-    casper.waitUntilVisible('.emoji_row', function () {
-        casper.test.assertSelectorHasText('.emoji_row .emoji_name', 'mouseface');
+    casper.waitUntilVisible('tr#emoji_mouseface', function () {
+        casper.test.assertSelectorHasText('tr#emoji_mouseface .emoji_name', 'mouseface');
         casper.test.assertExists('.emoji_row img[src="/user_avatars/1/emoji/mouseface.png"]');
-        casper.click('.emoji_row button.delete');
+        casper.click('tr#emoji_mouseface button.delete');
     });
 });
 
 casper.then(function () {
-    casper.waitWhileVisible('.emoji_row', function () {
-        casper.test.assertDoesntExist('.emoji_row');
+    casper.waitWhileVisible('tr#emoji_mouseface', function () {
+        casper.test.assertDoesntExist('tr#emoji_mouseface');
     });
 });
 
@@ -215,13 +245,13 @@ casper.then(function () {
 
 // Test uploading realm icon image
 casper.then(function () {
-    casper.click("li[data-section='organization-settings']");
+    casper.click("li[data-section='organization-profile']");
     var selector = 'img#realm-settings-icon[src^="https://secure.gravatar.com/avatar/"]';
     casper.waitUntilVisible(selector, function () {
         casper.test.assertEqual(casper.visible('#realm_icon_delete_button'), false);
         casper.fill('form.admin-realm-form', {
                 realm_icon_file_input: 'static/images/logo/zulip-icon-128x128.png',
-            }, true);
+        }, true);
         casper.waitWhileVisible("#upload_icon_spinner .loading_indicator_spinner", function () {
             casper.test.assertExists('img#realm-settings-icon[src^="/user_avatars/1/realm/icon.png?version=2"]');
             casper.test.assertEqual(casper.visible('#realm_icon_delete_button'), true);
@@ -231,7 +261,7 @@ casper.then(function () {
 
 // Test deleting realm icon image
 casper.then(function () {
-    casper.click("li[data-section='organization-settings']");
+    casper.click("li[data-section='organization-profile']");
     casper.click("#realm_icon_delete_button");
     casper.test.assertEqual(casper.visible('#realm_icon_delete_button'), true);
     casper.waitWhileVisible('#realm_icon_delete_button', function () {

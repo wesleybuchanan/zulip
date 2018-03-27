@@ -1,22 +1,22 @@
-#!/usr/bin/env python
-from __future__ import print_function
+#!/usr/bin/env python3
 import os
 import sys
 import logging
 import argparse
 import platform
 import subprocess
+import glob
+import hashlib
 
 os.environ["PYTHONUNBUFFERED"] = "y"
-
-PY2 = sys.version_info[0] == 2
 
 ZULIP_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 sys.path.append(ZULIP_PATH)
-from scripts.lib.zulip_tools import run, subprocess_text_output, OKBLUE, ENDC, WARNING
-from scripts.lib.setup_venv import setup_virtualenv, VENV_DEPENDENCIES
-from scripts.lib.node_cache import setup_node_modules, NPM_CACHE_PATH
+from scripts.lib.zulip_tools import run, subprocess_text_output, OKBLUE, ENDC, WARNING, \
+    get_dev_uuid_var_path
+from scripts.lib.setup_venv import VENV_DEPENDENCIES
+from scripts.lib.node_cache import setup_node_modules, NODE_MODULES_CACHE_PATH
 
 from version import PROVISION_VERSION
 if False:
@@ -27,11 +27,13 @@ SUPPORTED_PLATFORMS = {
     "Ubuntu": [
         "trusty",
         "xenial",
+        # Platforms that are blocked on on tsearch_extras
+        # "stretch",
+        # "zesty",
     ],
 }
 
-PY2_VENV_PATH = "/srv/zulip-venv"
-PY3_VENV_PATH = "/srv/zulip-py3-venv"
+VENV_PATH = "/srv/zulip-py3-venv"
 VAR_DIR_PATH = os.path.join(ZULIP_PATH, 'var')
 LOG_DIR_PATH = os.path.join(VAR_DIR_PATH, 'log')
 UPLOAD_DIR_PATH = os.path.join(VAR_DIR_PATH, 'uploads')
@@ -42,14 +44,10 @@ NODE_TEST_COVERAGE_DIR_PATH = os.path.join(VAR_DIR_PATH, 'node-coverage')
 
 # TODO: De-duplicate this with emoji_dump.py
 EMOJI_CACHE_PATH = "/srv/zulip-emoji-cache"
-if 'TRAVIS' in os.environ:
+is_travis = 'TRAVIS' in os.environ
+if is_travis:
     # In Travis CI, we don't have root access
     EMOJI_CACHE_PATH = "/home/travis/zulip-emoji-cache"
-
-if PY2:
-    VENV_PATH = PY2_VENV_PATH
-else:
-    VENV_PATH = PY3_VENV_PATH
 
 if not os.path.exists(os.path.join(ZULIP_PATH, ".git")):
     print("Error: No Zulip git repository present!")
@@ -70,7 +68,8 @@ if ram_gb < 1.5:
     sys.exit(1)
 
 try:
-    run(["mkdir", "-p", VAR_DIR_PATH])
+    UUID_VAR_PATH = get_dev_uuid_var_path(create_if_missing=True)
+    run(["mkdir", "-p", UUID_VAR_PATH])
     if os.path.exists(os.path.join(VAR_DIR_PATH, 'zulip-test-symlink')):
         os.remove(os.path.join(VAR_DIR_PATH, 'zulip-test-symlink'))
     os.symlink(
@@ -102,8 +101,10 @@ if not (vendor in SUPPORTED_PLATFORMS and codename in SUPPORTED_PLATFORMS[vendor
     sys.exit(1)
 
 POSTGRES_VERSION_MAP = {
+    "stretch": "9.6",
     "trusty": "9.3",
     "xenial": "9.5",
+    "zesty": "9.6",
 }
 POSTGRES_VERSION = POSTGRES_VERSION_MAP[codename]
 
@@ -123,9 +124,20 @@ UBUNTU_COMMON_APT_DEPENDENCIES = [
     "gettext",              # Used by makemessages i18n
     "curl",                 # Used for fetching PhantomJS as wget occasionally fails on redirects
     "netcat",               # Used for flushing memcached
+    "moreutils",            # Used for sponge command
 ] + VENV_DEPENDENCIES
 
 APT_DEPENDENCIES = {
+    "stretch": UBUNTU_COMMON_APT_DEPENDENCIES + [
+        "postgresql-9.6",
+        # tsearch-extras removed because there's no apt repository hosting it for Debian.
+        # "postgresql-9.6-tsearch-extras",
+        "postgresql-9.6-pgroonga",
+        # Technically, this should be in VENV_DEPENDENCIES, but it
+        # doesn't exist in trusty and we don't have a conditional on
+        # platform there.
+        "virtualenv",
+    ],
     "trusty": UBUNTU_COMMON_APT_DEPENDENCIES + [
         "postgresql-9.3",
         "postgresql-9.3-tsearch-extras",
@@ -135,6 +147,11 @@ APT_DEPENDENCIES = {
         "postgresql-9.5",
         "postgresql-9.5-tsearch-extras",
         "postgresql-9.5-pgroonga",
+    ],
+    "zesty": UBUNTU_COMMON_APT_DEPENDENCIES + [
+        "postgresql-9.6",
+        "postgresql-9.6-pgroonga",
+        "virtualenv",
     ],
 }
 
@@ -159,8 +176,10 @@ def setup_shell_profile(shell_profile):
     def write_command(command):
         # type: (str) -> None
         if os.path.exists(shell_profile_path):
-            with open(shell_profile_path, 'a+') as shell_profile_file:
-                if command not in shell_profile_file.read():
+            with open(shell_profile_path, 'r') as shell_profile_file:
+                lines = [line.strip() for line in shell_profile_file.readlines()]
+            if command not in lines:
+                with open(shell_profile_path, 'a+') as shell_profile_file:
                     shell_profile_file.writelines(command + '\n')
         else:
             with open(shell_profile_path, 'w') as shell_profile_file:
@@ -170,38 +189,79 @@ def setup_shell_profile(shell_profile):
     write_command(source_activate_command)
     write_command('cd /srv/zulip')
 
-def main(options):
-    # type: (Any) -> int
-
-    # npm install and management commands expect to be run from the root of the
-    # project.
-    os.chdir(ZULIP_PATH)
-
+def install_apt_deps():
+    # type: () -> None
     # setup-apt-repo does an `apt-get update`
     run(["sudo", "./scripts/lib/setup-apt-repo"])
     run(["sudo", "apt-get", "-y", "install", "--no-install-recommends"] + APT_DEPENDENCIES[codename])
 
-    if options.is_travis:
-        if PY2:
-            MYPY_REQS_FILE = os.path.join(ZULIP_PATH, "requirements", "mypy.txt")
-            setup_virtualenv(PY3_VENV_PATH, MYPY_REQS_FILE, patch_activate_script=True,
-                             virtualenv_args=['-p', 'python3'])
-            DEV_REQS_FILE = os.path.join(ZULIP_PATH, "requirements", "py2_dev.txt")
-            setup_virtualenv(PY2_VENV_PATH, DEV_REQS_FILE, patch_activate_script=True)
-        else:
-            DEV_REQS_FILE = os.path.join(ZULIP_PATH, "requirements", "py3_dev.txt")
-            setup_virtualenv(VENV_PATH, DEV_REQS_FILE, patch_activate_script=True,
-                             virtualenv_args=['-p', 'python3'])
+def main(options):
+    # type: (Any) -> int
+
+    # yarn and management commands expect to be run from the root of the
+    # project.
+    os.chdir(ZULIP_PATH)
+
+    # setup-apt-repo does an `apt-get update`
+    # hash the apt dependencies
+    sha_sum = hashlib.sha1()
+
+    for apt_depedency in APT_DEPENDENCIES[codename]:
+        sha_sum.update(apt_depedency.encode('utf8'))
+    # hash the content of setup-apt-repo
+    sha_sum.update(open('scripts/lib/setup-apt-repo').read().encode('utf8'))
+
+    new_apt_dependencies_hash = sha_sum.hexdigest()
+    last_apt_dependencies_hash = None
+    apt_hash_file_path = os.path.join(UUID_VAR_PATH, "apt_dependencies_hash")
+    try:
+        hash_file = open(apt_hash_file_path, 'r+')
+        last_apt_dependencies_hash = hash_file.read()
+    except IOError:
+        run(['touch', apt_hash_file_path])
+        hash_file = open(apt_hash_file_path, 'r+')
+
+    if (new_apt_dependencies_hash != last_apt_dependencies_hash):
+        try:
+            install_apt_deps()
+        except subprocess.CalledProcessError:
+            # Might be a failure due to network connection issues. Retrying...
+            print(WARNING + "`apt-get -y install` failed while installing dependencies; retrying..." + ENDC)
+            # Since a common failure mode is for the caching in
+            # `setup-apt-repo` to optimize the fast code path to skip
+            # running `apt-get update` when the target apt repository
+            # is out of date, we run it explicitly here so that we
+            # recover automatically.
+            run(['sudo', 'apt-get', 'update'])
+            install_apt_deps()
+        hash_file.write(new_apt_dependencies_hash)
     else:
-        # Import tools/setup_venv.py instead of running it so that we get an
-        # activated virtualenv for the rest of the provisioning process.
-        from tools.setup import setup_venvs
-        setup_venvs.main()
+        print("No changes to apt dependencies, so skipping apt operations.")
 
-    # Put Python2 virtualenv activation in .bash_profile.
+    # Here we install node.
+    run(["sudo", "scripts/lib/install-node"])
+
+    # This is a wrapper around `yarn`, which we run last since
+    # it can often fail due to network issues beyond our control.
+    try:
+        # Hack: We remove `node_modules` as root to work around an
+        # issue with the symlinks being improperly owned by root.
+        if os.path.islink("node_modules"):
+            run(["sudo", "rm", "-f", "node_modules"])
+        if not os.path.isdir(NODE_MODULES_CACHE_PATH):
+            run(["sudo", "mkdir", NODE_MODULES_CACHE_PATH])
+        run(["sudo", "chown", "%s:%s" % (user_id, user_id), NODE_MODULES_CACHE_PATH])
+        setup_node_modules(prefer_offline=True)
+    except subprocess.CalledProcessError:
+        print(WARNING + "`yarn install` failed; retrying..." + ENDC)
+        setup_node_modules()
+
+    # Import tools/setup_venv.py instead of running it so that we get an
+    # activated virtualenv for the rest of the provisioning process.
+    from tools.setup import setup_venvs
+    setup_venvs.main(is_travis)
+
     setup_shell_profile('~/.bash_profile')
-
-    # Put Python2 virtualenv activation in .zprofile (for Zsh users).
     setup_shell_profile('~/.zprofile')
 
     run(["sudo", "cp", REPO_STOPWORDS_PATH, TSEARCH_STOPWORDS_PATH])
@@ -219,15 +279,22 @@ def main(options):
     # create linecoverage directory`var/node-coverage`
     run(["mkdir", "-p", NODE_TEST_COVERAGE_DIR_PATH])
 
+    # `build_emoji` script requires `emoji-datasource` package which we install
+    # via npm and hence it should be executed after we are done installing npm
+    # packages.
     if not os.path.isdir(EMOJI_CACHE_PATH):
         run(["sudo", "mkdir", EMOJI_CACHE_PATH])
     run(["sudo", "chown", "%s:%s" % (user_id, user_id), EMOJI_CACHE_PATH])
-    run(["tools/setup/emoji/download-emoji-data"])
     run(["tools/setup/emoji/build_emoji"])
-    run(["tools/setup/build_pygments_data.py"])
+
+    # copy over static files from the zulip_bots package
+    run(["tools/setup/generate_zulip_bots_static_files"])
+
+    run(["tools/setup/build_pygments_data"])
     run(["scripts/setup/generate_secrets.py", "--development"])
     run(["tools/update-authors-json", "--use-fixture"])
-    if options.is_travis and not options.is_production_travis:
+    run(["tools/inline-email-css"])
+    if is_travis and not options.is_production_travis:
         run(["sudo", "service", "rabbitmq-server", "restart"])
         run(["sudo", "service", "redis-server", "restart"])
         run(["sudo", "service", "memcached", "restart"])
@@ -238,16 +305,34 @@ def main(options):
         run(["sudo", "service", "redis-server", "restart"])
         run(["sudo", "service", "memcached", "restart"])
     if not options.is_production_travis:
-        # These won't be used anyway
-        run(["scripts/setup/configure-rabbitmq"])
-        # Need to set up Django before using is_template_database_current.
+        # The following block is skipped for the production Travis
+        # suite, because that suite doesn't make use of these elements
+        # of the development environment (it just uses the development
+        # environment to build a release tarball).
+
+        # Need to set up Django before using is_template_database_current
         os.environ.setdefault("DJANGO_SETTINGS_MODULE", "zproject.settings")
         import django
         django.setup()
+
+        from zerver.lib.str_utils import force_bytes
         from zerver.lib.test_fixtures import is_template_database_current
 
+        try:
+            from zerver.lib.queue import SimpleQueueClient
+            SimpleQueueClient()
+            rabbitmq_is_configured = True
+        except Exception:
+            rabbitmq_is_configured = False
+
+        if options.is_force or not rabbitmq_is_configured:
+            run(["scripts/setup/configure-rabbitmq"])
+        else:
+            print("RabbitMQ is already configured.")
+
+        migration_status_path = os.path.join(UUID_VAR_PATH, "migration_status_dev")
         if options.is_force or not is_template_database_current(
-                migration_status="var/migration_status_dev",
+                migration_status=migration_status_path,
                 settings="zproject.settings",
                 database_name="zulip",
         ):
@@ -262,27 +347,31 @@ def main(options):
         else:
             print("No need to regenerate the test DB.")
 
-        run(["./manage.py", "compilemessages"])
+        # Consider updating generated translations data: both `.mo`
+        # files and `language-options.json`.
+        sha1sum = hashlib.sha1()
+        paths = ['zerver/management/commands/compilemessages.py']
+        paths += glob.glob('static/locale/*/LC_MESSAGES/*.po')
+        paths += glob.glob('static/locale/*/translations.json')
 
-    # Here we install nvm, node, and npm.
-    run(["sudo", "scripts/lib/install-node"])
+        for path in paths:
+            with open(path, 'r') as file_to_hash:
+                sha1sum.update(force_bytes(file_to_hash.read()))
 
-    # This is a wrapper around `npm install`, which we run last since
-    # it can often fail due to network issues beyond our control.
-    try:
-        # Hack: We remove `node_modules` as root to work around an
-        # issue with the symlinks being improperly owned by root.
-        if os.path.islink("node_modules"):
-            run(["sudo", "rm", "-f", "node_modules"])
-        if not os.path.isdir(NPM_CACHE_PATH):
-            run(["sudo", "mkdir", NPM_CACHE_PATH])
-        run(["sudo", "chown", "%s:%s" % (user_id, user_id), NPM_CACHE_PATH])
-        setup_node_modules()
-    except subprocess.CalledProcessError:
-        print(WARNING + "`npm install` failed; retrying..." + ENDC)
-        setup_node_modules()
+        compilemessages_hash_path = os.path.join(UUID_VAR_PATH, "last_compilemessages_hash")
+        new_compilemessages_hash = sha1sum.hexdigest()
+        run(['touch', compilemessages_hash_path])
+        with open(compilemessages_hash_path, 'r') as hash_file:
+            last_compilemessages_hash = hash_file.read()
 
-    version_file = os.path.join(ZULIP_PATH, 'var/provision_version')
+        if options.is_force or (new_compilemessages_hash != last_compilemessages_hash):
+            with open(compilemessages_hash_path, 'w') as hash_file:
+                hash_file.write(new_compilemessages_hash)
+            run(["./manage.py", "compilemessages"])
+        else:
+            print("No need to run `manage.py compilemessages`.")
+
+    version_file = os.path.join(UUID_VAR_PATH, 'provision_version')
     print('writing to %s\n' % (version_file,))
     open(version_file, 'w').write(PROVISION_VERSION + '\n')
 
@@ -297,14 +386,10 @@ if __name__ == "__main__":
                         default=False,
                         help="Ignore all provisioning optimizations.")
 
-    parser.add_argument('--travis', action='store_true', dest='is_travis',
-                        default=False,
-                        help="Provision for Travis but without production settings.")
-
     parser.add_argument('--production-travis', action='store_true',
                         dest='is_production_travis',
                         default=False,
-                        help="Provision for Travis but with production settings.")
+                        help="Provision for Travis with production settings.")
 
     parser.add_argument('--docker', action='store_true',
                         dest='is_docker',

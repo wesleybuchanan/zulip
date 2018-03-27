@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import unicode_literals
 
 from django.db import models, migrations
 from django.db.backends.postgresql_psycopg2.schema import DatabaseSchemaEditor
@@ -23,7 +22,7 @@ def set_subdomain_of_default_realm(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('zerver', '0028_userprofile_tos_version'),
+        ('zerver', '0001_initial'),
     ]
 
     operations = [

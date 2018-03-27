@@ -1,41 +1,31 @@
-#!/usr/bin/env python
 
-"""
+"""\
 Deliver email messages that have been queued by various things
 (at this time invitation reminders and day1/day2 followup emails).
 
-This management command is run via supervisor. Do not run on multiple machines,
-as you may encounter multiple sends in a specific race condition.
+This management command is run via supervisor.  Do not run on multiple
+machines, as you may encounter multiple sends in a specific race
+condition.  (Alternatively, you can set `EMAIL_DELIVERER_DISABLED=True`
+on all but one machine to make the command have no effect.)
 """
 
-from __future__ import absolute_import
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils.timezone import now as timezone_now
-from django.utils.html import format_html
 
-from zerver.models import ScheduledJob
+from zerver.models import ScheduledEmail
 from zerver.lib.context_managers import lockfile
-from zerver.lib.send_email import send_email
+from zerver.lib.send_email import send_email, EmailNotDeliveredException
 
 import time
-import logging
+from zerver.lib.logging_util import create_logger
 from datetime import datetime
 from ujson import loads
-from typing import Any, Dict
+from typing import Any
 
 ## Setup ##
-log_format = "%(asctime)s: %(message)s"
-logging.basicConfig(format=log_format)
-
-formatter = logging.Formatter(log_format)
-file_handler = logging.FileHandler(settings.EMAIL_DELIVERER_LOG_PATH)
-file_handler.setFormatter(formatter)
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-logger.addHandler(file_handler)
+logger = create_logger(__name__, settings.EMAIL_DELIVERER_LOG_PATH, 'DEBUG')
 
 class Command(BaseCommand):
     help = """Deliver emails queued by various parts of Zulip
@@ -48,24 +38,21 @@ Usage: ./manage.py deliver_email
 
     def handle(self, *args, **options):
         # type: (*Any, **Any) -> None
-        # TODO: this only acquires a lock on the system, not on the DB:
-        # be careful not to run this on multiple systems.
 
-        # In the meantime, we have an option to prevent this job from
-        # running on >1 machine
         if settings.EMAIL_DELIVERER_DISABLED:
-            return
+            while True:
+                time.sleep(10*9)
 
         with lockfile("/tmp/zulip_email_deliver.lockfile"):
             while True:
-                email_jobs_to_deliver = ScheduledJob.objects.filter(type=ScheduledJob.EMAIL,
-                                                                    scheduled_timestamp__lte=timezone_now())
+                email_jobs_to_deliver = ScheduledEmail.objects.filter(scheduled_timestamp__lte=timezone_now())
                 if email_jobs_to_deliver:
                     for job in email_jobs_to_deliver:
-                        if not send_email(**loads(job.data)):
-                            logger.warn("No exception raised, but %r sent as 0 bytes" % (job,))
-                        else:
+                        try:
+                            send_email(**loads(job.data))
                             job.delete()
+                        except EmailNotDeliveredException:
+                            logger.warning("%r not delivered" % (job,))
                     time.sleep(10)
                 else:
                     # Less load on the db during times of activity, and more responsiveness when the load is low

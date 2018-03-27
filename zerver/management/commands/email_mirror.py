@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 
 """
 Forward messages sent to the configured email gateway to Zulip.
@@ -23,23 +22,13 @@ recipient address and retrieve, forward, and archive the message.
 """
 
 
-from __future__ import absolute_import
-from __future__ import print_function
-
-import six
-from zerver.lib.str_utils import force_text
 from typing import Any, List, Generator
 
-from argparse import ArgumentParser
-import os
 import logging
-import sys
-import posix
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from zerver.lib.queue import queue_json_publish
 from zerver.lib.email_mirror import logger, process_message, \
     extract_and_validate, ZulipEmailForwardError, \
     mark_missed_message_address_as_used, is_missed_message_address
@@ -71,10 +60,7 @@ def get_imap_messages():
             for msgid in num_ids_data[0].split():
                 status, msg_data = mbox.fetch(msgid, '(RFC822)')
                 msg_as_bytes = msg_data[0][1]
-                if six.PY2:
-                    message = email.message_from_string(msg_as_bytes)
-                else:
-                    message = email.message_from_bytes(msg_as_bytes)
+                message = email.message_from_bytes(msg_as_bytes)
                 yield message
                 mbox.store(msgid, '+FLAGS', '\\Deleted')
             mbox.expunge()

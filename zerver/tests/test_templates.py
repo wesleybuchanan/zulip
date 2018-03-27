@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 import re
 from typing import Any, Dict, Iterable
@@ -14,6 +13,7 @@ from zerver.lib.test_helpers import get_all_templates
 from zerver.lib.test_classes import (
     ZulipTestCase,
 )
+from zerver.lib.test_runner import slow
 from zerver.context_processors import common_context
 
 
@@ -41,6 +41,7 @@ class TemplateTestCase(ZulipTestCase):
     is done that the output looks right).  Please see `get_context`
     function documentation for more information.
     """
+    @slow("Tests a large number of different templates")
     @override_settings(TERMS_OF_SERVICE=None)
     def test_templates(self):
         # type: () -> None
@@ -58,9 +59,7 @@ class TemplateTestCase(ZulipTestCase):
 
         logged_out = [
             'confirmation/confirm.html',  # seems unused
-            'confirmation/confirm_mituser.html',  # seems unused
             'zerver/compare.html',
-            'zerver/landing_nav_blue.html',
             'zerver/footer.html',
         ]
 
@@ -81,28 +80,25 @@ class TemplateTestCase(ZulipTestCase):
             'zerver/settings_sidebar.html',
             'zerver/stream_creation_prompt.html',
             'zerver/subscriptions.html',
-            'zerver/tutorial_finale.html',
             'zerver/message_history.html',
             'zerver/delete_message.html',
         ]
         unusual = [
-            'zerver/emails/confirm_registration_mit.txt',
-            'zerver/emails/confirm_registration_mit.subject',
-            'zerver/emails/invitation_mit.txt',
-            'zerver/emails/invitation_mit.subject',
             'zerver/emails/confirm_new_email.subject',
-            'zerver/emails/confirm_new_email.html',
+            'zerver/emails/compiled/confirm_new_email.html',
             'zerver/emails/confirm_new_email.txt',
             'zerver/emails/notify_change_in_email.subject',
+            'zerver/emails/compiled/notify_change_in_email.html',
             'zerver/emails/digest.subject',
             'zerver/emails/digest.html',
             'zerver/emails/digest.txt',
             'zerver/emails/followup_day1.subject',
-            'zerver/emails/followup_day1.html',
+            'zerver/emails/compiled/followup_day1.html',
             'zerver/emails/followup_day1.txt',
             'zerver/emails/followup_day2.subject',
             'zerver/emails/followup_day2.txt',
-            'zerver/emails/followup_day2.html',
+            'zerver/emails/compiled/followup_day2.html',
+            'zerver/emails/compiled/password_reset.html',
             'corporate/mit.html',
             'corporate/zephyr.html',
             'corporate/zephyr-mirror.html',
@@ -122,14 +118,21 @@ class TemplateTestCase(ZulipTestCase):
             'zerver/base.html',
             'zerver/api_content.json',
             'zerver/handlebars_compilation_failed.html',
+            'zerver/portico-header.html',
         ]
 
         integrations_regexp = re.compile('zerver/integrations/.*.html')
 
+        # Since static/generated/bots/ is searched by Jinja2 for templates,
+        # it mistakes logo files under that directory for templates.
+        bot_logos_regexp = re.compile('\w+\/logo\.(svg|png)$')
+
         skip = covered + defer + logged_out + logged_in + unusual + ['tests/test_markdown.html',
                                                                      'zerver/terms.html',
                                                                      'zerver/privacy.html']
-        templates = [t for t in get_all_templates() if not (t in skip or integrations_regexp.match(t))]
+
+        templates = [t for t in get_all_templates() if not (
+            t in skip or integrations_regexp.match(t) or bot_logos_regexp.match(t))]
         self.render_templates(templates, self.get_context())
 
         # Test the deferred templates with updated context.
@@ -199,7 +202,6 @@ class TemplateTestCase(ZulipTestCase):
                          "device_ip": "127.0.0.1",
                          "login_time": "9:33am NewYork, NewYork",
                          },
-            zulip_support="zulip-admin@example.com",
         )
 
         context.update(kwargs)

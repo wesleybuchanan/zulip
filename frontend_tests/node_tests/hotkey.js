@@ -14,7 +14,7 @@
 set_global('activity', {
 });
 
-set_global('drafts', {
+set_global('page_params', {
 });
 
 set_global('overlays', {
@@ -96,7 +96,7 @@ function stubbing(func_name_to_stub, test_function) {
     assert.equal(map_press(47).name, 'search'); // slash
     assert.equal(map_press(106).name, 'vim_down'); // j
 
-    assert.equal(map_down(219, false, true).name, 'esc_ctrl');
+    assert.equal(map_down(219, false, true).name, 'escape');
 
     // More negative tests.
     assert.equal(map_down(47), undefined);
@@ -148,7 +148,7 @@ function stubbing(func_name_to_stub, test_function) {
 
     // Unmapped keys should immediately return false, without
     // calling any functions outside of hotkey.js.
-    assert_unmapped('abefhlmoptuxyz');
+    assert_unmapped('abefhlmoptxyz');
     assert_unmapped('BEFHILNOQTUWXYZ');
 
     // We have to skip some checks due to the way the code is
@@ -162,7 +162,14 @@ function stubbing(func_name_to_stub, test_function) {
     set_global('emoji_picker', {
         reactions_popped: return_false,
     });
-
+    set_global('emoji_codes', {
+        codepoint_to_name: {
+            '1f44d': 'thumbs_up',
+        },
+    });
+    set_global('hotspots', {
+        is_open: return_false,
+    });
 
     // All letters should return false if we are composing text.
     hotkey.processing_text = return_true;
@@ -172,7 +179,7 @@ function stubbing(func_name_to_stub, test_function) {
         assert_unmapped(' ');
         assert_unmapped('[]\\.,;');
         assert_unmapped('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
-        assert_unmapped('~!@#$%^*()_+{}:"<>?');
+        assert_unmapped('~!@#$%^*()_+{}:"<>');
     }
 
     _.each([return_true, return_false], function (settings_open) {
@@ -192,30 +199,39 @@ function stubbing(func_name_to_stub, test_function) {
     hotkey.processing_text = return_false;
     overlays.settings_open = return_false;
 
+    page_params.can_create_streams = true;
     overlays.streams_open = return_true;
     overlays.is_active = return_true;
     assert_mapping('S', 'subs.keyboard_sub');
-    overlays.is_active = return_false;
     assert_mapping('V', 'subs.view_stream');
     assert_mapping('n', 'subs.new_stream_clicked');
+    page_params.can_create_streams = false;
+    assert_unmapped('n');
+    overlays.is_active = return_false;
     overlays.streams_open = return_false;
 
-    assert_mapping('?', 'ui.show_info_overlay');
+    assert_mapping('?', 'ui.maybe_show_keyboard_shortcuts');
     assert_mapping('/', 'search.initiate_search');
-    assert_mapping('q', 'activity.initiate_search');
-    assert_mapping('w', 'stream_list.initiate_search');
+    assert_mapping('w', 'activity.initiate_search');
+    assert_mapping('q', 'stream_list.initiate_search');
 
-    assert_mapping('A', 'navigate.cycle_stream');
-    assert_mapping('D', 'navigate.cycle_stream');
+    assert_mapping('A', 'narrow.stream_cycle_backward');
+    assert_mapping('D', 'narrow.stream_cycle_forward');
 
     assert_mapping('c', 'compose_actions.start');
     assert_mapping('C', 'compose_actions.start');
     assert_mapping('P', 'narrow.by');
     assert_mapping('g', 'gear_menu.open');
+
+    overlays.is_active = return_true;
+    overlays.drafts_open = return_true;
     assert_mapping('d', 'drafts.toggle');
+    overlays.drafts_open = return_false;
+    assert_unmapped('d');
+    overlays.is_active = return_false;
 
     // Next, test keys that only work on a selected message.
-    var message_view_only_keys = '@*+rRjJkKsSvi:GM';
+    var message_view_only_keys = '@*+RjJkKsSuvi:GM';
 
     // Check that they do nothing without a selected message
     global.current_msg_list.empty = return_true;
@@ -225,7 +241,7 @@ function stubbing(func_name_to_stub, test_function) {
 
     // Check that they do nothing while in the settings overlay
     overlays.settings_open = return_true;
-    assert_unmapped('@*+rRjJkKsSvi:GM');
+    assert_unmapped('@*+-rRjJkKsSuvi:GM');
     overlays.settings_open = return_false;
 
     // TODO: Similar check for being in the subs page
@@ -233,6 +249,7 @@ function stubbing(func_name_to_stub, test_function) {
     assert_mapping('@', 'compose_actions.reply_with_mention');
     assert_mapping('*', 'message_flags.toggle_starred');
     assert_mapping('+', 'reactions.toggle_emoji_reaction');
+    assert_mapping('-', 'condense.toggle_collapse');
     assert_mapping('r', 'compose_actions.respond_to_message');
     assert_mapping('R', 'compose_actions.respond_to_message', true);
     assert_mapping('j', 'navigate.down');
@@ -241,9 +258,15 @@ function stubbing(func_name_to_stub, test_function) {
     assert_mapping('K', 'navigate.page_up');
     assert_mapping('s', 'narrow.by_recipient');
     assert_mapping('S', 'narrow.by_subject');
+    assert_mapping('u', 'popovers.show_sender_info');
     assert_mapping('v', 'lightbox.show_from_selected_message');
     assert_mapping('i', 'popovers.open_message_menu');
-    assert_mapping(':', 'emoji_picker.toggle_emoji_popover', true);
+    assert_mapping(':', 'reactions.open_reactions_popover', true);
+
+    global.emoji_picker.reactions_popped = return_true;
+    assert_mapping(':', 'emoji_picker.navigate', true);
+    global.emoji_picker.reactions_popped = return_false;
+
     assert_mapping('G', 'navigate.to_end');
     assert_mapping('M', 'muting_ui.toggle_mute');
 
@@ -302,7 +325,6 @@ function stubbing(func_name_to_stub, test_function) {
 
     list_util.inside_list = return_false;
     global.current_msg_list.empty = return_true;
-    global.drafts.drafts_overlay_open = return_false;
     overlays.settings_open = return_false;
     overlays.streams_open = return_false;
     overlays.lightbox_open = return_false;
@@ -362,8 +384,10 @@ function stubbing(func_name_to_stub, test_function) {
     assert_mapping('down_arrow', 'settings.handle_down_arrow');
     overlays.settings_open = return_false;
 
-    global.drafts.drafts_overlay_open = return_true;
+    overlays.is_active = return_true;
+    overlays.drafts_open = return_true;
     assert_mapping('up_arrow', 'drafts.drafts_handle_events');
     assert_mapping('down_arrow', 'drafts.drafts_handle_events');
-    global.drafts.drafts_overlay_open = return_false;
+    overlays.is_active = return_false;
+    overlays.drafts_open = return_false;
 }());

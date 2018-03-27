@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 import ujson
-from typing import Any, Dict, List
+from typing import Any, Mapping, List
+from unittest import mock
 from six import string_types
 
+from zerver.lib.emoji import emoji_name_to_emoji_code
+from zerver.lib.request import JsonableError
 from zerver.lib.test_helpers import tornado_redirected_to_list, get_display_recipient, \
     get_test_image_file
 from zerver.lib.test_classes import ZulipTestCase
-from zerver.models import get_realm, Recipient, UserMessage
+from zerver.models import get_realm, RealmEmoji, Recipient, UserMessage
 
 class ReactionEmojiTest(ZulipTestCase):
     def test_missing_emoji(self):
@@ -31,15 +33,18 @@ class ReactionEmojiTest(ZulipTestCase):
                                  **self.api_auth(sender))
         self.assert_json_error(result, "Emoji 'foo' does not exist")
 
-    def test_remove_invalid_emoji(self):
+    def test_add_deactivated_realm_emoji(self):
         # type: () -> None
         """
-        Removing invalid emoji fails
+        Sending deactivated realm emoji fails.
         """
+        emoji = RealmEmoji.objects.get(name="green_tick")
+        emoji.deactivated = True
+        emoji.save(update_fields=['deactivated'])
         sender = self.example_email("hamlet")
-        result = self.client_delete('/api/v1/messages/1/emoji_reactions/foo',
-                                    **self.api_auth(sender))
-        self.assert_json_error(result, "Emoji 'foo' does not exist")
+        result = self.client_put('/api/v1/messages/1/emoji_reactions/green_tick',
+                                 **self.api_auth(sender))
+        self.assert_json_error(result, "Emoji 'green_tick' does not exist")
 
     def test_valid_emoji(self):
         # type: () -> None
@@ -68,9 +73,8 @@ class ReactionEmojiTest(ZulipTestCase):
         """
         Reacting with valid emoji on a historical message succeeds
         """
-        realm = get_realm("zulip")
         stream_name = "Saxony"
-        self.subscribe_to_stream(self.example_email("cordelia"), stream_name, realm=realm)
+        self.subscribe(self.example_user("cordelia"), stream_name)
         message_id = self.send_message(self.example_email("cordelia"), stream_name, Recipient.STREAM)
 
         user_profile = self.example_user('hamlet')
@@ -97,22 +101,67 @@ class ReactionEmojiTest(ZulipTestCase):
         Reacting with valid realm emoji succeeds
         """
         sender = self.example_email("hamlet")
-        emoji_name = 'my_emoji'
-        with get_test_image_file('img.png') as fp1:
-            emoji_data = {'f1': fp1}
-            result = self.client_put_multipart('/json/realm/emoji/my_emoji', info=emoji_data,
-                                               **self.api_auth(sender))
-        self.assert_json_success(result)
-        self.assertEqual(200, result.status_code)
-
-        result = self.client_get("/json/realm/emoji", **self.api_auth(sender))
-        content = ujson.loads(result.content)
-        self.assert_json_success(result)
-        self.assertTrue(emoji_name in content["emoji"])
+        emoji_name = 'green_tick'
 
         result = self.client_put('/api/v1/messages/1/emoji_reactions/%s' % (emoji_name,),
                                  **self.api_auth(sender))
         self.assert_json_success(result)
+
+    def test_emoji_name_to_emoji_code(self):
+        # type: () -> None
+        """
+        An emoji name is mapped canonically to emoji code.
+        """
+        realm = get_realm('zulip')
+
+        # Test active realm emoji.
+        emoji_code, reaction_type = emoji_name_to_emoji_code(realm, 'green_tick')
+        self.assertEqual(emoji_code, 'green_tick')
+        self.assertEqual(reaction_type, 'realm_emoji')
+
+        # Test deactivated realm emoji.
+        emoji = RealmEmoji.objects.get(name="green_tick")
+        emoji.deactivated = True
+        emoji.save(update_fields=['deactivated'])
+        with self.assertRaises(JsonableError) as exc:
+            emoji_name_to_emoji_code(realm, 'green_tick')
+        self.assertEqual(str(exc.exception), "Emoji 'green_tick' does not exist")
+
+        # Test ':zulip:' emoji.
+        emoji_code, reaction_type = emoji_name_to_emoji_code(realm, 'zulip')
+        self.assertEqual(emoji_code, 'zulip')
+        self.assertEqual(reaction_type, 'zulip_extra_emoji')
+
+        # Test unicode emoji.
+        emoji_code, reaction_type = emoji_name_to_emoji_code(realm, 'astonished')
+        self.assertEqual(emoji_code, '1f632')
+        self.assertEqual(reaction_type, 'unicode_emoji')
+
+        # Test override unicode emoji.
+        overriding_emoji = RealmEmoji.objects.create(
+            name='astonished', realm=realm, file_name='astonished')
+        emoji_code, reaction_type = emoji_name_to_emoji_code(realm, 'astonished')
+        self.assertEqual(emoji_code, 'astonished')
+        self.assertEqual(reaction_type, 'realm_emoji')
+
+        # Test deactivate over-ridding realm emoji.
+        overriding_emoji.deactivated = True
+        overriding_emoji.save(update_fields=['deactivated'])
+        emoji_code, reaction_type = emoji_name_to_emoji_code(realm, 'astonished')
+        self.assertEqual(emoji_code, '1f632')
+        self.assertEqual(reaction_type, 'unicode_emoji')
+
+        # Test override `:zulip:` emoji.
+        overriding_emoji = RealmEmoji.objects.create(
+            name='zulip', realm=realm, file_name='zulip')
+        emoji_code, reaction_type = emoji_name_to_emoji_code(realm, 'zulip')
+        self.assertEqual(emoji_code, 'zulip')
+        self.assertEqual(reaction_type, 'realm_emoji')
+
+        # Test non-existent emoji.
+        with self.assertRaises(JsonableError) as exc:
+            emoji_name_to_emoji_code(realm, 'invalid_emoji')
+        self.assertEqual(str(exc.exception), "Emoji 'invalid_emoji' does not exist")
 
 class ReactionMessageIDTest(ZulipTestCase):
     def test_missing_message_id(self):
@@ -149,8 +198,7 @@ class ReactionMessageIDTest(ZulipTestCase):
                                                        "to": pm_recipient},
                                   **self.api_auth(pm_sender))
         self.assert_json_success(result)
-        content = ujson.loads(result.content)
-        pm_id = content['id']
+        pm_id = result.json()['id']
         result = self.client_put('/api/v1/messages/%s/emoji_reactions/smile' % (pm_id,),
                                  **self.api_auth(reaction_sender))
         self.assert_json_error(result, "Invalid message(s)")
@@ -208,6 +256,40 @@ class ReactionTest(ZulipTestCase):
                                     **self.api_auth(reaction_sender))
         self.assert_json_error(second, "Reaction does not exist")
 
+    def test_remove_existing_reaction_with_renamed_emoji(self):
+        # type: () -> None
+        """
+        Removes an old existing reaction but the name of emoji got changed during
+        various emoji infra changes.
+        """
+        sender = self.example_email("hamlet")
+        result = self.client_put('/api/v1/messages/1/emoji_reactions/smile',
+                                 **self.api_auth(sender))
+        self.assert_json_success(result)
+
+        with mock.patch('zerver.lib.emoji.name_to_codepoint', name_to_codepoint={}):
+            result = self.client_delete('/api/v1/messages/1/emoji_reactions/smile',
+                                        **self.api_auth(sender))
+            self.assert_json_success(result)
+
+    def test_remove_existing_reaction_with_deactivated_realm_emoji(self):
+        # type: () -> None
+        """
+        Removes an old existing reaction but the realm emoji used there has been deactivated.
+        """
+        sender = self.example_email("hamlet")
+        result = self.client_put('/api/v1/messages/1/emoji_reactions/green_tick',
+                                 **self.api_auth(sender))
+        self.assert_json_success(result)
+
+        # Deactivate realm emoji.
+        emoji = RealmEmoji.objects.get(name="green_tick")
+        emoji.deactivated = True
+        emoji.save(update_fields=['deactivated'])
+
+        result = self.client_delete('/api/v1/messages/1/emoji_reactions/green_tick',
+                                    **self.api_auth(sender))
+        self.assert_json_success(result)
 
 class ReactionEventTest(ZulipTestCase):
     def test_add_event(self):
@@ -225,12 +307,11 @@ class ReactionEventTest(ZulipTestCase):
                                                        "to": pm_recipient.email},
                                   **self.api_auth(pm_sender.email))
         self.assert_json_success(result)
-        content = ujson.loads(result.content)
-        pm_id = content['id']
+        pm_id = result.json()['id']
 
         expected_recipient_ids = set([pm_sender.id, pm_recipient.id])
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_put('/api/v1/messages/%s/emoji_reactions/smile' % (pm_id,),
                                      **self.api_auth(reaction_sender.email))
@@ -262,7 +343,7 @@ class ReactionEventTest(ZulipTestCase):
                                                        "to": pm_recipient.email},
                                   **self.api_auth(pm_sender.email))
         self.assert_json_success(result)
-        content = ujson.loads(result.content)
+        content = result.json()
         pm_id = content['id']
 
         expected_recipient_ids = set([pm_sender.id, pm_recipient.id])
@@ -271,7 +352,7 @@ class ReactionEventTest(ZulipTestCase):
                               **self.api_auth(reaction_sender.email))
         self.assert_json_success(add)
 
-        events = []  # type: List[Dict[str, Any]]
+        events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_delete('/api/v1/messages/%s/emoji_reactions/smile' % (pm_id,),
                                         **self.api_auth(reaction_sender.email))

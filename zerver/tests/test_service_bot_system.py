@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
 
 import mock
 from typing import Any, Union, Mapping, Callable
 
-from zerver.lib.actions import do_create_user
+from zerver.lib.actions import (
+    do_create_user,
+    get_service_bot_events,
+)
+from zerver.lib.bot_lib import StateHandler, StateHandlerError
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.models import (
-    get_realm_by_email_domain,
+    get_realm,
+    BotUserStateData,
     UserProfile,
     Recipient,
 )
@@ -18,6 +21,156 @@ BOT_TYPE_TO_QUEUE_NAME = {
     UserProfile.EMBEDDED_BOT: 'embedded_bots',
 }
 
+class TestServiceBotBasics(ZulipTestCase):
+    def _get_outgoing_bot(self):
+        # type: () -> UserProfile
+        outgoing_bot = do_create_user(
+            email="bar-bot@zulip.com",
+            password="test",
+            realm=get_realm("zulip"),
+            full_name="BarBot",
+            short_name='bb',
+            bot_type=UserProfile.OUTGOING_WEBHOOK_BOT,
+            bot_owner=self.example_user('cordelia'),
+        )
+
+        return outgoing_bot
+
+    def test_service_events_for_pms(self):
+        # type: () -> None
+        sender = self.example_user('hamlet')
+        assert(not sender.is_bot)
+
+        outgoing_bot = self._get_outgoing_bot()
+
+        event_dict = get_service_bot_events(
+            sender=sender,
+            service_bot_tuples=[
+                (outgoing_bot.id, outgoing_bot.bot_type),
+            ],
+            mentioned_user_ids=set(),
+            recipient_type=Recipient.PERSONAL,
+        )
+
+        expected = dict(
+            outgoing_webhooks=[
+                dict(trigger='private_message', user_profile_id=outgoing_bot.id),
+            ],
+        )
+
+        self.assertEqual(event_dict, expected)
+
+    def test_service_events_for_stream_mentions(self):
+        # type: () -> None
+        sender = self.example_user('hamlet')
+        assert(not sender.is_bot)
+
+        outgoing_bot = self._get_outgoing_bot()
+
+        event_dict = get_service_bot_events(
+            sender=sender,
+            service_bot_tuples=[
+                (outgoing_bot.id, outgoing_bot.bot_type),
+            ],
+            mentioned_user_ids={outgoing_bot.id},
+            recipient_type=Recipient.STREAM,
+        )
+
+        expected = dict(
+            outgoing_webhooks=[
+                dict(trigger='mention', user_profile_id=outgoing_bot.id),
+            ],
+        )
+
+        self.assertEqual(event_dict, expected)
+
+    def test_service_events_for_unsubscribed_stream_mentions(self):
+        # type: () -> None
+        sender = self.example_user('hamlet')
+        assert(not sender.is_bot)
+
+        outgoing_bot = self._get_outgoing_bot()
+
+        '''
+        If an outgoing bot is mentioned on a stream message, we will
+        create an event for it even if it is not subscribed to the
+        stream and not part of our original `service_bot_tuples`.
+
+        Note that we add Cordelia as a red herring value that the
+        code should ignore, since she is not a bot.
+        '''
+
+        cordelia = self.example_user('cordelia')
+
+        event_dict = get_service_bot_events(
+            sender=sender,
+            service_bot_tuples=[],
+            mentioned_user_ids={
+                outgoing_bot.id,
+                cordelia.id,  # should be excluded, not a service bot
+            },
+            recipient_type=Recipient.STREAM,
+        )
+
+        expected = dict(
+            outgoing_webhooks=[
+                dict(trigger='mention', user_profile_id=outgoing_bot.id),
+            ],
+        )
+
+        self.assertEqual(event_dict, expected)
+
+class TestServiceBotStateHandler(ZulipTestCase):
+    def setUp(self):
+        # type: () -> None
+        self.user_profile = self.example_user("othello")
+        self.bot_profile = do_create_user(email="embedded-bot-1@zulip.com",
+                                          password="test",
+                                          realm=get_realm("zulip"),
+                                          full_name="EmbeddedBo1",
+                                          short_name="embedded-bot-1",
+                                          bot_type=UserProfile.EMBEDDED_BOT,
+                                          bot_owner=self.user_profile)
+        self.second_bot_profile = do_create_user(email="embedded-bot-2@zulip.com",
+                                                 password="test",
+                                                 realm=get_realm("zulip"),
+                                                 full_name="EmbeddedBot2",
+                                                 short_name="embedded-bot-2",
+                                                 bot_type=UserProfile.EMBEDDED_BOT,
+                                                 bot_owner=self.user_profile)
+
+    def test_basic_storage_and_retrieval(self):
+        # type: () -> None
+        state_handler = StateHandler(self.bot_profile)
+        state_handler['some key'] = 'some value'
+        state_handler['some other key'] = 'some other value'
+        self.assertEqual(state_handler['some key'], 'some value')
+        self.assertEqual(state_handler['some other key'], 'some other value')
+        self.assertFalse('nonexistent key' in state_handler)
+        self.assertRaises(BotUserStateData.DoesNotExist, lambda: state_handler['nonexistent key'])
+
+        second_state_handler = StateHandler(self.second_bot_profile)
+        self.assertRaises(BotUserStateData.DoesNotExist, lambda: second_state_handler['some key'])
+        second_state_handler['some key'] = 'yet another value'
+        self.assertEqual(state_handler['some key'], 'some value')
+        self.assertEqual(second_state_handler['some key'], 'yet another value')
+
+    def test_storage_limit(self):
+        # type: () -> None
+        # Reduce maximal state size for faster test string construction.
+        StateHandler.state_size_limit = 100
+        state_handler = StateHandler(self.bot_profile)
+        key = 'capacity-filling entry'
+        state_handler[key] = 'x' * (state_handler.state_size_limit - len(key))
+
+        with self.assertRaisesMessage(StateHandlerError, "Cannot set state. Request would require 132 bytes storage. "
+                                                         "The current storage limit is 100."):
+            state_handler['too much data'] = 'a few bits too long'
+
+        second_state_handler = StateHandler(self.second_bot_profile)
+        second_state_handler['another big entry'] = 'x' * (state_handler.state_size_limit - 40)
+        second_state_handler['normal entry'] = 'abcd'
+
 class TestServiceBotEventTriggers(ZulipTestCase):
 
     def setUp(self):
@@ -25,21 +178,21 @@ class TestServiceBotEventTriggers(ZulipTestCase):
         self.user_profile = self.example_user("othello")
         self.bot_profile = do_create_user(email="foo-bot@zulip.com",
                                           password="test",
-                                          realm=get_realm_by_email_domain("zulip.com"),
+                                          realm=get_realm("zulip"),
                                           full_name="FooBot",
                                           short_name="foo-bot",
                                           bot_type=UserProfile.OUTGOING_WEBHOOK_BOT,
                                           bot_owner=self.user_profile)
         self.second_bot_profile = do_create_user(email="bar-bot@zulip.com",
                                                  password="test",
-                                                 realm=get_realm_by_email_domain("zulip.com"),
+                                                 realm=get_realm("zulip"),
                                                  full_name="BarBot",
                                                  short_name="bar-bot",
                                                  bot_type=UserProfile.OUTGOING_WEBHOOK_BOT,
                                                  bot_owner=self.user_profile)
 
         # TODO: In future versions this won't be required
-        self.subscribe_to_stream(self.bot_profile.email, 'Denmark')
+        self.subscribe(self.bot_profile, 'Denmark')
 
     @mock.patch('zerver.lib.actions.queue_json_publish')
     def test_trigger_on_stream_mention_from_user(self, mock_queue_json_publish):

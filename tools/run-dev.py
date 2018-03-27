@@ -1,8 +1,6 @@
-#!/usr/bin/env python
-from __future__ import print_function
-from __future__ import absolute_import
+#!/usr/bin/env python3
 
-import optparse
+import argparse
 import os
 import pwd
 import signal
@@ -30,7 +28,7 @@ if False:
 if 'posix' in os.name and os.geteuid() == 0:
     raise RuntimeError("run-dev.py should not be run as root.")
 
-parser = optparse.OptionParser(r"""
+parser = argparse.ArgumentParser(description=r"""
 
 Starts the app listening on localhost, for local development.
 
@@ -42,8 +40,8 @@ which serves to both of them.  After it's all up and running, browse to
 Note that, while runserver and runtornado have the usual auto-restarting
 behavior, the reverse proxy itself does *not* automatically restart on changes
 to this file.
-""")
-
+""",
+                                 formatter_class=argparse.RawTextHelpFormatter)
 
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(TOOLS_DIR))
@@ -51,27 +49,25 @@ from tools.lib.test_script import (
     get_provisioning_status,
 )
 
-parser.add_option('--test',
-                  action='store_true', dest='test',
-                  help='Use the testing database and ports')
-
-parser.add_option('--interface',
-                  action='store', dest='interface',
-                  default=None, help='Set the IP or hostname for the proxy to listen on')
-
-parser.add_option('--no-clear-memcached',
-                  action='store_false', dest='clear_memcached',
-                  default=True, help='Do not clear memcached')
-
-parser.add_option('--force', dest='force',
-                  action="store_true",
-                  default=False, help='Run command despite possible problems.')
-
-parser.add_option('--enable-tornado-logging', dest='enable_tornado_logging',
-                  action="store_true",
-                  default=False, help='Enable access logs from tornado proxy server.')
-
-(options, arguments) = parser.parse_args()
+parser.add_argument('--test',
+                    action='store_true',
+                    help='Use the testing database and ports')
+parser.add_argument('--minify',
+                    action='store_true',
+                    help='Minifies assets for testing in dev')
+parser.add_argument('--interface',
+                    action='store',
+                    default=None, help='Set the IP or hostname for the proxy to listen on')
+parser.add_argument('--no-clear-memcached',
+                    action='store_false', dest='clear_memcached',
+                    default=True, help='Do not clear memcached')
+parser.add_argument('--force',
+                    action="store_true",
+                    default=False, help='Run command despite possible problems.')
+parser.add_argument('--enable-tornado-logging',
+                    action="store_true",
+                    default=False, help='Enable access logs from tornado proxy server.')
+options = parser.parse_args()
 
 if not options.force:
     ok, msg = get_provisioning_status()
@@ -96,7 +92,7 @@ if options.interface is None:
 elif options.interface == "":
     options.interface = None
 
-runserver_args = [] # type: List[str]
+runserver_args = []  # type: List[str]
 base_port = 9991
 if options.test:
     base_port = 9981
@@ -112,22 +108,6 @@ os.environ['DJANGO_SETTINGS_MODULE'] = settings_module
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from scripts.lib.zulip_tools import WARNING, ENDC
-from django.conf import settings
-
-if 'zproject.backends.GitHubAuthBackend' in settings.AUTHENTICATION_BACKENDS:
-    if not (settings.SOCIAL_AUTH_GITHUB_KEY and
-            settings.SOCIAL_AUTH_GITHUB_SECRET):
-        print('\n'.join([
-            WARNING,
-            "You are using the GitHub auth backend. Please make sure of the following:",
-            "- You have updated SOCIAL_AUTH_GITHUB_KEY and "
-            "  SOCIAL_AUTH_GITHUB_SECRET settings.",
-            "- You have added http://localhost:9991/complete/github/' ",
-            "  as the callback URL in the OAuth application in GitHub.",
-            "  You can create OAuth apps from ",
-            "  https://github.com/settings/developers.",
-            ENDC]))
-        sys.exit(1)
 
 proxy_port = base_port
 django_port = base_port + 1
@@ -138,12 +118,6 @@ os.chdir(os.path.join(os.path.dirname(__file__), '..'))
 
 # Clean up stale .pyc files etc.
 subprocess.check_call('./tools/clean-repo')
-
-# HACK to fix up node_modules/.bin/handlebars deletion issue
-if not os.path.exists("node_modules/.bin/handlebars") and os.path.exists("node_modules/handlebars"):
-    print("Handlebars binary missing due to rebase past .gitignore fixup; fixing...")
-    subprocess.check_call(["rm", "-rf", "node_modules/handlebars"])
-    subprocess.check_call(["npm", "install"])
 
 if options.clear_memcached:
     print("Clearing memcached ...")
@@ -186,7 +160,14 @@ if options.test:
     # for the Casper tests.
     subprocess.check_call('./tools/webpack')
 else:
-    cmds += [['./tools/webpack', '--watch', '--port', str(webpack_port)]]
+    webpack_cmd = ['./tools/webpack', '--watch', '--port', str(webpack_port)]
+    if options.minify:
+        webpack_cmd.append('--minify')
+    if options.interface:
+        webpack_cmd += ["--host", options.interface]
+    else:
+        webpack_cmd += ["--host", "0.0.0.0"]
+    cmds.append(webpack_cmd)
 for cmd in cmds:
     subprocess.Popen(cmd)
 
@@ -220,7 +201,7 @@ class BaseWebsocketHandler(WebSocketHandler):
         # type: (*Any, **Any) -> None
         super(BaseWebsocketHandler, self).__init__(*args, **kwargs)
         # define client for target websocket server
-        self.client = None # type: Any
+        self.client = None  # type: Any
 
     def get(self, *args, **kwargs):
         # type: (*Any, **Any) -> Optional[Callable]
@@ -379,7 +360,6 @@ class Application(web.Application):
             (r"/json/events.*", TornadoHandler),
             (r"/api/v1/events.*", TornadoHandler),
             (r"/webpack.*", WebPackHandler),
-            (r"/sockjs-node.*", WebPackHandler),
             (r"/sockjs.*", TornadoHandler),
             (r"/.*", DjangoHandler)
         ]

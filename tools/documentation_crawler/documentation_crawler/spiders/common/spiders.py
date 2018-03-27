@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-from __future__ import print_function
-
 import logging
 import re
 import scrapy
@@ -17,6 +14,8 @@ EXCLUDED_URLS = [
     'https://calendar.google.com/calendar/embed?src=ktiduof4eoh47lmgcl2qunnc0o@group.calendar.google.com',
     # Returns 409 errors to HEAD requests frequently
     'https://medium.freecodecamp.com',
+    # Returns 404 to HEAD requests unconditionally
+    'https://www.git-tower.com/blog/command-line-cheat-sheet/',
 ]
 
 

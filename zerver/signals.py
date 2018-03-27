@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 
 from django.dispatch import receiver
 from django.contrib.auth.signals import user_logged_in
@@ -7,13 +6,19 @@ from django.template import loader
 from django.utils.timezone import get_current_timezone_name as timezone_get_current_timezone_name
 from django.utils.timezone import now as timezone_now
 from typing import Any, Dict, Optional
-from zerver.lib.send_email import send_email_to_user
+from zerver.lib.send_email import send_email, FromAddress
 from zerver.models import UserProfile
 
 def get_device_browser(user_agent):
     # type: (str) -> Optional[str]
     user_agent = user_agent.lower()
-    if "chrome" in user_agent and "chromium" not in user_agent:
+    if "zulip" in user_agent:
+        return "Zulip"
+    elif "edge" in user_agent:
+        return "Edge"
+    elif "opera" in user_agent or "opr/" in user_agent:
+        return "Opera"
+    elif "chrome" in user_agent and "chromium" not in user_agent:
         return 'Chrome'
     elif "firefox" in user_agent and "seamonkey" not in user_agent and "chrome" not in user_agent:
         return "Firefox"
@@ -21,12 +26,8 @@ def get_device_browser(user_agent):
         return "Chromium"
     elif "safari" in user_agent and "chrome" not in user_agent and "chromium" not in user_agent:
         return "Safari"
-    elif "opera" in user_agent:
-        return "Opera"
     elif "msie" in user_agent or "trident" in user_agent:
         return "Internet Explorer"
-    elif "edge" in user_agent:
-        return "Edge"
     else:
         return None
 
@@ -37,11 +38,13 @@ def get_device_os(user_agent):
     if "windows" in user_agent:
         return "Windows"
     elif "macintosh" in user_agent:
-        return "MacOS"
+        return "macOS"
     elif "linux" in user_agent and "android" not in user_agent:
         return "Linux"
     elif "android" in user_agent:
         return "Android"
+    elif "ios" in user_agent:
+        return "iOS"
     elif "like mac os x" in user_agent:
         return "iOS"
     else:
@@ -50,7 +53,7 @@ def get_device_os(user_agent):
 
 @receiver(user_logged_in, dispatch_uid="only_on_login")
 def email_on_new_login(sender, user, request, **kwargs):
-    # type: (Any, UserProfile, Any, Any) -> None
+    # type: (Any, UserProfile, Any, **Any) -> None
 
     # We import here to minimize the dependencies of this module,
     # since it runs as part of `manage.py` initialization
@@ -60,13 +63,9 @@ def email_on_new_login(sender, user, request, **kwargs):
         return
 
     if request:
-        # Login emails are for returning users, not new registrations.
-        # Determine if login request was from new registration.
-        path = request.META.get('PATH_INFO', None)
-
-        if path:
-            if path == "/accounts/register/":
-                return
+        # If the user's account was just created, avoid sending an email.
+        if getattr(user, "just_registered", False):
+            return
 
         login_time = timezone_now().strftime('%A, %B %d, %Y at %I:%M%p ') + \
             timezone_get_current_timezone_name()
@@ -82,7 +81,8 @@ def email_on_new_login(sender, user, request, **kwargs):
 
         context = common_context(user)
         context['device_info'] = device_info
-        context['zulip_support'] = settings.ZULIP_ADMINISTRATOR
         context['user'] = user
 
-        send_email_to_user('zerver/emails/notify_new_login', user, context=context)
+        send_email('zerver/emails/notify_new_login', to_user_id=user.id,
+                   from_name='Zulip Account Security', from_address=FromAddress.NOREPLY,
+                   context=context)

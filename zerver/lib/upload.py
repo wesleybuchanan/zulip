@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 from typing import Any, Dict, Mapping, Optional, Tuple, Text
 
 from django.utils.translation import ugettext as _
@@ -11,7 +10,7 @@ from jinja2 import Markup as mark_safe
 import unicodedata
 
 from zerver.lib.avatar_hash import user_avatar_path
-from zerver.lib.request import JsonableError
+from zerver.lib.exceptions import JsonableError, ErrorCode
 from zerver.lib.str_utils import force_text, force_str, NonBinaryStr
 
 from boto.s3.bucket import Bucket
@@ -84,10 +83,10 @@ def random_name(bytes=60):
     return base64.urlsafe_b64encode(os.urandom(bytes)).decode('utf-8')
 
 class BadImageError(JsonableError):
-    pass
+    code = ErrorCode.BAD_IMAGE
 
 class ExceededQuotaError(JsonableError):
-    pass
+    code = ErrorCode.QUOTA_EXCEEDED
 
 def resize_avatar(image_data, size=DEFAULT_AVATAR_SIZE):
     # type: (binary_type, int) -> binary_type
@@ -107,7 +106,10 @@ def resize_emoji(image_data, size=DEFAULT_EMOJI_SIZE):
         im = Image.open(io.BytesIO(image_data))
         image_format = im.format
         if image_format == 'GIF' and im.is_animated:
-            if im.size[0] > size or im.size[1] > size:
+            if im.size[0] != im.size[1]:
+                raise JsonableError(
+                    _("Animated emoji must be have same width and height."))
+            elif im.size[0] > size:
                 raise JsonableError(
                     _("Animated emoji can't be larger than 64px in width or height."))
             else:
@@ -196,7 +198,7 @@ def upload_image_to_s3(
     else:
         headers = None
 
-    key.set_contents_from_string(force_str(contents), headers=headers)
+    key.set_contents_from_string(contents, headers=headers)  # type: ignore # https://github.com/python/typeshed/issues/1552
 
 def get_total_uploads_size_for_user(user):
     # type: (UserProfile) -> int

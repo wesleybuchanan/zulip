@@ -2,6 +2,7 @@ add_dependencies({
     people: 'js/people.js',
     stream_data: 'js/stream_data.js',
     util: 'js/util.js',
+    unread: 'js/unread.js',
 });
 
 set_global('page_params', {});
@@ -256,6 +257,10 @@ function make_sub(name, stream_id) {
     assert(predicate({starred: true}));
     assert(!predicate({starred: false}));
 
+    predicate = get_predicate([['is', 'unread']]);
+    assert(predicate({flags: ''}));
+    assert(!predicate({flags: 'read'}));
+
     predicate = get_predicate([['is', 'alerted']]);
     assert(predicate({alerted: true}));
     assert(!predicate({alerted: false}));
@@ -305,11 +310,45 @@ function make_sub(name, stream_id) {
     }));
     assert(!predicate({type: 'stream'}));
 
+    predicate = get_predicate([['pm-with', 'Joe@example.com,steve@foo.com']]);
+    assert(predicate({
+        type: 'private',
+        display_recipient: [{user_id: joe.user_id}, {user_id: steve.user_id}],
+    }));
+
+    // Make sure your own email is ignored
+    predicate = get_predicate([['pm-with', 'Joe@example.com,steve@foo.com,me@example.com']]);
+    assert(predicate({
+        type: 'private',
+        display_recipient: [{user_id: joe.user_id}, {user_id: steve.user_id}],
+    }));
+
     predicate = get_predicate([['pm-with', 'nobody@example.com']]);
     assert(!predicate({
         type: 'private',
         display_recipient: [{id: joe.user_id}],
     }));
+
+    predicate = get_predicate([['group-pm-with', 'nobody@example.com']]);
+    assert(!predicate({
+        type: 'private',
+        display_recipient: [{id: joe.user_id}],
+    }));
+
+    predicate = get_predicate([['group-pm-with', 'Joe@example.com']]);
+    assert(predicate({
+        type: 'private',
+        display_recipient: [{id: joe.user_id}, {id: steve.user_id}, {id: me.user_id}],
+    }));
+    assert(!predicate({ // you must be a part of the group pm
+        type: 'private',
+        display_recipient: [{id: joe.user_id}, {id: steve.user_id}],
+    }));
+    assert(!predicate({
+        type: 'private',
+        display_recipient: [{id: steve.user_id}, {id: me.user_id}],
+    }));
+    assert(!predicate({type: 'stream'}));
 }());
 
 (function test_negated_predicates() {
@@ -383,7 +422,7 @@ function make_sub(name, stream_id) {
         {operator: 'topic', operand: 'bar'},
     ];
     var filter = new Filter(terms);
-    predicate = filter.predicate();
+    filter.predicate();
     predicate = filter.predicate(); // get cached version
     assert(predicate({type: 'stream', stream: 'foo', subject: 'bar'}));
 
@@ -421,6 +460,26 @@ function make_sub(name, stream_id) {
     string = 'stream:With+Space';
     operators = [
         {operator: 'stream', operand: 'With Space'},
+    ];
+    _test();
+
+    string = 'stream:"with quoted space" topic:and separate';
+    operators = [
+        {operator: 'stream', operand: 'with quoted space'},
+        {operator: 'topic', operand: 'and'},
+        {operator: 'search', operand: 'separate'},
+    ];
+    _test();
+
+    string = 'stream:"unclosed quote';
+    operators = [
+        {operator: 'stream', operand: 'unclosed quote'},
+    ];
+    _test();
+
+    string = 'stream:""';
+    operators = [
+        {operator: 'stream', operand: ''},
     ];
     _test();
 
@@ -464,6 +523,17 @@ function make_sub(name, stream_id) {
         {operator: 'search', operand: ':stream: -:emoji: are cool'},
     ];
     _test();
+
+    string = '';
+    operators = [];
+    _test();
+
+    string = 'stream: separated topic: "with space"';
+    operators = [
+        {operator: 'stream', operand: 'separated'},
+        {operator: 'topic', operand: 'with space'},
+    ];
+    _test();
 }());
 
 (function test_unparse() {
@@ -489,6 +559,12 @@ function make_sub(name, stream_id) {
     ];
     string = 'near:150';
     assert.deepEqual(Filter.unparse(operators), string);
+
+    operators = [
+        {operator: '', operand: ''},
+    ];
+    string = '';
+    assert.deepEqual(Filter.unparse(operators), string);
 }());
 
 (function test_describe() {
@@ -499,87 +575,98 @@ function make_sub(name, stream_id) {
         {operator: 'stream', operand: 'devel'},
         {operator: 'is', operand: 'starred'},
     ];
-    string = 'Narrow to stream devel, Narrow to starred messages';
+    string = 'stream devel, starred messages';
+    assert.equal(Filter.describe(narrow), string);
+
+    narrow = [
+        {operator: 'stream', operand: 'river'},
+        {operator: 'is', operand: 'unread'},
+    ];
+    string = 'stream river, unread messages';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'topic', operand: 'JS'},
     ];
-    string = 'Narrow to devel > JS';
+    string = 'stream devel > JS';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'private'},
         {operator: 'search', operand: 'lunch'},
     ];
-    string = 'Narrow to all private messages, Search for lunch';
+    string = 'private messages, search for lunch';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'id', operand: 99},
     ];
-    string = 'Narrow to message ID 99';
+    string = 'message ID 99';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'in', operand: 'home'},
     ];
-    string = 'Narrow to messages in home';
+    string = 'messages in home';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'mentioned'},
     ];
-    string = 'Narrow to mentioned messages';
+    string = '@-mentions';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'alerted'},
     ];
-    string = 'Narrow to alerted messages';
+    string = 'alerted messages';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'something_we_do_not_support'},
     ];
-    string = 'Narrow to (unknown operator)';
+    string = 'something_we_do_not_support messages';
     assert.equal(Filter.describe(narrow), string);
 
+    // this should be unreachable, but just in case
     narrow = [
         {operator: 'bogus', operand: 'foo'},
     ];
-    string = 'Narrow to (unknown operator)';
+    string = 'unknown operator';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'topic', operand: 'JS', negated: true},
     ];
-    string = 'Narrow to stream devel, Exclude topic JS';
+    string = 'stream devel, exclude topic JS';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'private'},
         {operator: 'search', operand: 'lunch', negated: true},
     ];
-    string = 'Narrow to all private messages, Exclude lunch';
+    string = 'private messages, exclude lunch';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'is', operand: 'starred', negated: true},
     ];
-    string = 'Narrow to stream devel, Exclude starred messages';
+    string = 'stream devel, exclude starred messages';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'has', operand: 'image', negated: true},
     ];
-    string = 'Narrow to stream devel, Exclude messages with one or more image';
+    string = 'stream devel, exclude messages with one or more image';
     assert.equal(Filter.describe(narrow), string);
 
+    narrow = [];
+    string = 'Go to Home view';
+    assert.equal(Filter.describe(narrow), string);
 }());
 
 (function test_update_email() {

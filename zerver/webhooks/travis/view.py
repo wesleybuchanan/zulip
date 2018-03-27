@@ -1,10 +1,9 @@
 # Webhooks for external integrations.
-from __future__ import absolute_import
 
 from django.http import HttpRequest, HttpResponse
 
 from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-from zerver.lib.actions import check_send_message
+from zerver.lib.actions import check_send_stream_message
 from zerver.lib.response import json_success
 from zerver.lib.validator import check_dict, check_string, check_bool
 from zerver.models import UserProfile
@@ -53,5 +52,5 @@ def api_travis_webhook(request, user_profile,
         message['build_url']
     )
 
-    check_send_message(user_profile, request.client, 'stream', [stream], topic, body)
+    check_send_stream_message(user_profile, request.client, stream, topic, body)
     return json_success()

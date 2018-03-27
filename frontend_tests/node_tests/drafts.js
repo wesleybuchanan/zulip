@@ -1,4 +1,5 @@
-global.stub_out_jquery();
+set_global('$', global.make_zjquery());
+set_global('window', {});
 
 add_dependencies({
     localstorage: 'js/localstorage',
@@ -79,7 +80,7 @@ var draft_2 = {
     localStorage.clear();
     (function test_editDraft() {
          stub_timestamp(2, function () {
-             ls.set("drafts", { id1: draft_1 } );
+             ls.set("drafts", { id1: draft_1 });
              var expected = _.clone(draft_2);
              expected.updatedAt = 2;
              draft_model.editDraft("id1", _.clone(draft_2));
@@ -90,7 +91,7 @@ var draft_2 = {
 
     localStorage.clear();
     (function test_deleteDraft() {
-         ls.set("drafts", { id1: draft_1 } );
+         ls.set("drafts", { id1: draft_1 });
          draft_model.deleteDraft("id1");
 
          assert.deepEqual(ls.get("drafts"), {});
@@ -127,4 +128,22 @@ var draft_2 = {
 
     stub_draft({});
     assert.equal(drafts.snapshot_message(), undefined);
+}());
+
+(function test_initialize() {
+    var message_content = $("#new_message_content");
+    message_content.focusout = function (f) {
+        assert.equal(f, drafts.update_draft);
+        f();
+    };
+
+    global.window.addEventListener = function (event_name, f) {
+        assert.equal(event_name, "beforeunload");
+        var called = false;
+        drafts.update_draft = function () { called = true; };
+        f();
+        assert(called);
+    };
+
+    drafts.initialize();
 }());

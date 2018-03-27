@@ -4,9 +4,215 @@ All notable changes to the Zulip server are documented in this file.
 
 ### Unreleased
 
+This section lists notable unreleased changes; it is generally updated
+in bursts.
+
+### 1.7.1 -- 2017-11-21
+
+This is a security release, with a handful of cherry-picked changes
+since 1.7.0.  All Zulip server admins are encouraged to upgrade
+promptly.
+
+This release includes fixes for the upgrade process, so server admins
+running a version from before 1.7 should upgrade directly to 1.7.1.
+
+- CVE-2017-0910: On a server with multiple realms, a vulnerability in
+  the invitation system allowed an authorized user of one realm to
+  create an account on any other realm.
+- The Korean translation is now complete, a huge advance from almost
+  nothing in 1.7.0.  The French translation is now nearly complete,
+  and several other languages have smaller updates.
+- The installer now sets LC_ALL to a known locale, working around an
+  issue where some dependencies fail to install in some locales.
+- We fixed a bug in the script that runs after upgrading Zulip (so
+  the fix applies when upgrading to this version), where the
+  garbage-collection of old deployments sometimes wouldn't preserve
+  the immediate last deployment.
+
+### 1.7.0 -- 2017-10-25
+
+**Highlights:**
+
+Web
+- We’ve completely redesigned our onboarding process to explain Zulip,
+  and especially topics, to new users.
+- We’ve built a beautiful new emoji picker with categories, a
+  showcase, and much better data. Note the clean, underscore-free
+  display!
+- The emails sent by Zulip are more consistent, readable, and visually
+  interesting.
+- Chinese (Simplified) and Japanese join Spanish, German, and Czech in
+  having the user interface fully translated, in addition to partial
+  translations for many other languages. We also fixed many small
+  issues where strings weren’t tagged for translation.
+- Many pages have been redesigned to be easier to use and visually
+  cleaner, including the settings pages and the user documentation at
+  /help, /integrations, and /apps.
+
+Mobile and Desktop support
+- Zulip Server 1.7 adds several new APIs that are critical for mobile
+  app performance and that let the app track unread messages. If
+  you’re using the mobile apps at all (iOS or Android), you will
+  definitely want to upgrade to Zulip 1.7.
+- The iOS and Android apps can receive push notifications
+  (configurable, naturally) for events like PMs and @-mentions. While
+  Zulip Server 1.6 has basic support for these, 1.7 brings a new,
+  clearer format to notifications, and gives each user more options
+  for finer-grained control.
+- The new Electron desktop app is out of beta and replaces our legacy
+  desktop apps.
+
+Backend and scaling
+- Zulip now runs exclusively on Python 3.  This is the culmination of
+  an 18-month migration effort.  We are very excited about this!
+- We’ve added an automatic "soft deactivation" process, which
+  dramatically improves performance for organizations with a large
+  number of inactive users, without any impact on those users’
+  experience if they later come back.
+- Zulip's performance at scale has improved significantly. Performance
+  now scales primarily with number of active users (not total
+  users). As an example, chat.zulip.org serves 400 monthly active
+  users and about 3500 total users, on one VM with just 8GB of RAM and
+  a CPU consistently over 90% idle.
+
+**Upgrade notes:**
+
+* Zulip 1.7 contains some significant database migrations that can
+  take several minutes to run.  The upgrade process automatically
+  minimizes disruption by running these first, before beginning the
+  user-facing downtime.  However, if you'd like to watch the downtime
+  phase of the upgrade closely, we recommend
+  [running them first manually](expensive-migrations.html) and as well
+  as the usual trick of
+  [doing an apt upgrade first](prod-maintain-secure-upgrade.html#applying-ubuntu-system-updates).
+
+* We've removed support for an uncommon legacy deployment model where
+  a Zulip server served multiple organizations on the same domain.
+  Installs with multiple organizations now require each organization
+  to have its own subdomain.
+
+  This change should have no effect for the vast majority of Zulip
+  servers that only have one organization.  If you manage a server
+  that hosts multiple organizations, you'll want to read [our guide on
+  multiple organizations](prod-multiple-organizations.html).
+
+* We simplified the configuration for our password strength checker to
+  be much more intuitive.  If you were using the
+  `PASSWORD_MIN_ZXCVBN_QUALITY` setting,
+  [it has been replaced](https://github.com/zulip/zulip/commit/a116303604e362796afa54b5d923ea5312b2ea23) by
+  the more intuitive `PASSWORD_MIN_GUESSES`.
+
+**Full feature changelog:**
+
+- Simplified the process for installing a new Zulip server, as well as
+  fixing the most common roadbumps and confusing error messages.
+- Added a new "incoming webhook" bot type, limited to only sending
+  messages into Zulip, for better security.
+- Added experimental support for outgoing webhooks.
+- Added support for changing the notifications stream.
+- Added 'u' hotkey to show a user's profile.
+- Added '-' hotkey to toggle collapsing a message.
+- Added an organization setting to require topics in stream messages.
+- Added an organization setting to control whether edit history is available.
+- Added a confirmation dialogue when inviting many users to a new stream.
+- Added new notification setting to always get push notifications on a stream.
+- Added new "getting started" guides to the user documentation.
+- Added support for installing a Zulip server from a Git checkout.
+- Added support for mentioning a user when editing a message.
+- Added OpsGenie, Google Code-In, Google Search, and xkcd integrations.
+- Added support for organization administrators deleting private streams.
+- Added support for using any LDAP attribute for login username.
+- Added support for searching by group-pm-with.
+- Added support for mentioning users when editing messages.
+- Added a much prettier prompt for enabling desktop notifications.
+- Added a new PHYSICAL_ADDRESS setting to be used in outgoing emails
+  to support compliance with anti-spam regulations.
+- Dramatically improved the search typeahead experience when using
+  multiple operators.
+- Improved design for /stats page and added a link to it in the gear menu.
+- Improved how timestamps are displayed across the product.
+- Improved the appearance of mention/compose typeahead.
+- Improved lightbox to support panning and zooming on images.
+- Improved "more topics" to fetch all historical topics from the server.
+- Improved scrollbars across the site to look good on Windows and Linux.
+- Improved visual design of stream management UI.
+- Improved management of disk space, especially when deploying with
+  Git frequently.
+- Improve mention typeahead sort order to prioritize recent senders in
+  a stream.
+- Swapped the 'q' and 'w' hotkeys to better match the UI.
+- Fixed most issues with the registration flow, including adding Oauth
+  support for mobile and many corner case problems.
+- Significantly improved sort ordering for the emoji picker.
+- Fixed most accessibility errors detected by major accessibility
+  checker tools.
+- Extracted Zulip's Python API and bots ecosystem into its own
+  repository, zulip/python-zulip-api.
+- Enter hotkey now opens compose in empty narrows.
+- Significantly improved performance of "starred messages" and
+  "mentions" database queries through new indexes.
+- Upgraded to Django 1.11.x.
+- Upgraded to a more modern version of the SourceSansPro font.
+- Redesigned several settings subpages to be visually cleaner.
+- Redesigned Zulip's error pages to feature cute illustrations.
+- Dramatically improved the user typeahead algorithm to suggest
+  relevant users even in large organizations with 1000s of accounts.
+- Fixed log rotation structural issues which wasted a lot of disk.
+- Updated notification settings to not require a "save changes" button.
+- Rewrote the documentation for almost all of our integrations to be
+  much clearer and more consistent through use of Markdown and macros.
+- Restructured Zulip's management commands to use a common system for
+  accessing realms and users.
+- Made starting editing a message you just sent not require a round trip.
+- Dramatically increased test coverage of the frontend codebase.
+- Dramatically improved the responsive mobile user experience.
+- Changed the right sidebar search to ignore diacritics.
+- Overhauled error handling in the new user registration flows.
+- Fixed minor bugs in several webhook integrations.
+- Fixed several local echo bugs involving mentions and line-wrapping.
+- Fixed various inconsistent old-style buttons in settings pages.
+- Fixed some obscure bugs with uploading files.
+- Fixed issues with deactivating realm emoji.
+- Fixed rendering of emoji in tweet previews.
+- Fixed buggy translation caching which filled local storage.
+- Fixed handling of desktop and mobile apps in new-login emails.
+- Fixed caching of source repository in upgrade-zulip-from-git.
+- Fixed numerous minor internationalization bugs.
+- Fixed several bugs with the LDAP authentication backend.
+- Fixed several corner case bugs with push notification.
+- Fixed rendering of realm emoji in missed-message emails.
+- Fixed various endpoints incorrectly using the PUT HTTP method.
+- Fixed bugs in scrolling up using the home key repeatedly.
+- Fixed a bug where private messages from multiple users could be
+  included in a single missed-message email.
+- Fixed issues with inconsistent visual display of @-all mentions.
+- Fixed zombie process leaks on servers with <4GB of RAM.
+- Fixed markdown previews of /me messages.
+- Fixed a subtle bug involving timestamps of locally echoed messages.
+- Fixed the behavior of key combintions like Ctrl+Enter in the compose box.
+- Worked around Google Compute Engine's default boto configuration,
+  which broke Zulip (and any other app using boto).
+- Zulip now will gracefully handle the Postgres server being restarted.
+- Optimized marking an entire topic as read.
+- Switched from npm to yarn for downloading JS packages.
+- Switched the function of the 'q' and 'w' search hotkeys.
+- Simplified the settings for configuring senders for our emails.
+- Emoji can now be typed with spaces, e.g. entering "robot face" in
+  the typeahead as well as "robot_face".
+- Improved title and alt text for unicode emoji.
+- Added development tools to make iterating on emails and error pages easy.
+- Added backend support for multi-use invite links (no UI for creating yet).
+- Added a central debugging log for attempts to send outgoing emails.
+- Added a deprecation notice for the legacy QT-based desktop app.
+- Removed most remaining legacy API format endpoints.
+- Removed the obsolete shortname-based syntax.
+- Removed the old django-guardian dependency.
+- Removed several obsolete settings.
+- Partially completed migration to webpack as our static asset bundler.
+
 ### 1.6.0 -- 2017-06-06
 
-Highlights:
+**Highlights:**
 
 - A complete visual redesign of the logged-out pages, including login,
 registration, integrations, etc.
@@ -40,7 +246,7 @@ Zulip apps.
 [electron-app]: https://github.com/zulip/zulip-electron/releases
 [ios-app]: https://itunes.apple.com/us/app/zulip/id1203036395
 
-Full feature Changelog:
+**Full feature changelog:**
 
 * Added Basecamp, Gogs, Greenhouse, Home Assistant, Slack, Splunk, and
   WordPress webhook integrations.
@@ -140,7 +346,7 @@ Full feature Changelog:
 
 ### 1.5.0 -- 2017-02-06
 
-Highlights:
+**Highlights:**
 
 - Completely redesigned the Manage streams interface.
 - Added support for emoji reactions to messages.
@@ -154,7 +360,7 @@ Highlights:
   setting, `INLINE_URL_EMBED_PREVIEW`, is disabled by default in this
   release).
 
-Full feature Changelog:
+**Full feature changelog:**
 
 - Added an emoji picker/browser to the compose box.
 - Added markdown preview support to the compose box.
@@ -202,6 +408,7 @@ Full feature Changelog:
 - Added errors for common installations mistakes (e.g. too little RAM).
 - Added a new /authors page showing the contributors to the current
   Zulip version.
+- Added illustrations to the 404 and 500 pages.
 - Upgraded all Python dependencies to modern versions, including
   Django 1.10 (all of Zulip's patches have been merged into mainline).
 - Increased backend test coverage of Python codebase to 90%.

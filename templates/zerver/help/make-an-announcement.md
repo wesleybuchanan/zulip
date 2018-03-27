@@ -35,13 +35,17 @@ messages.
 5. Enter your announcement in **Compose your message here...**
   (also known as the compose box).
 
+    !!! tip ""
+        You can type `@**all**` to mention everyone subscribed to the stream you
+        send the message to.
+
 6. Finally, you can now send your announcement by
   clicking the **Send** button or by pressing the enter key
   (if you have checked the option **Press Enter to send**).
 
 !!! tip ""
     You can always cancel your message by clicking the x (<i
-    class="icon-vector-remove"></i>) icon located at the top-right corner of
+    class="icon-vector-remove"></i>) icon located at the top right corner of
     your compose box or pressing the `Esc` key.
 
 
