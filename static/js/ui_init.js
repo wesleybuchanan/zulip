@@ -274,6 +274,7 @@ $(function () {
     hotspots.initialize();
     ui.initialize();
     desktop_notifications_panel.initialize();
+    mute_popover.initialize();
 });
 
 

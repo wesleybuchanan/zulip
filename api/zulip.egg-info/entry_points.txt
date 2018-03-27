@@ -1,0 +1,3 @@
+[console_scripts]
+zulip-send = zulip.send:main
+

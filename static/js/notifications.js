@@ -416,6 +416,10 @@ function message_is_notifiable(message) {
         return false;
     }
 
+    if (mute_popover.notifications_muted() == true) {
+        return false;
+    }
+
     // Everything else is on the table; next filter based on notification
     // settings.
     return true;

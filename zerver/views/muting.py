@@ -6,7 +6,7 @@ import ujson
 
 from django.utils.translation import ugettext as _
 from zerver.decorator import authenticated_json_post_view
-from zerver.lib.actions import do_mute_topic, do_unmute_topic
+from zerver.lib.actions import do_mute_topic, do_unmute_topic, do_change_unmute_time
 from zerver.lib.request import has_request_variables, REQ
 from zerver.lib.response import json_success, json_error
 from zerver.lib.topic_mutes import topic_is_muted
@@ -44,3 +44,10 @@ def update_muted_topic(request, user_profile, stream=REQ(),
         return mute_topic(user_profile, stream, topic)
     elif op == 'remove':
         return unmute_topic(user_profile, stream, topic)
+
+@has_request_variables
+def update_muted_time(request, user_profile, unmuteTime=REQ()):
+    # type: (HttpRequest, UserProfile, DateTime) -> HttpResponse
+    do_change_unmute_time(user_profile, unmuteTime)
+    return json_success()
+

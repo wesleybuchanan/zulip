@@ -12,6 +12,7 @@
 
 #streams_inline_cog,
 #streams_filter_icon,
+#mute_notifications_icon,
 #join_unsub_stream {
     float: right;
     color: hsl(0, 0%, 54%);
@@ -22,6 +23,7 @@
 
 #streams_inline_cog:hover,
 #streams_filter_icon:hover,
+#mute_notifications_icon:hover,
 #join_unsub_stream:hover {
     color: hsl(0, 0%, 33%);
     cursor: pointer;

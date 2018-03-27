@@ -206,6 +206,10 @@ def fetch_initial_state_data(user_profile, event_types, queue_id,
             state[notification] = getattr(user_profile, notification)
         state['default_desktop_notifications'] = user_profile.default_desktop_notifications
 
+    if want('mute_notifications_until'):
+        #print('mute time = ' + user_profile.mute_notifications_until)
+        state['mute_notifications_until'] = user_profile.mute_notifications_until.isoformat()
+
     if want('zulip_version'):
         state['zulip_version'] = ZULIP_VERSION
 
@@ -501,6 +505,8 @@ def apply_event(state, event, user_profile, include_subscribers):
     elif event['type'] == "update_global_notifications":
         assert event['notification_name'] in UserProfile.notification_setting_types
         state[event['notification_name']] = event['setting']
+    elif event['type'] == "set_unmute_time":
+        state['mute_notifications_until'] = event['setting'];
     else:
         raise AssertionError("Unexpected event type %s" % (event['type'],))
 
