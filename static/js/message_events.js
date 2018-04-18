@@ -31,6 +31,7 @@ function maybe_add_narrowed_messages(messages, msg_list, messages_are_new) {
                 }
             });
 
+            _.each(new_messages, message_store.set_message_booleans);
             new_messages = _.map(new_messages, message_store.add_message_metadata);
             message_util.add_messages(
                 new_messages,
@@ -116,6 +117,7 @@ exports.update_messages = function update_messages(events) {
     var msgs_to_rerender = [];
     var topic_edited = false;
     var changed_narrow = false;
+    var changed_compose = false;
     var message_content_edited = false;
 
     _.each(events, function (event) {
@@ -125,13 +127,16 @@ exports.update_messages = function update_messages(events) {
         }
         msgs_to_rerender.push(msg);
 
-        msg.flags = event.flags;
-        message_store.set_message_booleans(msg, event.flags);
+        message_store.update_booleans(msg, event.flags);
 
         condense.un_cache_message_content_height(msg.id);
 
         if (event.rendered_content !== undefined) {
             msg.content = event.rendered_content;
+        }
+
+        if (event.is_me_message !== undefined) {
+            msg.is_me_message = event.is_me_message;
         }
 
         var row = current_msg_list.get_row(event.message_id);
@@ -153,7 +158,9 @@ exports.update_messages = function update_messages(events) {
             if (going_forward_change && stream_name && compose_stream_name) {
                 if (stream_name.toLowerCase() === compose_stream_name.toLowerCase()) {
                     if (event.orig_subject === compose_state.subject()) {
+                        changed_compose = true;
                         compose_state.subject(event.subject);
+                        compose_fade.set_focused_recipient("stream");
                     }
                 }
             }
@@ -259,6 +266,13 @@ exports.update_messages = function update_messages(events) {
             home_msg_list.view.rerender_messages(msgs_to_rerender);
         }
     }
+
+    if (changed_compose) {
+        // We need to do this after we rerender the message list, to
+        // produce correct results.
+        compose_fade.update_message_list();
+    }
+
     unread_ui.update_unread_counts();
     stream_list.update_streams_sidebar();
     pm_list.update_private_messages();

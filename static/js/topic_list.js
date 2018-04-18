@@ -161,11 +161,6 @@ exports.widget = function (parent_elem, my_stream_id) {
         self.no_more_topics = true;
     };
 
-    self.show_help_link = function () {
-        var elem = self.dom.find('.sidebar-topics-help');
-        elem.show();
-    };
-
     self.build = function (active_topic, no_more_topics) {
         self.no_more_topics = false; // for now
 
@@ -184,10 +179,6 @@ exports.widget = function (parent_elem, my_stream_id) {
         // the initial zooming.
         if (no_more_topics) {
             self.show_no_more_topics();
-        }
-
-        if (zoomed) {
-            self.show_help_link();
         }
 
         if (active_topic) {
@@ -267,11 +258,11 @@ exports.zoom_in = function () {
             active_widget.show_no_more_topics();
         }
 
-        $('#stream-filters-container').perfectScrollbar('update');
+        ui.update_scrollbar($("#stream-filters-container"));
     }
 
     $('#stream-filters-container').scrollTop(0);
-    $('#stream-filters-container').perfectScrollbar('update');
+    ui.update_scrollbar($("#stream-filters-container"));
     active_widget.show_spinner();
     topic_data.get_server_history(stream_id, on_success);
 };

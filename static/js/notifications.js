@@ -16,6 +16,11 @@ var previous_favicon;
 var flashing = false;
 
 var notifications_api;
+
+exports.set_notification_api = function (n) {
+    notifications_api = n;
+};
+
 if (window.webkitNotifications) {
     notifications_api = window.webkitNotifications;
 } else if (window.Notification) {
@@ -57,6 +62,10 @@ function cancel_notification_object(notification_object) {
         notification_object.onclick = function () {};
         notification_object.close();
 }
+
+exports.get_notifications = function () {
+    return notice_memory;
+};
 
 exports.initialize = function () {
     $(window).focus(function () {
@@ -163,10 +172,17 @@ exports.redraw_title = function () {
         favicon.set(current_favicon);
     }
 
+    // window.bridge is for the legacy QT desktop app; we'll likely
+    // remove this code soon.
     if (window.bridge !== undefined) {
         // We don't use 'n' because we want the exact count. The bridge handles
         // which icon to show.
         window.bridge.updateCount(new_message_count);
+    }
+
+    // Notify the current desktop app's UI about the new unread count.
+    if (window.electron_bridge !== undefined) {
+        window.electron_bridge.send_event('total_unread_count', new_message_count);
     }
 };
 
@@ -374,6 +390,8 @@ function process_notification(notification) {
     }
 }
 
+exports.process_notification = process_notification;
+
 exports.close_notification = function (message) {
     _.each(Object.keys(notice_memory), function (key) {
        if (notice_memory[key].message_id === message.id) {
@@ -383,7 +401,7 @@ exports.close_notification = function (message) {
     });
 };
 
-function message_is_notifiable(message) {
+exports.message_is_notifiable = function (message) {
     // Independent of the user's notification settings, are there
     // properties of the message that unconditionally mean we
     // shouldn't notify about it.
@@ -423,7 +441,7 @@ function message_is_notifiable(message) {
     // Everything else is on the table; next filter based on notification
     // settings.
     return true;
-}
+};
 
 function should_send_desktop_notification(message) {
     // For streams, send if desktop notifications are enabled for this
@@ -496,13 +514,11 @@ exports.request_desktop_notifications_permission = function () {
 
 exports.received_messages = function (messages) {
     _.each(messages, function (message) {
-        if (!message_is_notifiable(message)) {
+        if (!exports.message_is_notifiable(message)) {
             return;
         }
-        // checking for unread flags here is basically proxy for
-        // "is Zulip currently in focus". In the case of auto-scroll forever,
-        // we don't care
-        if (!unread.message_unread(message) && !page_params.autoscroll_forever) {
+        if (!unread.message_unread(message)) {
+            // The message is already read; Zulip is currently in focus.
             return;
         }
 
@@ -664,6 +680,7 @@ exports.handle_global_notification_updates = function (notification_name, settin
     // Update the global settings checked when determining if we should notify
     // for a given message. These settings do not affect whether or not a
     // particular stream should receive notifications.
+<<<<<<< HEAD
     if (notification_name === "enable_stream_desktop_notifications") {
         page_params.enable_stream_desktop_notifications = setting;
     } else if (notification_name === "enable_stream_push_notifications") {
@@ -686,6 +703,10 @@ exports.handle_global_notification_updates = function (notification_name, settin
         page_params.pm_content_in_desktop_notifications = setting;
     } else if (notification_name === "enable_persistent_desktop_notifications") {
         page_params.persistent_desktop_notifications_enabled = setting;
+=======
+    if (settings_notifications.notification_settings.indexOf(notification_name) !== -1) {
+        page_params[notification_name] = setting;
+>>>>>>> a6a5636a326d41c82a21f5fe2b26463162b37621
     }
 };
 

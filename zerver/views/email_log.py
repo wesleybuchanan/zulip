@@ -3,9 +3,15 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render, redirect
 from django.test import Client
 from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import csrf_exempt
 
 from zerver.models import get_realm, get_user
 from zerver.lib.notifications import enqueue_welcome_emails
+from zerver.lib.response import json_success
+from zproject.email_backends import (
+    get_forward_address,
+    set_forward_address,
+)
 from six.moves import urllib
 from confirmation.models import Confirmation, confirmation_url
 
@@ -15,17 +21,20 @@ import datetime
 ZULIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../')
 client = Client()
 
-def email_page(request):
-    # type: (HttpRequest) -> HttpResponse
+def email_page(request: HttpRequest) -> HttpResponse:
+    if request.method == 'POST':
+        set_forward_address(request.POST["forward_address"])
+        return json_success()
     try:
         with open(settings.EMAIL_CONTENT_LOG_PATH, "r+") as f:
             content = f.read()
     except FileNotFoundError:
         content = ""
-    return render(request, 'zerver/email_log.html', {'log': content})
+    return render(request, 'zerver/email_log.html',
+                  {'log': content,
+                   'forward_address': get_forward_address()})
 
-def clear_emails(request):
-    # type: (HttpRequest) -> HttpResponse
+def clear_emails(request: HttpRequest) -> HttpResponse:
     try:
         os.remove(settings.EMAIL_CONTENT_LOG_PATH)
     except FileNotFoundError:  # nocoverage
@@ -33,8 +42,7 @@ def clear_emails(request):
     return redirect(email_page)
 
 @require_GET
-def generate_all_emails(request):
-    # type: (HttpRequest) -> HttpResponse
+def generate_all_emails(request: HttpRequest) -> HttpResponse:
 
     # write fake data for all variables
     registered_email = "hamlet@zulip.com"
@@ -56,17 +64,19 @@ def generate_all_emails(request):
     assert result.status_code == 302
 
     # New login email
-    logged_in = client.login(username=registered_email)
+    logged_in = client.login(dev_auth_username=registered_email, realm=realm)
     assert logged_in
 
     # New user invite and reminder emails
     result = client.post("/json/invites",
-                         {"invitee_emails": unregistered_email_2, "stream": ["Denmark"], "custom_body": ""},
+                         {"invitee_emails": unregistered_email_2, "stream": ["Denmark"]},
                          **host_kwargs)
     assert result.status_code == 200
 
     # Verification for new email
-    result = client.patch('/json/settings', urllib.parse.urlencode({'email': 'hamlets-new@zulip.com'}), **host_kwargs)
+    result = client.patch('/json/settings',
+                          urllib.parse.urlencode({'email': 'hamlets-new@zulip.com'}),
+                          **host_kwargs)
     assert result.status_code == 200
 
     # Email change successful
@@ -74,9 +84,11 @@ def generate_all_emails(request):
     url = confirmation_url(key, realm.host, Confirmation.EMAIL_CHANGE)
     user_profile = get_user(registered_email, realm)
     result = client.get(url)
-    assert result.status_code == 302
-    user_profile.emails = "hamlet@zulip.com"
-    user_profile.save()
+    assert result.status_code == 200
+
+    # Reset the email value so we can run this again
+    user_profile.email = registered_email
+    user_profile.save(update_fields=['email'])
 
     # Follow up day1 day2 emails
     enqueue_welcome_emails(user_profile)

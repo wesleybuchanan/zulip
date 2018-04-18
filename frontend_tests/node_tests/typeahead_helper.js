@@ -1,18 +1,20 @@
-var th = require('js/typeahead_helper.js');
-
 set_global('page_params', {realm_is_zephyr_mirror_realm: false});
 set_global('templates', {});
-
-add_dependencies({
-    stream_data: 'js/stream_data.js',
-    people: 'js/people.js',
-    util: 'js/util.js',
-    Handlebars: 'handlebars',
-    recent_senders: 'js/recent_senders.js',
-    pm_conversations: 'js/pm_conversations.js',
-    message_store: 'js/message_store.js',
-    typeahead_helper: 'js/typeahead_helper.js',
+set_global('md5', function (s) {
+    return 'md5-' + s;
 });
+
+zrequire('Handlebars', 'handlebars');
+zrequire('recent_senders');
+zrequire('pm_conversations');
+zrequire('people');
+zrequire('util');
+zrequire('stream_data');
+zrequire('narrow');
+zrequire('hash_util');
+zrequire('marked', 'third/marked/lib/marked');
+var _ = require('node_modules/underscore/underscore.js');
+var th = zrequire('typeahead_helper');
 
 stream_data.create_streams([
     {name: 'Dev', subscribed: true, color: 'blue', stream_id: 1},
@@ -29,12 +31,13 @@ stream_data.create_streams([
     }};
 
     var test_streams = [
-        {name: 'Dev', pin_to_top: false, subscribers: unpopular},
-        {name: 'Docs', pin_to_top: false, subscribers: popular},
-        {name: 'Derp', pin_to_top: false, subscribers: unpopular},
-        {name: 'Denmark', pin_to_top: true, subscribers: popular},
-        {name: 'dead', pin_to_top: false, subscribers: unpopular},
+        {name: 'Dev', pin_to_top: false, subscribers: unpopular, subscribed: true},
+        {name: 'Docs', pin_to_top: false, subscribers: popular, subscribed: true},
+        {name: 'Derp', pin_to_top: false, subscribers: unpopular, subscribed: true},
+        {name: 'Denmark', pin_to_top: true, subscribers: popular, subscribed: true},
+        {name: 'dead', pin_to_top: false, subscribers: unpopular, subscribed: true},
     ];
+    _.each(test_streams, stream_data.update_calculated_fields);
 
     global.stream_data.is_active = function (sub) {
         return sub.name !== 'dead';
@@ -49,18 +52,38 @@ stream_data.create_streams([
 
     // Test sort streams with description
     test_streams = [
-        {name: 'Dev', description: 'development help', subscribers: unpopular},
-        {name: 'Docs', description: 'writing docs', subscribers: popular},
-        {name: 'Derp', description: 'derping around', subscribers: unpopular},
-        {name: 'Denmark', description: 'visiting Denmark', subscribers: popular},
-        {name: 'dead', description: 'dead stream', subscribers: unpopular},
+        {name: 'Dev', description: 'development help', subscribers: unpopular, subscribed: true},
+        {name: 'Docs', description: 'writing docs', subscribers: popular, subscribed: true},
+        {name: 'Derp', description: 'derping around', subscribers: unpopular, subscribed: true},
+        {name: 'Denmark', description: 'visiting Denmark', subscribers: popular, subscribed: true},
+        {name: 'dead', description: 'dead stream', subscribers: unpopular, subscribed: true},
     ];
+    _.each(test_streams, stream_data.update_calculated_fields);
     test_streams = th.sort_streams(test_streams, 'wr');
     assert.deepEqual(test_streams[0].name, "Docs"); // Description match
     assert.deepEqual(test_streams[1].name, "Denmark"); // Popular stream
     assert.deepEqual(test_streams[2].name, "Derp"); // Less subscribers
     assert.deepEqual(test_streams[3].name, "Dev"); // Alphabetically last
     assert.deepEqual(test_streams[4].name, "dead"); // Inactive streams last
+
+    // Test sort both subscribed and unsubscribed streams.
+    test_streams = [
+        {name: 'Dev', description: 'Some devs', subscribed: true, subscribers: popular},
+        {name: 'East', description: 'Developing east', subscribed: true, subscribers: popular},
+        {name: 'New', description: 'No match', subscribed: true, subscribers: popular},
+        {name: 'Derp', description: 'Always Derping', subscribed: false, subscribers: popular},
+        {name: 'Ether', description: 'Destroying ether', subscribed: false, subscribers: popular},
+        {name: 'Mew', description: 'Cat mews', subscribed: false, subscribers: popular},
+    ];
+    _.each(test_streams, stream_data.update_calculated_fields);
+
+    test_streams = th.sort_streams(test_streams, 'd');
+    assert.deepEqual(test_streams[0].name, "Dev"); // Subscribed and stream name starts with query
+    assert.deepEqual(test_streams[1].name, "Derp"); // Unsubscribed and stream name starts with query
+    assert.deepEqual(test_streams[2].name, "East"); // Subscribed and description starts with query
+    assert.deepEqual(test_streams[3].name, "Ether"); // Unsubscribed and description starts with query
+    assert.deepEqual(test_streams[4].name, "New"); // Subscribed and no match
+    assert.deepEqual(test_streams[5].name, "Mew"); // Unsubscribed and no match
 }());
 
 (function test_sort_languages() {
@@ -174,6 +197,11 @@ _.each(matches, function (person) {
     stream_data.add_subscriber("Dev", people.get_user_id(subscriber_email_2));
     stream_data.add_subscriber("Dev", people.get_user_id(subscriber_email_3));
 
+    var dev_sub = stream_data.get_sub("Dev");
+    var linux_sub = stream_data.get_sub("Linux");
+    stream_data.update_calculated_fields(dev_sub);
+    stream_data.update_calculated_fields(linux_sub);
+
     // For spliting based on whether a PM was sent
     global.pm_conversations.set_partner(5);
     global.pm_conversations.set_partner(6);
@@ -185,19 +213,19 @@ _.each(matches, function (person) {
         sender_id : 7,
         stream_id : 1,
         subject : "Dev Topic",
-        timestamp : _.uniqueId(),
+        id : _.uniqueId(),
     });
     global.recent_senders.process_message_for_senders({
         sender_id : 5,
         stream_id : 1,
         subject : "Dev Topic",
-        timestamp : _.uniqueId(),
+        id : _.uniqueId(),
     });
     global.recent_senders.process_message_for_senders({
         sender_id : 6,
         stream_id : 1,
         subject : "Dev Topic",
-        timestamp : _.uniqueId(),
+        id : _.uniqueId(),
     });
 
     // Typeahead for stream message [query, stream-name, topic-name]
@@ -215,13 +243,13 @@ _.each(matches, function (person) {
         sender_id : 5,
         stream_id : 2,
         subject : "Linux Topic",
-        timestamp : _.uniqueId(),
+        id : _.uniqueId(),
     });
     global.recent_senders.process_message_for_senders({
         sender_id : 7,
         stream_id : 2,
         subject : "Linux Topic",
-        timestamp : _.uniqueId(),
+        id : _.uniqueId(),
     });
 
     // No match
@@ -402,6 +430,32 @@ _.each(matches, function (person) {
     };
     assert.equal(th.render_person(special_person), 'typeahead-item-stub');
     assert(rendered);
+}());
+
+(function test_clear_rendered_person() {
+    var rendered = false;
+    global.templates.render = function (template_name, args) {
+        assert.equal(template_name, 'typeahead_list_item');
+        assert.equal(args.primary, matches[5].full_name);
+        assert.equal(args.secondary, matches[5].email);
+        rendered = true;
+        return 'typeahead-item-stub';
+    };
+    assert.equal(th.render_person(matches[5]), 'typeahead-item-stub');
+    assert(rendered);
+
+    // Bot once rendered won't be rendered again until clear_rendered_person
+    // function is called. clear_rendered_person is used to clear rendered
+    // data once bot name is modified.
+    rendered = false;
+    assert.equal(th.render_person(matches[5]), 'typeahead-item-stub');
+    assert.equal(rendered, false);
+
+    // Here rendered will be true as it is being rendered again.
+    th.clear_rendered_person(matches[5].user_id);
+    assert.equal(th.render_person(matches[5]), 'typeahead-item-stub');
+    assert(rendered);
+
 }());
 
 (function test_render_stream() {

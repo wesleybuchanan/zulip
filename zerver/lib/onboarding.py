@@ -4,17 +4,35 @@ from django.conf import settings
 from zerver.lib.actions import set_default_streams, bulk_add_subscriptions, \
     internal_prep_stream_message, internal_send_private_message, \
     create_stream_if_needed, create_streams_if_needed, do_send_messages, \
-    do_add_reaction
+    do_add_reaction_legacy, create_users
 from zerver.models import Realm, UserProfile, Message, Reaction, get_system_bot
 
 from typing import Any, Dict, List, Mapping, Text
 
-def send_initial_pms(user):
-    # type: (UserProfile) -> None
+def setup_realm_internal_bots(realm: Realm) -> None:
+    """Create this realm's internal bots.
+
+    This function is idempotent; it does nothing for a bot that
+    already exists.
+    """
+    internal_bots = [(bot['name'], bot['email_template'] % (settings.INTERNAL_BOT_DOMAIN,))
+                     for bot in settings.REALM_INTERNAL_BOTS]
+    create_users(realm, internal_bots, bot_type=UserProfile.DEFAULT_BOT)
+    bots = UserProfile.objects.filter(
+        realm=realm,
+        email__in=[bot_info[1] for bot_info in internal_bots],
+        bot_owner__isnull=True
+    )
+    for bot in bots:
+        bot.bot_owner = bot
+        bot.save()
+
+def send_initial_pms(user: UserProfile) -> None:
     organization_setup_text = ""
     if user.is_realm_admin:
-        organization_setup_text = "* [Read the guide](%s) for getting your organization started with Zulip\n" \
-                                  % (user.realm.uri + "/help/getting-your-organization-started-with-zulip",)
+        help_url = user.realm.uri + "/help/getting-your-organization-started-with-zulip"
+        organization_setup_text = ("* [Read the guide](%s) for getting your organization "
+                                   "started with Zulip\n" % (help_url,))
 
     content = (
         "Hello, and welcome to Zulip!\n\nThis is a private message from me, Welcome Bot. "
@@ -32,8 +50,7 @@ def send_initial_pms(user):
     internal_send_private_message(user.realm, get_system_bot(settings.WELCOME_BOT),
                                   user, content)
 
-def setup_initial_streams(realm):
-    # type: (Realm) -> None
+def setup_initial_streams(realm: Realm) -> None:
     stream_dicts = [
         {'name': "general"},
         {'name': "new members",
@@ -45,15 +62,7 @@ def setup_initial_streams(realm):
     create_streams_if_needed(realm, stream_dicts)
     set_default_streams(realm, {stream['name']: {} for stream in stream_dicts})
 
-# For the first user in a realm
-def setup_initial_private_stream(user):
-    # type: (UserProfile) -> None
-    stream, _ = create_stream_if_needed(user.realm, "core team", invite_only=True,
-                                        stream_description="A private stream for core team members.")
-    bulk_add_subscriptions([stream], [user])
-
-def send_initial_realm_messages(realm):
-    # type: (Realm) -> None
+def send_initial_realm_messages(realm: Realm) -> None:
     welcome_bot = get_system_bot(settings.WELCOME_BOT)
     # Make sure each stream created in the realm creation process has at least one message below
     # Order corresponds to the ordering of the streams on the left sidebar, to make the initial Home
@@ -63,7 +72,7 @@ def send_initial_realm_messages(realm):
          'topic': "welcome",
          'content': "This is a message on stream `%s` with the topic `welcome`. We'll use this stream "
          "for system-generated notifications." % (Realm.DEFAULT_NOTIFICATION_STREAM_NAME,)},
-        {'stream': "core team",
+        {'stream': Realm.INITIAL_PRIVATE_STREAM_NAME,
          'topic': "private streams",
          'content': "This is a private stream. Only admins and people you invite "
          "to the stream will be able to see that this stream exists."},
@@ -100,4 +109,4 @@ def send_initial_realm_messages(realm):
         id__in=message_ids,
         subject='topic demonstration',
         content__icontains='cute/turtle.png')
-    do_add_reaction(welcome_bot, turtle_message, 'turtle')
+    do_add_reaction_legacy(welcome_bot, turtle_message, 'turtle')

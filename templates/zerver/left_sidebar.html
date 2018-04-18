@@ -7,18 +7,19 @@
                     <span class="filter-icon">
                         <i class="icon-vector-home"></i>
                     </span>
-                    {{ _('Home') }}
+                    <span class="hover-underline">{{ _('All messages') }}</span>
                     <span class="count">
                         <span class="value"></span>
                     </span>
                 </a>
+                <span class="arrow stream-sidebar-arrow"><i class="icon-vector-chevron-down"></i></span>
             </li>
             <li data-name="private" class="global-filter" title="{{ _('Private messages') }} (P)">
                 <a href="#narrow/is/private">
                     <span class="filter-icon">
                         <i class="icon-vector-envelope"></i>
                     </span>
-                    <span>{{ _('Private messages') }}</span>
+                    <span class="hover-underline">{{ _('Private messages') }}</span>
                     <span class="count">
                         <span class="value"></span>
                     </span>
@@ -29,7 +30,7 @@
                     <span class="filter-icon">
                         <i class="icon-vector-star"></i>
                     </span>
-                    {{ _('Starred messages') }}
+                    <span class="hover-underline">{{ _('Starred messages') }}</span>
                 </a>
             </li>
             <li data-name="mentioned" class="global-filter">
@@ -37,7 +38,7 @@
                     <span class="filter-icon">
                         <i class="fa fa-at"></i>
                     </span>
-                    {{ _('Mentions') }}
+                    <span class="hover-underline">{{ _('Mentions') }}</span>
                     <span class="count">
                         <span class="value"></span>
                     </span>
@@ -56,10 +57,9 @@
              </li>
         </ul>
         <div id="streams_list" class="zoom-out">
-            <div id="streams_header" class="zoom-in-hide"><h4 class="sidebar-title" data-toggle="tooltip" title="{{ _('Subscribed streams') }}"><a href="">{{ _('STREAMS') }}</a></h4>
+            <div id="streams_header" class="zoom-in-hide"><h4 class="sidebar-title" data-toggle="tooltip" title="{{ _('Subscribed streams') }}">{{ _('STREAMS') }}</h4>
                 <i id="streams_inline_cog" class='icon-vector-cog' data-toggle="tooltip" title="{{ _('Subscribe, add, or configure streams') }}"></i>
                 <i id="streams_filter_icon" class='icon-vector-search' data-toggle="tooltip" title="{{ _('Filter streams') }} (q)"></i>
-                <i id="join_unsub_stream" class="icon-vector-plus" data-toggle="tooltip" title="{{ _('Join stream')}}" ></i>
                 <i id="mute_notifications_icon" class="icon-vector-bell" data-toggle="tooltip" type="checkbox" title="{{ _('Mute Notifications') }}"></i>
             </div>
             <div id="topics_header">
@@ -68,7 +68,7 @@
             <div id="stream-filters-container" class="scrolling_list">
                 <div class="input-append notdisplayed">
                     <input class="stream-list-filter" type="text" placeholder="{{ _('Search streams') }}" />
-                    <button type="button" class="btn clear_search_button" id="clear_search_stream_button" disabled="disabled">
+                    <button type="button" class="btn clear_search_button" id="clear_search_stream_button">
                         <i class="icon-vector-remove"></i>
                     </button>
                 </div>

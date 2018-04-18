@@ -1,25 +1,19 @@
 
-from django.db import connection
-from django.conf import settings
-from django.utils.timezone import now as timezone_now
-
-from typing import Any, List, Dict
-from argparse import ArgumentParser
-from six.moves import map
 import sys
+from argparse import ArgumentParser
+from typing import Any, Dict, List
 
-from zerver.models import UserProfile, UserMessage, Realm, RealmAuditLog
-from zerver.lib.soft_deactivation import (
-    do_soft_deactivate_users, do_soft_activate_users,
-    get_users_for_soft_deactivation, logger
-)
+from django.conf import settings
+
 from zerver.lib.management import ZulipBaseCommand
+from zerver.lib.soft_deactivation import do_soft_activate_users, \
+    do_soft_deactivate_users, get_users_for_soft_deactivation, logger
+from zerver.models import Realm, UserProfile
 
 class Command(ZulipBaseCommand):
     help = """Soft activate/deactivate users. Users are recognised by there emails here."""
 
-    def add_arguments(self, parser):
-        # type: (ArgumentParser) -> None
+    def add_arguments(self, parser: ArgumentParser) -> None:
         self.add_realm_args(parser)
         parser.add_argument('-d', '--deactivate',
                             dest='deactivate',
@@ -34,12 +28,11 @@ class Command(ZulipBaseCommand):
         parser.add_argument('--inactive-for',
                             type=int,
                             default=28,
-                            help='Specify the number of days of user inactivity that user should be marked soft_deactviated')
+                            help='Number of days of inactivity before soft-deactivation')
         parser.add_argument('users', metavar='<users>', type=str, nargs='*', default=[],
-                            help="This option can be used to specify a list of user emails to soft activate/deactivate.")
+                            help="A list of user emails to soft activate/deactivate.")
 
-    def handle(self, *args, **options):
-        # type: (*Any, **str) -> None
+    def handle(self, *args: Any, **options: str) -> None:
         if settings.STAGING:
             print('This is a Staging server. Suppressing management command.')
             sys.exit(0)
@@ -69,7 +62,8 @@ class Command(ZulipBaseCommand):
                 user_emails_found = [user.email for user in users_to_activate]
                 for user in user_emails:
                     if user not in user_emails_found:
-                        raise Exception('User with email %s was not found. Check if the email is correct.' % (user))
+                        raise Exception('User with email %s was not found. '
+                                        'Check if the email is correct.' % (user))
 
             users_activated = do_soft_activate_users(users_to_activate)
             logger.info('Soft Reactivated %d user(s)' % (len(users_activated)))
@@ -85,12 +79,14 @@ class Command(ZulipBaseCommand):
                     user_emails_found = [user.email for user in users_to_deactivate]
                     for user in user_emails:
                         if user not in user_emails_found:
-                            raise Exception('User with email %s was not found. Check if the email is correct.' % (user))
+                            raise Exception('User with email %s was not found. '
+                                            'Check if the email is correct.' % (user,))
                 print('Soft deactivating forcefully...')
             else:
                 if realm is not None:
                     filter_kwargs = dict(user_profile__realm=realm)
-                users_to_deactivate = get_users_for_soft_deactivation(int(options['inactive_for']), filter_kwargs)
+                users_to_deactivate = get_users_for_soft_deactivation(int(options['inactive_for']),
+                                                                      filter_kwargs)
 
             if users_to_deactivate:
                 users_deactivated = do_soft_deactivate_users(users_to_deactivate)

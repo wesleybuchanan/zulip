@@ -4,28 +4,31 @@ from django.template import loader
 from django.utils.timezone import now as timezone_now
 from django.template.exceptions import TemplateDoesNotExist
 from zerver.models import UserProfile, ScheduledEmail, get_user_profile_by_id, \
-    EMAIL_TYPES
+    EMAIL_TYPES, Realm
 
 import datetime
 from email.utils import parseaddr, formataddr
+import logging
 import ujson
 
 import os
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Text
 
-from zerver.lib.logging_util import create_logger
+from zerver.lib.logging_util import log_to_file
 
 ## Logging setup ##
 
-logger = create_logger('zulip.send_email', settings.EMAIL_LOG_PATH, 'INFO')
+logger = logging.getLogger('zulip.send_email')
+log_to_file(logger, settings.EMAIL_LOG_PATH)
 
-class FromAddress(object):
+class FromAddress:
     SUPPORT = parseaddr(settings.ZULIP_ADMINISTRATOR)[1]
     NOREPLY = parseaddr(settings.NOREPLY_EMAIL_ADDRESS)[1]
 
-def build_email(template_prefix, to_user_id=None, to_email=None, from_name=None,
-                from_address=None, reply_to_email=None, context=None):
-    # type: (str, Optional[int], Optional[Text], Optional[Text], Optional[Text], Optional[Text], Optional[Dict[str, Any]]) -> EmailMultiAlternatives
+def build_email(template_prefix: str, to_user_id: Optional[int]=None,
+                to_email: Optional[Text]=None, from_name: Optional[Text]=None,
+                from_address: Optional[Text]=None, reply_to_email: Optional[Text]=None,
+                context: Optional[Dict[str, Any]]=None) -> EmailMultiAlternatives:
     # Callers should pass exactly one of to_user_id and to_email.
     assert (to_user_id is None) ^ (to_email is None)
     if to_user_id is not None:
@@ -38,7 +41,6 @@ def build_email(template_prefix, to_user_id=None, to_email=None, from_name=None,
         context = {}
 
     context.update({
-        'realm_name_in_notifications': False,
         'support_email': FromAddress.SUPPORT,
         'email_images_base_uri': settings.ROOT_DOMAIN_URI + '/static/images/emails',
         'physical_address': settings.PHYSICAL_ADDRESS,
@@ -81,9 +83,9 @@ class EmailNotDeliveredException(Exception):
 
 # When changing the arguments to this function, you may need to write a
 # migration to change or remove any emails in ScheduledEmail.
-def send_email(template_prefix, to_user_id=None, to_email=None, from_name=None,
-               from_address=None, reply_to_email=None, context={}):
-    # type: (str, Optional[int], Optional[Text], Optional[Text], Optional[Text], Optional[Text], Dict[str, Any]) -> None
+def send_email(template_prefix: str, to_user_id: Optional[int]=None, to_email: Optional[Text]=None,
+               from_name: Optional[Text]=None, from_address: Optional[Text]=None,
+               reply_to_email: Optional[Text]=None, context: Dict[str, Any]={}) -> None:
     mail = build_email(template_prefix, to_user_id=to_user_id, to_email=to_email, from_name=from_name,
                        from_address=from_address, reply_to_email=reply_to_email, context=context)
     template = template_prefix.split("/")[-1]
@@ -93,13 +95,13 @@ def send_email(template_prefix, to_user_id=None, to_email=None, from_name=None,
         logger.error("Error sending %s email to %s" % (template, mail.to))
         raise EmailNotDeliveredException
 
-def send_email_from_dict(email_dict):
-    # type: (Mapping[str, Any]) -> None
+def send_email_from_dict(email_dict: Mapping[str, Any]) -> None:
     send_email(**dict(email_dict))
 
-def send_future_email(template_prefix, to_user_id=None, to_email=None, from_name=None,
-                      from_address=None, context={}, delay=datetime.timedelta(0)):
-    # type: (str, Optional[int], Optional[Text], Optional[Text], Optional[Text], Dict[str, Any], datetime.timedelta) -> None
+def send_future_email(template_prefix: str, realm: Realm, to_user_id: Optional[int]=None,
+                      to_email: Optional[Text]=None, from_name: Optional[Text]=None,
+                      from_address: Optional[Text]=None, context: Dict[str, Any]={},
+                      delay: datetime.timedelta=datetime.timedelta(0)) -> None:
     template_name = template_prefix.split('/')[-1]
     email_fields = {'template_prefix': template_prefix, 'to_user_id': to_user_id, 'to_email': to_email,
                     'from_name': from_name, 'from_address': from_address, 'context': context}
@@ -111,6 +113,9 @@ def send_future_email(template_prefix, to_user_id=None, to_email=None, from_name
 
     assert (to_user_id is None) ^ (to_email is None)
     if to_user_id is not None:
+        # The realm is redundant if we have a to_user_id; this assert just
+        # expresses that fact
+        assert(UserProfile.objects.filter(id=to_user_id, realm=realm).exists())
         to_field = {'user_id': to_user_id}  # type: Dict[str, Any]
     else:
         to_field = {'address': parseaddr(to_email)[1]}
@@ -118,5 +123,6 @@ def send_future_email(template_prefix, to_user_id=None, to_email=None, from_name
     ScheduledEmail.objects.create(
         type=EMAIL_TYPES[template_name],
         scheduled_timestamp=timezone_now() + delay,
+        realm=realm,
         data=ujson.dumps(email_fields),
         **to_field)

@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
-from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_stream_message
-from zerver.lib.response import json_success, json_error
-from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-from zerver.models import UserProfile
-from zerver.lib.webhooks.git import get_push_commits_event_message, \
-    get_pull_request_event_message, get_create_branch_event_message, \
-    SUBJECT_WITH_BRANCH_TEMPLATE, SUBJECT_WITH_PR_OR_ISSUE_INFO_TEMPLATE
+from typing import Any, Dict, Iterable, Optional, Text
 
 from django.http import HttpRequest, HttpResponse
-from typing import Dict, Any, Iterable, Optional, Text
+from django.utils.translation import ugettext as _
 
-def format_push_event(payload):
-    # type: (Dict[str, Any]) -> Text
+from zerver.decorator import api_key_only_webhook_view
+from zerver.lib.request import REQ, has_request_variables
+from zerver.lib.response import json_error, json_success
+from zerver.lib.webhooks.common import check_send_webhook_message
+from zerver.lib.webhooks.git import SUBJECT_WITH_BRANCH_TEMPLATE, \
+    SUBJECT_WITH_PR_OR_ISSUE_INFO_TEMPLATE, get_create_branch_event_message, \
+    get_pull_request_event_message, get_push_commits_event_message
+from zerver.models import UserProfile
+
+def format_push_event(payload: Dict[str, Any]) -> Text:
 
     for commit in payload['commits']:
         commit['sha'] = commit['id']
@@ -29,8 +30,7 @@ def format_push_event(payload):
 
     return get_push_commits_event_message(**data)
 
-def format_new_branch_event(payload):
-    # type: (Dict[str, Any]) -> Text
+def format_new_branch_event(payload: Dict[str, Any]) -> Text:
 
     branch_name = payload['ref']
     url = '{}/src/{}'.format(payload['repository']['html_url'], branch_name)
@@ -42,8 +42,7 @@ def format_new_branch_event(payload):
     }
     return get_create_branch_event_message(**data)
 
-def format_pull_request_event(payload):
-    # type: (Dict[str, Any]) -> Text
+def format_pull_request_event(payload: Dict[str, Any]) -> Text:
 
     data = {
         'user_name': payload['pull_request']['user']['username'],
@@ -62,11 +61,9 @@ def format_pull_request_event(payload):
 
 @api_key_only_webhook_view('Gogs')
 @has_request_variables
-def api_gogs_webhook(request, user_profile,
-                     payload=REQ(argument_type='body'),
-                     stream=REQ(default='commits'),
-                     branches=REQ(default=None)):
-    # type: (HttpRequest, UserProfile, Dict[str, Any], Text, Optional[Text]) -> HttpResponse
+def api_gogs_webhook(request: HttpRequest, user_profile: UserProfile,
+                     payload: Dict[str, Any]=REQ(argument_type='body'),
+                     branches: Optional[Text]=REQ(default=None)) -> HttpResponse:
 
     repo = payload['repository']['name']
     event = request.META['HTTP_X_GOGS_EVENT']
@@ -96,5 +93,5 @@ def api_gogs_webhook(request, user_profile,
     else:
         return json_error(_('Invalid event "{}" in request headers').format(event))
 
-    check_send_stream_message(user_profile, request.client, stream, topic, body)
+    check_send_webhook_message(request, user_profile, topic, body)
     return json_success()

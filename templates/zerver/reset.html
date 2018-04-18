@@ -12,14 +12,14 @@
 
             <p>Forgot your password? No problem, we'll send a link to reset your password to the email you signed up with.</p>
 
-            <form method="post" class="form-horizontal" action="{{ url('django.contrib.auth.views.password_reset') }}">
+            <form method="post" class="form-horizontal" action="{{ url('zerver.views.auth.password_reset') }}">
                 {{ csrf_input }}
                 <div class="new-style">
                     <div class="input-box horizontal moving-label">
                         <div class="inline-block relative">
                             <input id="id_email" class="required" type="text" name="email"
-                                   value="{% if form.email.value() %}{{ form.email.value() }}{% endif %}"
-                                   maxlength="100" required />
+                              value="{% if form.email.value() %}{{ form.email.value() }}{% endif %}"
+                              maxlength="100" required />
                             <label for="id_email" class="">{{ _('Email') }}</label>
                             {% if form.email.errors %}
                                 {% for error in form.email.errors %}

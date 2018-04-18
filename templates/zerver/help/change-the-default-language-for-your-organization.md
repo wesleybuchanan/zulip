@@ -2,9 +2,9 @@
 
 {!admin-only.md!}
 
-{!follow-steps.md!} change the default language of your organization.
+Follow the following steps to change the default language of your organization.
 
-{!go-to-the.md!} [Organization settings](/#organization/organization-settings)
+1. Go to the [Organization settings](/#organization/organization-settings)
 {!admin.md!}
 
 2. Find and click on the **Default language** option under the

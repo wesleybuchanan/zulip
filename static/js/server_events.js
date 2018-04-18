@@ -95,6 +95,7 @@ function get_events_success(events) {
         messages = _.sortBy(messages, 'id');
         try {
             messages = echo.process_from_server(messages);
+            _.each(messages, message_store.set_message_booleans);
             message_events.insert_new_messages(messages);
         } catch (ex2) {
             blueslip.error('Failed to insert new messages\n' +
@@ -154,6 +155,9 @@ function get_events(options) {
     if (get_events_timeout !== undefined) {
         clearTimeout(get_events_timeout);
     }
+
+    get_events_params.client_gravatar = true;
+
     get_events_timeout = undefined;
     get_events_xhr = channel.get({
         url:      '/json/events',

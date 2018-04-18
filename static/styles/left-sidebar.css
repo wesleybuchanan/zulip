@@ -11,25 +11,34 @@
 }
 
 #streams_inline_cog,
+<<<<<<< HEAD
 #streams_filter_icon,
 #mute_notifications_icon,
 #join_unsub_stream {
+=======
+#streams_filter_icon {
+>>>>>>> a6a5636a326d41c82a21f5fe2b26463162b37621
     float: right;
-    color: hsl(0, 0%, 54%);
+    opacity: 0.50;
     font-size: 13px;
     margin-top: 3px;
     margin-left: 10px;
 }
 
 #streams_inline_cog:hover,
+<<<<<<< HEAD
 #streams_filter_icon:hover,
 #mute_notifications_icon:hover,
 #join_unsub_stream:hover {
     color: hsl(0, 0%, 33%);
+=======
+#streams_filter_icon:hover {
+    opacity: 1;
+>>>>>>> a6a5636a326d41c82a21f5fe2b26463162b37621
     cursor: pointer;
 }
 
-#streams_header #join_unsub_stream {
+#streams_header {
     margin-top: 3px;
 }
 
@@ -50,13 +59,21 @@
 
 #stream_filters {
     overflow: visible;
-    margin: 2px 0px 2px 0px;
+    margin: 2px 0px 22px 0px;
     padding: 0;
     font-weight: normal;
 }
 
+.left-sidebar li {
+    margin: 1px 0px;
+}
+
+.left-sidebar li a:hover {
+    text-decoration: none;
+}
+
 #stream_filters li {
-    padding: 0px;
+    padding: 1px 0px;
 }
 
 #stream_filters li ul {
@@ -64,7 +81,7 @@
 }
 
 #stream_filters li ul.topic-list li {
-    padding-left: 29px;
+    padding: 2px 0px 2px 29px;
 }
 
 #stream-filters-container {
@@ -75,21 +92,13 @@
     width: 100%;
 }
 
-#stream-filters-container .ps-scrollbar-y-rail {
-    right: 0px !important;
-    width: 4px !important;
-}
-
-#stream-filters-container .ps-scrollbar-y {
-    width: 4px !important;
-}
-
-.stream-list-filter {
-    margin-left: 1ex;
+.input-append input[type=text].stream-list-filter {
+    margin-left: 10px;
 }
 
 #global_filters li:hover,
-#stream_filters li:hover {
+#stream_filters li:hover,
+#stream_filters li.highlighted_stream {
     background-color: hsl(93, 19%, 88%);
 }
 
@@ -103,7 +112,7 @@ ul.filters {
 }
 
 ul.filters a {
-    color: hsl(0, 0%, 20%);
+    color: inherit;
 }
 
 ul.filters hr {
@@ -124,12 +133,7 @@ li.active-sub-filter {
 }
 
 .left-sidebar .sidebar-title:hover {
-    color: hsl(0, 0%, 33%);
-}
-
-li.hidden-filter {
-    visibility: hidden;
-    display: none;
+    opacity: 1;
 }
 
 #left-sidebar .filter-icon {
@@ -146,13 +150,14 @@ li.hidden-filter {
 
 #global_filters .global-filter {
     position: relative;
-    padding-left: 10px;
-    padding-right: 10px;
+    padding: 1px 10px;
 }
 
 .left-sidebar li {
     padding-top: 2px;
     padding-bottom: 2px;
+
+    border-radius: 4px;
 }
 
 #global_filters .global-filter i {
@@ -161,6 +166,10 @@ li.hidden-filter {
 
 #global_filters .global-filter a {
     display: block;
+}
+
+.left-sidebar li a.conversation-partners:hover {
+    text-decoration: underline;
 }
 
 #global_filters .global-filter i.icon-vector-home {
@@ -178,12 +187,10 @@ li.hidden-filter {
 #global_filters .count,
 #stream_filters .count {
     float: right;
-    margin-top: 3px;
     line-height: 12px;
     background: hsl(105, 2%, 50%);
-    padding: 1px 4px 2px 4px;
-    border-radius: 0px;
-    color: #ffffff;
+    padding: 1px 4px;
+    color: hsl(0, 0%, 100%);
     font-size: 12px;
     font-weight: normal;
     letter-spacing: 0.6px;
@@ -192,10 +199,10 @@ li.hidden-filter {
 
 #global_filters .count {
     margin-right: 20px;
-    margin-top: 2px;
+    margin-top: 3px;
     display: none;
 
-    line-height: 13px;
+    line-height: 12px;
 }
 
 #stream_filters .count {
@@ -204,41 +211,35 @@ li.hidden-filter {
 
 .topic-box {
     padding-left: 5px;
+    margin-right: 30px;
 }
 
+.conversation-partners,
 .topic-name {
     display: block;
-    line-height: 1.3em;
-    width: 100%;
-    max-width: 158px;
+    line-height: 1.1;
+    width: calc(100% - 5px);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    padding-right: 2px;
+}
+
+.left-sidebar li a.topic-name:hover {
+    text-decoration: underline;
 }
 
 .topic-unread-count,
 .private_message_count {
-    display: block;
-    position: absolute;
     line-height: 1em;
-    top: 4px;
-    padding: 1px 4px 2px 4px;
+    padding: 1px 4px 1px 4px;
     background: hsl(107, 5%, 66%);
-    color: #ffffff;
+    color: hsl(0, 0%, 100%);
     border-radius: 1px;
     font-size: 12px;
     font-weight: normal;
     letter-spacing: 0.6px;
     border-radius: 4px;
-}
-
-.topic-unread-count {
-    right: 30px;
-    top: 2px;
-}
-
-.private_message_count {
-    right: 20px;
 }
 
 ul.filters i {
@@ -303,9 +304,15 @@ ul.filters li.out_of_home_view li.muted_topic {
 }
 
 #stream_filters .subscription_block {
-    padding: 1px 0px;
-    margin-right: 18px;
+    padding: 0px;
+    margin-right: 25px;
     margin-left: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #stream_filters .subscription_block::after {
@@ -315,7 +322,13 @@ ul.filters li.out_of_home_view li.muted_topic {
 }
 
 #stream_filters .subscription_block .stream-name {
-    overflow-wrap: break-word;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.1;
+    position: relative;
+    width: 100%;
+    padding-right: 2px;
 }
 
 #stream_filters .subscription_block.stream-with-count {
@@ -344,10 +357,6 @@ ul.filters li.out_of_home_view li.muted_topic {
 ul.topic-list {
     list-style-type: none;
     font-weight: normal;
-}
-
-#streams_header a {
-    text-decoration: none;
 }
 
 ul.expanded_private_messages {
@@ -382,14 +391,15 @@ li.expanded_private_message a {
 
 .pm-box,
 .topic-box {
-    display: block;
-    margin-right: 38px;
+    display: flex;
+    justify-content: center;
     padding-top: 1px;
     cursor: pointer;
 }
 
 .pm-box {
-    line-height: 1;
+    margin-right: 20px;
+    align-items: center;
 }
 
 .zero-subject-unreads .pm-box,
@@ -403,6 +413,10 @@ li.expanded_private_message a {
 
 #global_filters {
     margin-bottom: 20px;
+}
+
+#global_filters i {
+    opacity: 0.7;
 }
 
 #topics_header {
@@ -425,6 +439,7 @@ li.expanded_private_message a {
 #streams_header {
     margin-right: 0px;
     padding-left: 10px;
+    cursor: pointer;
 }
 
 #stream_filters .inactive_stream {
@@ -432,7 +447,7 @@ li.expanded_private_message a {
 }
 
 .zero_count {
-    display: none;
+    visibility: hidden;
 }
 
 li.show-more-topics a {

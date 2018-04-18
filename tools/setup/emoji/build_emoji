@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 #
-# See docs/emoji.md for a high-level explanation of how this system
+# See docs/subsystems/emoji.md for a high-level explanation of how this system
 # works.
 import os
 import sys
 import ujson
 
-from typing import Any, Dict, List, Text, Union
+from typing import Any, Dict, List
 
 from emoji_setup_utils import generate_emoji_catalog, generate_codepoint_to_name_map, \
     get_extended_codepoint_to_name, get_extended_name_to_codepoint, get_extended_names_list, \
@@ -21,7 +21,6 @@ TARGET_EMOJI_DUMP = os.path.join(ZULIP_PATH, 'static', 'generated', 'emoji')
 EMOJI_CACHE_PATH = "/srv/zulip-emoji-cache"
 EMOJI_SCRIPT_DIR_PATH = os.path.join(ZULIP_PATH, 'tools', 'setup', 'emoji')
 NODE_MODULES_PATH = os.path.join(ZULIP_PATH, 'node_modules')
-EMOJI_DATA_PATH = os.path.join(NODE_MODULES_PATH, 'emoji-datasource')
 
 EMOJI_CODES_FILE_TEMPLATE = """\
 var emoji_codes = (function () {
@@ -47,7 +46,7 @@ div.emoji,
 span.emoji
 {
     display: inline-block;
-    background-image: url('sheet_%(emojiset)s_32.png');
+    background-image: url('sheet_%(emojiset)s_64.png');
     -webkit-background-size: 4900%%;
     -moz-background-size: 4900%%;
     background-size: 4900%%;
@@ -95,7 +94,7 @@ def get_success_stamp():
     return os.path.join(EMOJI_CACHE_PATH, sha1_hexdigest, 'emoji', '.success-stamp')
 
 def generate_sprite_css_files(cache_path, emoji_map, emoji_data):
-    # type: (Text, Dict[Text, Text], List[Dict[Text, Any]]) -> None
+    # type: (str, Dict[str, str], List[Dict[str, Any]]) -> None
     # Spritesheet CSS generation code.
     emoji_positions = ""
     for emoji in emoji_data:
@@ -115,27 +114,29 @@ def generate_sprite_css_files(cache_path, emoji_map, emoji_data):
         sprite_css_file.close()
 
 def setup_emoji_farm(cache_path, emoji_map, emoji_data):
-    # type: (Text, Dict[Text, Text], List[Dict[Text, Any]]) -> None
-    # Copy individual emoji images from npm package.
-    src_emoji_farm = os.path.join(NODE_MODULES_PATH, 'emoji-datasource-google', 'img', 'google', '64', '*')
-    target_emoji_farm = os.path.join(cache_path, 'images-google-64')
-    run(['mkdir', '-p', target_emoji_farm])
-    run(['cp', '-RPp', src_emoji_farm, target_emoji_farm], shell=True)
-
-    # Copy zulip.png to the emoji farm.
-    zulip_image = "{}/static/assets/zulip-emoji/*".format(ZULIP_PATH)
-    run(['cp', '-RPp', zulip_image, target_emoji_farm], shell=True)
-
-    # Copy spritesheets.
+    # type: (str, Dict[str, str], List[Dict[str, Any]]) -> None
     for emojiset in EMOJISETS:
-        input_sprite_sheet = os.path.join(EMOJI_DATA_PATH, 'img', emojiset, 'sheets', '32.png')
-        output_sprite_sheet = os.path.join(cache_path, 'sheet_%s_32.png' % (emojiset,))
+        # Copy individual emoji images from npm packages.
+        src_emoji_farm = os.path.join(
+            NODE_MODULES_PATH, 'emoji-datasource-' + emojiset, 'img', emojiset, '64', '*')
+        target_emoji_farm = os.path.join(cache_path, 'images-' + emojiset + '-64')
+        run(['mkdir', '-p', target_emoji_farm])
+        run(['cp', '-RPp', src_emoji_farm, target_emoji_farm], shell=True)
+
+        # Copy zulip.png to the emoji farm.
+        zulip_image = "{}/static/assets/zulip-emoji/*".format(ZULIP_PATH)
+        run(['cp', '-RPp', zulip_image, target_emoji_farm], shell=True)
+
+        # Copy spritesheets.
+        emoji_data_path = os.path.join(NODE_MODULES_PATH, 'emoji-datasource-' + emojiset)
+        input_sprite_sheet = os.path.join(emoji_data_path, 'img', emojiset, 'sheets-256', '64.png')
+        output_sprite_sheet = os.path.join(cache_path, 'sheet_%s_64.png' % (emojiset,))
         run(['cp', input_sprite_sheet, output_sprite_sheet])
 
     generate_sprite_css_files(cache_path, emoji_map, emoji_data)
 
 def setup_old_emoji_farm(cache_path, emoji_map):
-    # type: (Text, Dict[Text, Text]) -> None
+    # type: (str, Dict[str, str]) -> None
     # Code for setting up old emoji farm.
     # Some image files in the old emoji farm had a different name than in the new emoji
     # farm. `remapped_emojis` is a map that contains a mapping of their name in the old
@@ -185,7 +186,7 @@ def setup_old_emoji_farm(cache_path, emoji_map):
             pass
 
 def generate_map_files(cache_path, emoji_map, emoji_data, emoji_catalog, unified_reactions_data):
-    # type: (Text, Dict[Text, Text], List[Dict[Text, Any]], Dict[Text, List[Text]], Dict[Text, Text]) -> None
+    # type: (str, Dict[str, str], List[Dict[str, Any]], Dict[str, List[str]], Dict[str, str]) -> None
     # This function generates the various data files consumed by webapp, mobile apps, bugdown etc.
     EMOJI_CODES_PATH = os.path.join(cache_path, 'emoji_codes.js')
     emoji_codes_file = open(EMOJI_CODES_PATH, 'w')
@@ -230,12 +231,15 @@ def dump_emojis(cache_path):
     with open('emoji_map.json') as emoji_map_file:
         emoji_map = ujson.load(emoji_map_file)
 
-    EMOJI_DATA_FILE_PATH = os.path.join(EMOJI_DATA_PATH, 'emoji.json')
+    # `emoji.json` or any other data file can be sourced from any of the supported
+    # emojiset packages, they all contain the same data files.
+    EMOJI_DATA_FILE_PATH = os.path.join(NODE_MODULES_PATH, 'emoji-datasource-google', 'emoji.json')
     with open(EMOJI_DATA_FILE_PATH) as emoji_data_file:
         emoji_data = ujson.load(emoji_data_file)
     emoji_catalog = generate_emoji_catalog(emoji_data)
 
-    UNIFIED_REACTIONS_PATH = os.path.join(ZULIP_PATH, 'zerver', 'management', 'data', 'unified_reactions.json')
+    UNIFIED_REACTIONS_PATH = os.path.join(ZULIP_PATH, 'zerver',
+                                          'management', 'data', 'unified_reactions.json')
     with open(UNIFIED_REACTIONS_PATH) as unified_reactions_file:
         unified_reactions_data = ujson.load(unified_reactions_file)
 

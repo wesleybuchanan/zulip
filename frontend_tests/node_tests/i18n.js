@@ -1,10 +1,7 @@
-add_dependencies({
-    Handlebars: 'handlebars',
-    templates: 'js/templates',
-    i18n: 'i18next',
-});
+zrequire('Handlebars', 'handlebars');
+zrequire('templates');
+zrequire('i18n', 'i18next');
 
-var i18n = global.i18n;
 i18n.init({
     nsSeparator: false,
     keySeparator: false,
@@ -32,6 +29,7 @@ i18n.init({
             subject: "testing",
             sender_full_name: "King Lear",
         },
+        should_display_quote_and_reply: true,
         can_edit_message: true,
         can_mute_topic: true,
         narrowed: true,
@@ -58,7 +56,6 @@ i18n.init({
             enable_offline_push_notifications: false,
             enable_online_push_notifications: false,
             enable_digest_emails: false,
-            autoscroll_forever: false,
             default_desktop_notifications: false,
         },
     };

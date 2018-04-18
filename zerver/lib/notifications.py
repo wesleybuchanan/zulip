@@ -6,8 +6,7 @@ from django.conf import settings
 from django.template import loader
 from django.utils.timezone import now as timezone_now
 from zerver.decorator import statsd_increment
-from zerver.lib.send_email import send_future_email, \
-    send_email_from_dict, FromAddress
+from zerver.lib.send_email import send_future_email, FromAddress
 from zerver.lib.queue import queue_json_publish
 from zerver.models import (
     Recipient,
@@ -18,23 +17,23 @@ from zerver.models import (
     UserProfile,
     get_user,
     get_user_profile_by_id,
-    receives_offline_notifications,
+    receives_offline_email_notifications,
     get_context_for_message,
     Message,
     Realm,
 )
 
-import datetime
+from datetime import timedelta, datetime
 from email.utils import formataddr
 import lxml.html
 import re
 import subprocess
 import ujson
-from six.moves import urllib
+import urllib
 from collections import defaultdict
+import pytz
 
-def one_click_unsubscribe_link(user_profile, email_type):
-    # type: (UserProfile, str) -> str
+def one_click_unsubscribe_link(user_profile: UserProfile, email_type: str) -> str:
     """
     Generate a unique link that a logged-out user can visit to unsubscribe from
     Zulip e-mails without having to first log in.
@@ -43,35 +42,36 @@ def one_click_unsubscribe_link(user_profile, email_type):
                                     Confirmation.UNSUBSCRIBE,
                                     url_args = {'email_type': email_type})
 
-def hash_util_encode(string):
-    # type: (Text) -> Text
+def hash_util_encode(string: Text) -> Text:
     # Do the same encoding operation as hash_util.encodeHashComponent on the
     # frontend.
     # `safe` has a default value of "/", but we want those encoded, too.
     return urllib.parse.quote(
         string.encode("utf-8"), safe=b"").replace(".", "%2E").replace("%", ".")
 
-def pm_narrow_url(realm, participants):
-    # type: (Realm, List[Text]) -> Text
+def encode_stream(stream_id: int, stream_name: Text) -> Text:
+    # We encode streams for urls as something like 99-Verona.
+    stream_name = stream_name.replace(' ', '-')
+    return str(stream_id) + '-' + hash_util_encode(stream_name)
+
+def pm_narrow_url(realm: Realm, participants: List[Text]) -> Text:
     participants.sort()
-    base_url = u"%s/#narrow/pm-with/" % (realm.uri,)
+    base_url = "%s/#narrow/pm-with/" % (realm.uri,)
     return base_url + hash_util_encode(",".join(participants))
 
-def stream_narrow_url(realm, stream):
-    # type: (Realm, Text) -> Text
-    base_url = u"%s/#narrow/stream/" % (realm.uri,)
-    return base_url + hash_util_encode(stream)
+def stream_narrow_url(realm: Realm, stream: Stream) -> Text:
+    base_url = "%s/#narrow/stream/" % (realm.uri,)
+    return base_url + encode_stream(stream.id, stream.name)
 
-def topic_narrow_url(realm, stream, topic):
-    # type: (Realm, Text, Text) -> Text
-    base_url = u"%s/#narrow/stream/" % (realm.uri,)
-    return u"%s%s/topic/%s" % (base_url, hash_util_encode(stream),
-                               hash_util_encode(topic))
+def topic_narrow_url(realm: Realm, stream: Stream, topic: Text) -> Text:
+    base_url = "%s/#narrow/stream/" % (realm.uri,)
+    return "%s%s/topic/%s" % (base_url,
+                              encode_stream(stream.id, stream.name),
+                              hash_util_encode(topic))
 
-def relative_to_full_url(base_url, content):
-    # type: (Text, Text) -> Text
+def relative_to_full_url(base_url: Text, content: Text) -> Text:
     # Convert relative URLs to absolute URLs.
-    fragment = lxml.html.fromstring(content)  # type: ignore # https://github.com/python/typeshed/issues/525
+    fragment = lxml.html.fromstring(content)
 
     # We handle narrow URLs separately because of two reasons:
     # 1: 'lxml' seems to be having an issue in dealing with URLs that begin
@@ -97,25 +97,59 @@ def relative_to_full_url(base_url, content):
     for container in inline_image_containers:
         container.drop_tree()
 
+    # The previous block handles most inline images, but for messages
+    # where the entire markdown input was just the URL of an image
+    # (i.e. the entire body is a message_inline_image object), the
+    # entire message body will be that image element; here, we need a
+    # more drastic edit to the content.
+    if fragment.get('class') == 'message_inline_image':
+        content_template = '<p><a href="%s" target="_blank" title="%s">%s</a></p>'
+        image_link = fragment.find('a').get('href')
+        image_title = fragment.find('a').get('title')
+        new_content = (content_template % (image_link, image_title, image_link))
+        fragment = lxml.html.fromstring(new_content)
+
     fragment.make_links_absolute(base_url)
-    content = lxml.html.tostring(fragment).decode("utf-8")  # type: ignore # https://github.com/python/typeshed/issues/525
+    content = lxml.html.tostring(fragment).decode("utf-8")
 
     return content
 
-def fix_emojis(content, base_url):
-    # type: (Text, Text) -> Text
-    # Convert the emoji spans to img tags.
-    content = re.sub(
-        r'<span class=\"emoji emoji-(\S+)\" title=\"([^\"]+)\">(\S+)</span>',
-        r'<img src="' + base_url + r'/static/generated/emoji/images-google-64/\1.png" ' +
-        r'title="\2" alt="\3" style="height: 20px;">',
-        content)
-    content = content.replace(' class="emoji"', ' style="height: 20px;"')
+def fix_emojis(content: Text, base_url: Text, emojiset: Text) -> Text:
+    def make_emoji_img_elem(emoji_span_elem: Any) -> Dict[str, Any]:
+        # Convert the emoji spans to img tags.
+        classes = emoji_span_elem.get('class')
+        match = re.search('emoji-(?P<emoji_code>\S+)', classes)
+        emoji_code = match.group('emoji_code')
+        emoji_name = emoji_span_elem.get('title')
+        alt_code = emoji_span_elem.text
+        image_url = base_url + '/static/generated/emoji/images-%(emojiset)s-64/%(emoji_code)s.png' % {
+            'emojiset': emojiset,
+            'emoji_code': emoji_code
+        }
+        img_elem = lxml.html.fromstring(
+            '<img alt="%(alt_code)s" src="%(image_url)s" title="%(title)s">' % {
+                'alt_code': alt_code,
+                'image_url': image_url,
+                'title': emoji_name,
+            })
+        img_elem.set('style', 'height: 20px;')
+        img_elem.tail = emoji_span_elem.tail
+        return img_elem
 
+    fragment = lxml.html.fromstring(content)
+    for elem in fragment.cssselect('span.emoji'):
+        parent = elem.getparent()
+        img_elem = make_emoji_img_elem(elem)
+        parent.replace(elem, img_elem)
+
+    for realm_emoji in fragment.cssselect('.emoji'):
+        del realm_emoji.attrib['class']
+        realm_emoji.set('style', 'height: 20px;')
+
+    content = lxml.html.tostring(fragment).decode('utf-8')
     return content
 
-def build_message_list(user_profile, messages):
-    # type: (UserProfile, List[Message]) -> List[Dict[str, Any]]
+def build_message_list(user_profile: UserProfile, messages: List[Message]) -> List[Dict[str, Any]]:
     """
     Builds the message list object for the missed message email template.
     The messages are collapsed into per-recipient and per-sender blocks, like
@@ -123,22 +157,19 @@ def build_message_list(user_profile, messages):
     """
     messages_to_render = []  # type: List[Dict[str, Any]]
 
-    def sender_string(message):
-        # type: (Message) -> Text
+    def sender_string(message: Message) -> Text:
         if message.recipient.type in (Recipient.STREAM, Recipient.HUDDLE):
             return message.sender.full_name
         else:
             return ''
 
-    def fix_plaintext_image_urls(content):
-        # type: (Text) -> Text
+    def fix_plaintext_image_urls(content: Text) -> Text:
         # Replace image URLs in plaintext content of the form
         #     [image name](image url)
         # with a simple hyperlink.
         return re.sub(r"\[(\S*)\]\((\S*)\)", r"\2", content)
 
-    def build_message_payload(message):
-        # type: (Message) -> Dict[str, Text]
+    def build_message_payload(message: Message) -> Dict[str, Text]:
         plain = message.content
         plain = fix_plaintext_image_urls(plain)
         # There's a small chance of colliding with non-Zulip URLs containing
@@ -153,38 +184,36 @@ def build_message_list(user_profile, messages):
         assert message.rendered_content is not None
         html = message.rendered_content
         html = relative_to_full_url(user_profile.realm.uri, html)
-        html = fix_emojis(html, user_profile.realm.uri)
+        html = fix_emojis(html, user_profile.realm.uri, user_profile.emojiset)
 
         return {'plain': plain, 'html': html}
 
-    def build_sender_payload(message):
-        # type: (Message) -> Dict[str, Any]
+    def build_sender_payload(message: Message) -> Dict[str, Any]:
         sender = sender_string(message)
         return {'sender': sender,
                 'content': [build_message_payload(message)]}
 
-    def message_header(user_profile, message):
-        # type: (UserProfile, Message) -> Dict[str, Any]
-        disp_recipient = get_display_recipient(message.recipient)
+    def message_header(user_profile: UserProfile, message: Message) -> Dict[str, Any]:
         if message.recipient.type == Recipient.PERSONAL:
-            header = u"You and %s" % (message.sender.full_name,)
+            header = "You and %s" % (message.sender.full_name,)
             html_link = pm_narrow_url(user_profile.realm, [message.sender.email])
-            header_html = u"<a style='color: #ffffff;' href='%s'>%s</a>" % (html_link, header)
+            header_html = "<a style='color: #ffffff;' href='%s'>%s</a>" % (html_link, header)
         elif message.recipient.type == Recipient.HUDDLE:
+            disp_recipient = get_display_recipient(message.recipient)
             assert not isinstance(disp_recipient, Text)
             other_recipients = [r['full_name'] for r in disp_recipient
                                 if r['email'] != user_profile.email]
-            header = u"You and %s" % (", ".join(other_recipients),)
+            header = "You and %s" % (", ".join(other_recipients),)
             html_link = pm_narrow_url(user_profile.realm, [r["email"] for r in disp_recipient
                                       if r["email"] != user_profile.email])
-            header_html = u"<a style='color: #ffffff;' href='%s'>%s</a>" % (html_link, header)
+            header_html = "<a style='color: #ffffff;' href='%s'>%s</a>" % (html_link, header)
         else:
-            assert isinstance(disp_recipient, Text)
-            header = u"%s > %s" % (disp_recipient, message.topic_name())
-            stream_link = stream_narrow_url(user_profile.realm, disp_recipient)
-            topic_link = topic_narrow_url(user_profile.realm, disp_recipient, message.subject)
-            header_html = u"<a href='%s'>%s</a> > <a href='%s'>%s</a>" % (
-                stream_link, disp_recipient, topic_link, message.subject)
+            stream = Stream.objects.only('id', 'name').get(id=message.recipient.type_id)
+            header = "%s > %s" % (stream.name, message.topic_name())
+            stream_link = stream_narrow_url(user_profile.realm, stream)
+            topic_link = topic_narrow_url(user_profile.realm, stream, message.subject)
+            header_html = "<a href='%s'>%s</a> > <a href='%s'>%s</a>" % (
+                stream_link, stream.name, topic_link, message.subject)
         return {"plain": header,
                 "html": header_html,
                 "stream_message": message.recipient.type_name() == "stream"}
@@ -240,8 +269,9 @@ def build_message_list(user_profile, messages):
     return messages_to_render
 
 @statsd_increment("missed_message_reminders")
-def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, message_count):
-    # type: (UserProfile, List[Message], int) -> None
+def do_send_missedmessage_events_reply_in_zulip(user_profile: UserProfile,
+                                                missed_messages: List[Message],
+                                                message_count: int) -> None:
     """
     Send a reminder email to a user if she's missed some PMs by being offline.
 
@@ -270,10 +300,11 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
     context = common_context(user_profile)
     context.update({
         'name': user_profile.full_name,
-        'messages': build_message_list(user_profile, missed_messages),
         'message_count': message_count,
-        'mention': missed_messages[0].recipient.type == Recipient.STREAM,
+        'mention': missed_messages[0].is_stream_message(),
         'unsubscribe_link': unsubscribe_link,
+        'realm_name_in_notifications': user_profile.realm_name_in_notifications,
+        'show_message_content': user_profile.message_content_in_email_notifications,
     })
 
     # If this setting (email mirroring integration) is enabled, only then
@@ -306,13 +337,15 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
                             if r['id'] != user_profile.id]
         context.update({'group_pm': True})
         if len(other_recipients) == 2:
-            huddle_display_name = u"%s" % (" and ".join(other_recipients))
+            huddle_display_name = "%s" % (" and ".join(other_recipients))
             context.update({'huddle_display_name': huddle_display_name})
         elif len(other_recipients) == 3:
-            huddle_display_name = u"%s, %s, and %s" % (other_recipients[0], other_recipients[1], other_recipients[2])
+            huddle_display_name = "%s, %s, and %s" % (
+                other_recipients[0], other_recipients[1], other_recipients[2])
             context.update({'huddle_display_name': huddle_display_name})
         else:
-            huddle_display_name = u"%s, and %s others" % (', '.join(other_recipients[:2]), len(other_recipients) - 2)
+            huddle_display_name = "%s, and %s others" % (
+                ', '.join(other_recipients[:2]), len(other_recipients) - 2)
             context.update({'huddle_display_name': huddle_display_name})
     elif (missed_messages[0].recipient.type == Recipient.PERSONAL):
         context.update({'private_message': True})
@@ -326,10 +359,21 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
                                                       flags=UserMessage.flags.mentioned).exists()))
         context.update({'at_mention': True})
 
-    context.update({
-        'sender_str': ", ".join(sender.full_name for sender in senders),
-        'realm_str': user_profile.realm.name,
-    })
+    # If message content is disabled, then flush all information we pass to email.
+    if not user_profile.message_content_in_email_notifications:
+        context.update({
+            'reply_to_zulip': False,
+            'messages': [],
+            'sender_str': "",
+            'realm_str': user_profile.realm.name,
+            'huddle_display_name': "",
+        })
+    else:
+        context.update({
+            'messages': build_message_list(user_profile, missed_messages),
+            'sender_str': ", ".join(sender.full_name for sender in senders),
+            'realm_str': user_profile.realm.name,
+        })
 
     from_name = "Zulip missed messages"  # type: Text
     from_address = FromAddress.NOREPLY
@@ -353,17 +397,17 @@ def do_send_missedmessage_events_reply_in_zulip(user_profile, missed_messages, m
         'from_address': from_address,
         'reply_to_email': formataddr((reply_to_name, reply_to_address)),
         'context': context}
-    queue_json_publish("missedmessage_email_senders", email_dict, send_email_from_dict)
+    queue_json_publish("email_senders", email_dict)
 
     user_profile.last_reminder = timezone_now()
     user_profile.save(update_fields=['last_reminder'])
 
-def handle_missedmessage_emails(user_profile_id, missed_email_events):
-    # type: (int, Iterable[Dict[str, Any]]) -> None
+def handle_missedmessage_emails(user_profile_id: int,
+                                missed_email_events: Iterable[Dict[str, Any]]) -> None:
     message_ids = [event.get('message_id') for event in missed_email_events]
 
     user_profile = get_user_profile_by_id(user_profile_id)
-    if not receives_offline_notifications(user_profile):
+    if not receives_offline_email_notifications(user_profile):
         return
 
     messages = Message.objects.filter(usermessage__user_profile_id=user_profile,
@@ -391,7 +435,7 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
 
     for msg_list in messages_by_recipient_subject.values():
         msg = min(msg_list, key=lambda msg: msg.pub_date)
-        if msg.recipient.type == Recipient.STREAM:
+        if msg.is_stream_message():
             msg_list.extend(get_context_for_message(msg))
 
     # Send an email per recipient subject pair
@@ -403,29 +447,44 @@ def handle_missedmessage_emails(user_profile_id, missed_email_events):
             message_count_by_recipient_subject[recipient_subject],
         )
 
-def clear_scheduled_invitation_emails(email):
-    # type: (str) -> None
+def clear_scheduled_invitation_emails(email: str) -> None:
     """Unlike most scheduled emails, invitation emails don't have an
     existing user object to key off of, so we filter by address here."""
     items = ScheduledEmail.objects.filter(address__iexact=email,
                                           type=ScheduledEmail.INVITATION_REMINDER)
     items.delete()
 
-def clear_scheduled_emails(user_id, email_type=None):
-    # type: (int, Optional[int]) -> None
+def clear_scheduled_emails(user_id: int, email_type: Optional[int]=None) -> None:
     items = ScheduledEmail.objects.filter(user_id=user_id)
     if email_type is not None:
         items = items.filter(type=email_type)
     items.delete()
 
-def log_digest_event(msg):
-    # type: (Text) -> None
+def log_digest_event(msg: Text) -> None:
     import logging
     logging.basicConfig(filename=settings.DIGEST_LOG_PATH, level=logging.INFO)
     logging.info(msg)
 
-def enqueue_welcome_emails(user):
-    # type: (UserProfile) -> None
+def followup_day2_email_delay(user: UserProfile) -> timedelta:
+    days_to_delay = 2
+    user_tz = user.timezone
+    if user_tz == '':
+        user_tz = 'UTC'
+    signup_day = user.date_joined.astimezone(pytz.timezone(user_tz)).isoweekday()
+    if signup_day == 5:
+        # If the day is Friday then delay should be till Monday
+        days_to_delay = 3
+    elif signup_day == 4:
+        # If the day is Thursday then delay should be till Friday
+        days_to_delay = 1
+
+    # The delay should be 1 hour before the above calculated delay as
+    # our goal is to maximize the chance that this email is near the top
+    # of the user's inbox when the user sits down to deal with their inbox,
+    # or comes in while they are dealing with their inbox.
+    return timedelta(days=days_to_delay, hours=-1)
+
+def enqueue_welcome_emails(user: UserProfile) -> None:
     from zerver.context_processors import common_context
     if settings.WELCOME_EMAIL_SENDER is not None:
         # line break to avoid triggering lint rule
@@ -440,18 +499,17 @@ def enqueue_welcome_emails(user):
     context.update({
         'unsubscribe_link': unsubscribe_link,
         'organization_setup_advice_link':
-        user.realm.uri + '%s/help/getting-your-organization-started-with-zulip',
+        user.realm.uri + '/help/getting-your-organization-started-with-zulip',
         'is_realm_admin': user.is_realm_admin,
     })
     send_future_email(
-        "zerver/emails/followup_day1", to_user_id=user.id, from_name=from_name,
+        "zerver/emails/followup_day1", user.realm, to_user_id=user.id, from_name=from_name,
         from_address=from_address, context=context)
     send_future_email(
-        "zerver/emails/followup_day2", to_user_id=user.id, from_name=from_name,
-        from_address=from_address, context=context, delay=datetime.timedelta(days=1))
+        "zerver/emails/followup_day2", user.realm, to_user_id=user.id, from_name=from_name,
+        from_address=from_address, context=context, delay=followup_day2_email_delay(user))
 
-def convert_html_to_markdown(html):
-    # type: (Text) -> Text
+def convert_html_to_markdown(html: Text) -> Text:
     # On Linux, the tool installs as html2markdown, and there's a command called
     # html2text that does something totally different. On OSX, the tool installs
     # as html2text.
@@ -473,5 +531,5 @@ def convert_html_to_markdown(html):
     # ugly. Run a regex over the resulting description, turning links of the
     # form `![](http://foo.com/image.png?12345)` into
     # `[image.png](http://foo.com/image.png)`.
-    return re.sub(u"!\\[\\]\\((\\S*)/(\\S*)\\?(\\S*)\\)",
-                  u"[\\2](\\1/\\2)", markdown)
+    return re.sub("!\\[\\]\\((\\S*)/(\\S*)\\?(\\S*)\\)",
+                  "[\\2](\\1/\\2)", markdown)

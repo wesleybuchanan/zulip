@@ -1,11 +1,10 @@
 set_global('$', global.make_zjquery());
 set_global('i18n', global.stub_i18n);
-
-add_dependencies({
-    XDate: 'node_modules/xdate/src/xdate.js',
+set_global('page_params' , {
+    twenty_four_hour_time: true,
 });
-
-var timerender = require('js/timerender.js');
+zrequire('XDate', 'xdate');
+zrequire('timerender');
 
 (function test_render_now_returns_today() {
     var today = new XDate(1555091573000); // Friday 4/12/2019 5:52:53 PM (UTC+0)
@@ -198,7 +197,7 @@ var timerender = require('js/timerender.js');
 
 (function test_set_full_datetime() {
     var message = {
-        timestamp: 1495091573, // 5/18/2017 7:12:53 AM (UTC+0)
+        timestamp: 1495091573, // 2017-5-18 07:12:53 AM (UTC+0)
     };
     var time_element = $('<span/>');
     var attrs = new Dict();
@@ -208,7 +207,14 @@ var timerender = require('js/timerender.js');
         return time_element;
     };
 
-    var expected = '5/18/2017 7:12:53 AM (UTC+0)';
+    // since node >= 8 date.toLocaleDateString and
+    // date.toLocaleTimeString have been changed, instead of
+    // returning 5/18/2017 7:12:53 AM (UTC+0) they now return
+    // 2017-5-18 07:12:53 (UTC+0) - This change does not affect browsers
+    // since browsers have their own way of returning string that is
+    // or maybe inconsistenc with node's way.
+    var time = new Date(message.timestamp * 1000);
+    var expected = `${time.toLocaleDateString()} 07:12:53 (UTC+0)`;
     timerender.set_full_datetime(message, time_element);
     var actual = attrs.get('title');
     assert.equal(expected, actual);
@@ -264,4 +270,22 @@ var timerender = require('js/timerender.js');
     assert_same(function (d) { return d.addYears(-3); },
                 i18n.t("Last seen on Mar 01, 2013"));
 
+}());
+
+(function test_set_full_datetime() {
+    var time = new XDate(1549958107000); // Tuesday 2/12/2019 07:55:07 AM (UTC+0)
+    var time_str = timerender.stringify_time(time);
+    var expected = '07:55';
+    assert.equal(expected, time_str);
+
+    page_params.twenty_four_hour_time = false;
+    time_str = timerender.stringify_time(time);
+    expected = '7:55 AM';
+    assert.equal(expected, time_str);
+
+    time = new XDate(1549979707000); // Tuesday 2/12/2019 13:55:07 PM (UTC+0)
+    page_params.twenty_four_hour_time = false;
+    time_str = timerender.stringify_time(time);
+    expected = '1:55 PM';
+    assert.equal(expected, time_str);
 }());

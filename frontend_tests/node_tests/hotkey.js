@@ -32,7 +32,7 @@ set_global('$', function () {
 set_global('document', {
 });
 
-var hotkey = require('js/hotkey.js');
+var hotkey = zrequire('hotkey');
 
 set_global('list_util', {
 });
@@ -91,6 +91,7 @@ function stubbing(func_name_to_stub, test_function) {
     assert.equal(map_down(27).name, 'escape');
     assert.equal(map_down(37).name, 'left_arrow');
     assert.equal(map_down(13).name, 'enter');
+    assert.equal(map_down(46).name, 'delete');
     assert.equal(map_down(13, true).name, 'enter');
 
     assert.equal(map_press(47).name, 'search'); // slash
@@ -129,7 +130,7 @@ function stubbing(func_name_to_stub, test_function) {
             // An exception will be thrown here if a different
             // function is called than the one declared.  Try to
             // provide a useful error message.
-            // add a newline to seperate from other console output.
+            // add a newline to separate from other console output.
             console.log('\nERROR: Mapping for character "' + e.which + '" does not match tests.');
         }
     }
@@ -148,7 +149,7 @@ function stubbing(func_name_to_stub, test_function) {
 
     // Unmapped keys should immediately return false, without
     // calling any functions outside of hotkey.js.
-    assert_unmapped('abefhlmoptxyz');
+    assert_unmapped('abefhlmotyz');
     assert_unmapped('BEFHILNOQTUWXYZ');
 
     // We have to skip some checks due to the way the code is
@@ -188,8 +189,8 @@ function stubbing(func_name_to_stub, test_function) {
                 set_global('overlays', {
                     is_active: is_active,
                     settings_open: settings_open,
-                    info_overlay_open: info_overlay_open});
-
+                    info_overlay_open: info_overlay_open,
+                });
                 test_normal_typing();
             });
         });
@@ -198,6 +199,9 @@ function stubbing(func_name_to_stub, test_function) {
     // Ok, now test keys that work when we're viewing messages.
     hotkey.processing_text = return_false;
     overlays.settings_open = return_false;
+    overlays.streams_open = return_false;
+    overlays.lightbox_open = return_false;
+    overlays.drafts_open = return_false;
 
     page_params.can_create_streams = true;
     overlays.streams_open = return_true;
@@ -207,10 +211,11 @@ function stubbing(func_name_to_stub, test_function) {
     assert_mapping('n', 'subs.new_stream_clicked');
     page_params.can_create_streams = false;
     assert_unmapped('n');
-    overlays.is_active = return_false;
     overlays.streams_open = return_false;
+    test_normal_typing();
+    overlays.is_active = return_false;
 
-    assert_mapping('?', 'ui.maybe_show_keyboard_shortcuts');
+    assert_mapping('?', 'info_overlay.maybe_show_keyboard_shortcuts');
     assert_mapping('/', 'search.initiate_search');
     assert_mapping('w', 'activity.initiate_search');
     assert_mapping('q', 'stream_list.initiate_search');
@@ -219,19 +224,20 @@ function stubbing(func_name_to_stub, test_function) {
     assert_mapping('D', 'narrow.stream_cycle_forward');
 
     assert_mapping('c', 'compose_actions.start');
-    assert_mapping('C', 'compose_actions.start');
+    assert_mapping('x', 'compose_actions.start');
     assert_mapping('P', 'narrow.by');
     assert_mapping('g', 'gear_menu.open');
 
     overlays.is_active = return_true;
     overlays.drafts_open = return_true;
-    assert_mapping('d', 'drafts.toggle');
+    assert_mapping('d', 'overlays.close_overlay');
     overlays.drafts_open = return_false;
-    assert_unmapped('d');
+    test_normal_typing();
     overlays.is_active = return_false;
+    assert_mapping('d', 'drafts.launch');
 
     // Next, test keys that only work on a selected message.
-    var message_view_only_keys = '@*+RjJkKsSuvi:GM';
+    var message_view_only_keys = '@*+>RjJkKsSuvi:GM';
 
     // Check that they do nothing without a selected message
     global.current_msg_list.empty = return_true;
@@ -241,7 +247,7 @@ function stubbing(func_name_to_stub, test_function) {
 
     // Check that they do nothing while in the settings overlay
     overlays.settings_open = return_true;
-    assert_unmapped('@*+-rRjJkKsSuvi:GM');
+    assert_unmapped('@*+->rRjJkKsSuvi:GM');
     overlays.settings_open = return_false;
 
     // TODO: Similar check for being in the subs page
@@ -259,9 +265,17 @@ function stubbing(func_name_to_stub, test_function) {
     assert_mapping('s', 'narrow.by_recipient');
     assert_mapping('S', 'narrow.by_subject');
     assert_mapping('u', 'popovers.show_sender_info');
-    assert_mapping('v', 'lightbox.show_from_selected_message');
     assert_mapping('i', 'popovers.open_message_menu');
     assert_mapping(':', 'reactions.open_reactions_popover', true);
+    assert_mapping('>', 'compose_actions.quote_and_reply');
+
+    overlays.is_active = return_true;
+    overlays.lightbox_open = return_true;
+    assert_mapping('v', 'overlays.close_overlay');
+    overlays.lightbox_open = return_false;
+    test_normal_typing();
+    overlays.is_active = return_false;
+    assert_mapping('v', 'lightbox.show_from_selected_message');
 
     global.emoji_picker.reactions_popped = return_true;
     assert_mapping(':', 'emoji_picker.navigate', true);
@@ -273,6 +287,7 @@ function stubbing(func_name_to_stub, test_function) {
     // Test keys that work when a message is selected and
     // also when the message list is empty.
     assert_mapping('n', 'narrow.narrow_to_next_topic');
+    assert_mapping('p', 'narrow.narrow_to_next_pm_string');
 
     global.current_msg_list.empty = return_true;
     assert_mapping('n', 'narrow.narrow_to_next_topic');
@@ -308,7 +323,7 @@ function stubbing(func_name_to_stub, test_function) {
             // An exception will be thrown here if a different
             // function is called than the one declared.  Try to
             // provide a useful error message.
-            // add a newline to seperate from other console output.
+            // add a newline to separate from other console output.
             console.log('\nERROR: Mapping for character "' + e.which + '" does not match tests.');
         }
     }

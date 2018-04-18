@@ -19,6 +19,13 @@ var actions_dropdown_hotkeys = [
 // we'll do in cases where they have the exact same semantics.
 // DON'T FORGET: update keyboard_shortcuts.html
 
+// The `message_view_only` property is a convenient and performant way
+// to express a common case of which hotkeys do something in which
+// views.  It is set for hotkeys (like `*`) that only have an effect
+// in the main message view with a selected message.
+// `message_view_only` hotkeys, as a group, are not processed if any
+// overlays are open (e.g. settings, streams, etc.).
+
 var keydown_shift_mappings = {
     // these can be triggered by shift + key only
     9: {name: 'shift_tab', message_view_only: false}, // tab
@@ -58,6 +65,7 @@ var keydown_either_mappings = {
     // in other apps, but that's also slightly dubious.
     8: {name: 'backspace', message_view_only: true}, // backspace
     13: {name: 'enter', message_view_only: false}, // enter
+    46: {name: 'delete', message_view_only: false}, // delete
 };
 
 var keypress_mappings = {
@@ -66,10 +74,11 @@ var keypress_mappings = {
     45: {name: 'toggle_message_collapse', message_view_only: true}, // '-'
     47: {name: 'search', message_view_only: false}, // '/'
     58: {name: 'toggle_reactions_popover', message_view_only: true}, // ':'
+    62: {name: 'compose_quote_reply', message_view_only: true}, // '>'
     63: {name: 'show_shortcuts', message_view_only: false}, // '?'
     64: {name: 'compose_reply_with_mention', message_view_only: true}, // '@'
     65: {name: 'stream_cycle_backward', message_view_only: true}, // 'A'
-    67: {name: 'compose_private_message', message_view_only: true}, // 'C'
+    67: {name: 'C_deprecated', message_view_only: true}, // 'C'
     68: {name: 'stream_cycle_forward', message_view_only: true}, // 'D'
     71: {name: 'G_end', message_view_only: true}, // 'G'
     74: {name: 'vim_page_down', message_view_only: true}, // 'J'
@@ -80,18 +89,20 @@ var keypress_mappings = {
     83: {name: 'narrow_by_subject', message_view_only: true}, //'S'
     86: {name: 'view_selected_stream', message_view_only: false}, //'V'
     99: {name: 'compose', message_view_only: true}, // 'c'
-    100: {name: 'open_drafts', message_view_only: false}, // 'd'
+    100: {name: 'open_drafts', message_view_only: true}, // 'd'
     103: {name: 'gear_menu', message_view_only: true}, // 'g'
     105: {name: 'message_actions', message_view_only: true}, // 'i'
     106: {name: 'vim_down', message_view_only: true}, // 'j'
     107: {name: 'vim_up', message_view_only: true}, // 'k'
     110: {name: 'n_key', message_view_only: false}, // 'n'
+    112: {name: 'p_key', message_view_only: false}, // 'p'
     113: {name: 'query_streams', message_view_only: false}, // 'q'
     114: {name: 'reply_message', message_view_only: true}, // 'r'
     115: {name: 'narrow_by_recipient', message_view_only: true}, // 's'
     117: {name: 'show_sender_info', message_view_only: true}, // 'u'
     118: {name: 'show_lightbox', message_view_only: true}, // 'v'
     119: {name: 'query_users', message_view_only: false}, // 'w'
+    120: {name: 'compose_private_message', message_view_only: true}, // 'x'
 };
 
 exports.get_keydown_hotkey = function (e) {
@@ -133,10 +144,20 @@ exports.get_keypress_hotkey = function (e) {
     return keypress_mappings[e.which];
 };
 
-exports.processing_text = function () {
-    var selector = 'input:focus,select:focus,textarea:focus,#compose-send-button:focus,.editable-section:focus';
-    return $(selector).length > 0;
-};
+exports.processing_text = (function () {
+    var selector = [
+        'input:focus',
+        'select:focus',
+        'textarea:focus',
+        '#compose-send-button:focus',
+        '.editable-section:focus',
+        '.pill-container div:focus',
+    ].join(",");
+
+    return function () {
+        return $(selector).length > 0;
+    };
+}());
 
 exports.is_editing_stream_name = function (e) {
     return $(e.target).is(".editable-section");
@@ -166,7 +187,12 @@ exports.process_escape_key = function (e) {
     }
 
     if (message_edit.is_editing(current_msg_list.selected_id())) {
-        message_edit.end(current_msg_list.selected_row());
+        // Using this definition of "row" instead of "current_msg_list.selected_row()"
+        // because it returns a more complete object.
+        // Necessary for refocusing on message list in Firefox.
+        row = $(".message_edit_content").filter(":focus").closest(".message_row");
+        row.find('.message_edit_content').blur();
+        message_edit.end(row);
         return true;
     }
 
@@ -202,6 +228,12 @@ exports.process_escape_key = function (e) {
         }
 
         if (compose_state.composing()) {
+            // Check for errors in compose box; close errors if they exist
+            if ($("#compose-send-status").css('display') !== 'none') {
+                $("#compose-send-status").hide();
+                return true;
+            }
+
             // If the user hit the escape key, cancel the current compose
             compose_actions.cancel();
             return true;
@@ -406,6 +438,7 @@ exports.process_hotkey = function (e, hotkey) {
         case 'up_arrow':
         case 'down_arrow':
         case 'backspace':
+        case 'delete':
             if (overlays.drafts_open()) {
                 drafts.drafts_handle_events(e, event_name);
                 return true;
@@ -422,6 +455,10 @@ exports.process_hotkey = function (e, hotkey) {
         }
         if (event_name === 'show_lightbox' && overlays.lightbox_open()) {
             overlays.close_overlay('lightbox');
+            return true;
+        }
+        if (event_name === 'open_drafts' && overlays.drafts_open()) {
+            overlays.close_overlay('drafts');
             return true;
         }
         return false;
@@ -511,11 +548,12 @@ exports.process_hotkey = function (e, hotkey) {
             compose_actions.cancel();
             // don't return, as we still want it to be picked up by the code below
         } else if (event_name === "page_up") {
-            $("#new_message_content").caret(0);
+            $("#compose-textarea").caret(0).animate({ scrollTop: 0 }, "fast");
             return true;
         } else if (event_name === "page_down") {
             // so that it always goes to the end of the compose box.
-            $("#new_message_content").caret(Infinity);
+            var height = $("#compose-textarea")[0].scrollHeight;
+            $("#compose-textarea").caret(Infinity).animate({ scrollTop: height }, "fast");
             return true;
         } else {
             // Let the browser handle the key normally.
@@ -546,6 +584,19 @@ exports.process_hotkey = function (e, hotkey) {
         }
     }
 
+    // Prevent navigation in the background when the overlays are active.
+    if (overlays.is_active()) {
+        if (event_name === 'view_selected_stream' && overlays.streams_open()) {
+            subs.view_stream();
+            return true;
+        }
+        if (event_name === 'n_key' && overlays.streams_open() && page_params.can_create_streams) {
+            subs.new_stream_clicked();
+            return true;
+        }
+        return false;
+    }
+
     // Shortcuts that don't require a message
     switch (event_name) {
         case 'compose': // 'c': compose
@@ -572,7 +623,7 @@ exports.process_hotkey = function (e, hotkey) {
             gear_menu.open();
             return true;
         case 'show_shortcuts': // Show keyboard shortcuts page
-            ui.maybe_show_keyboard_shortcuts();
+            info_overlay.maybe_show_keyboard_shortcuts();
             return true;
         case 'stream_cycle_backward':
             narrow.stream_cycle_backward();
@@ -580,41 +631,26 @@ exports.process_hotkey = function (e, hotkey) {
         case 'stream_cycle_forward':
             narrow.stream_cycle_forward();
             return true;
-        case 'view_selected_stream':
-            if (overlays.streams_open()) {
-                subs.view_stream();
-                return true;
-            }
-            break;
         case 'n_key':
-            if (overlays.streams_open()) {
-                if (page_params.can_create_streams) {
-                    subs.new_stream_clicked();
-                    return true;
-                }
-                return false;
-            }
             narrow.narrow_to_next_topic();
             return true;
+        case 'p_key':
+            narrow.narrow_to_next_pm_string();
+            return true;
         case 'open_drafts':
-            if (overlays.is_active() && !overlays.drafts_open()) {
-                return false;
-            }
-            drafts.toggle();
+            drafts.launch();
             return true;
         case 'reply_message': // 'r': respond to message
             // Note that you can "enter" to respond to messages as well,
             // but that is handled in process_enter_key().
             compose_actions.respond_to_message({trigger: 'hotkey'});
             return true;
+        case 'C_deprecated':
+            ui.maybe_show_deprecation_notice('C');
+            return true;
     }
 
     if (current_msg_list.empty()) {
-        return false;
-    }
-
-    // Prevent navigation in the background when the overlays are active.
-    if (overlays.is_active()) {
         return false;
     }
 
@@ -651,7 +687,7 @@ exports.process_hotkey = function (e, hotkey) {
     // Shortcuts that operate on a message
     switch (event_name) {
         case 'message_actions':
-            return popovers.open_message_menu();
+            return popovers.open_message_menu(msg);
         case 'star_message':
             return message_flags.toggle_starred(msg);
         case 'narrow_by_recipient':
@@ -674,16 +710,16 @@ exports.process_hotkey = function (e, hotkey) {
             reactions.open_reactions_popover();
             return true;
         case 'thumbs_up_emoji': // '+': reacts with thumbs up emoji on selected message
-            // Use canonical name.
-            var thumbs_up_codepoint = '1f44d';
-            var canonical_name = emoji_codes.codepoint_to_name[thumbs_up_codepoint];
-            reactions.toggle_emoji_reaction(msg.id, canonical_name);
+            reactions.toggle_emoji_reaction(msg.id, "thumbs_up");
             return true;
         case 'toggle_mute':
             muting_ui.toggle_mute(msg);
             return true;
         case 'toggle_message_collapse':
             condense.toggle_collapse(msg);
+            return true;
+        case 'compose_quote_reply': // > : respond to selected message with quote
+            compose_actions.quote_and_reply({trigger: 'hotkey'});
             return true;
     }
 

@@ -8,7 +8,7 @@ html {
     align-items: center;
     justify-content: center;
 
-    min-height: calc(100vh - 407px);
+    min-height: calc(100vh - 402px);
 }
 
 .m-10 {
@@ -202,7 +202,6 @@ html {
     stroke: #fff !important;
 }
 
-
 .new-style {
     -webkit-font-smoothing: antialiased;
 }
@@ -334,6 +333,10 @@ html {
     border-radius: 0px;
 
     transition: border 0.3s ease;
+}
+
+.new-style .input-box input[type=email] {
+    margin-bottom: 10px;
 }
 
 .new-style .input-box label {
@@ -491,7 +494,6 @@ html {
     width: 328px;
 }
 
-
 .split-view .org-header .avatar,
 .register-page-container .org-header .avatar {
     display: inline-block;
@@ -511,21 +513,21 @@ html {
     text-align: left;
 }
 
-.split-view .info-box .organization-name,
-.split-view .info-box .organization-path {
+.info-box .organization-name,
+.info-box .organization-path {
     max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
 
-.split-view .info-box .organization-name {
+.info-box .organization-name {
     font-size: 1.5em;
     font-weight: 300;
     line-height: 1.2;
 }
 
-.split-view .info-box .organization-path {
+.info-box .organization-path {
     font-weight: 400;
     color: hsl(0, 0%, 46%);
     margin-top: 5px;
@@ -540,42 +542,40 @@ html {
 }
 
 .portico-page .or {
-    width: 328px;
+    width: 100%;
     display: block;
     margin: 10px auto;
     color: hsl(0, 0%, 34%);
     font-weight: 600;
     text-align: center;
-    text-transform: uppercase;
+    position: relative;
+    z-index: 1;
 }
 
-.portico-page .or::before,
-.portico-page .or::after {
+.portico-page .or::before {
     content: " ";
 
     display: inline-block;
-    position: relative;
-    width: calc(149px);
-    top: -3px;
+    position: absolute;
+    width: calc(100% - 5px);
+    top: calc(50% - 2px);
+    left: 0;
+    z-index: -1;
 
     border-bottom: 2px solid hsl(0, 0%, 86%);
 
 }
 
-.portico-page .or::before {
-    left: -5px;
-}
-
-.portico-page .or::after {
-    left: 5px;
+.portico-page .or span {
+    background-color: hsl(0, 0%, 100%);
+    padding: 0 5px;
 }
 
 .login-google {
     margin-bottom: 10px;
 }
 
-button.login-google-button,
-button.login-github-button {
+button.login-social-button {
     width: 328px;
     padding-left: 35px;
 
@@ -588,21 +588,18 @@ button.login-github-button {
     color: #fff;
 }
 
-button.login-google-button,
-button.login-github-button {
+button.login-social-button {
     background-color: #fff;
     box-shadow: 0px 1px 3px hsla(0, 0%, 0%, 0.3), 0px 0px 5px hsla(0, 0%, 0%, 0.1);
     color: hsl(0, 0%, 34%);
 }
 
-button.login-google-button:hover,
-button.login-github-button:hover {
+button.login-social-button:hover {
     background-color: hsl(0, 0%, 98%);
     box-shadow: 1px 2px 5px hsla(0, 0%, 0%, 0.2);
 }
 
-button.login-google-button:active,
-button.login-github-button:active {
+button.login-social-button:active {
     background-color: hsl(0, 0%, 93%);
     box-shadow: 0px 1px 1px hsla(0, 0%, 0%, 0.3);
 }
@@ -630,6 +627,7 @@ button.login-google-button {
 .forgot-password-container .actions {
     line-height: 0;
 }
+
 .forgot-password-container .actions .back-to-login i {
     position: relative;
     top: 5px;
@@ -665,6 +663,14 @@ button.login-google-button {
     margin: 30px;
 }
 
+#registration .info-box {
+    margin: 10px 0px 0px 20px;
+}
+
+#registration .info-box .organization-name {
+    max-width: 228px;
+}
+
 #registration .input-box {
     display: block;
     text-align: center;
@@ -691,7 +697,6 @@ button.login-google-button {
     margin-left: 2px;
 }
 
-
 #registration [for="realm_in_root_domain"] {
     font-weight: normal !important;
 }
@@ -711,19 +716,25 @@ button.login-google-button {
     position: relative;
     padding-right: 10px;
 
-    width: 156px;
+    width: 150px;
 }
 
 #registration #id_team_subdomain.subdomain + .realm_subdomain_label {
-    float: right;
     margin-top: 12px;
-    margin-left: 10px;
+    margin-left: 180px;
+    display: inline-block;
 
     font-weight: normal;
+    font-size: inherit;
 }
 
 #registration #id_team_subdomain.subdomain {
     margin-top: 0px;
+}
+
+#registration #subdomain_section .inline-block {
+    width: 100%;
+    overflow-x: auto;
 }
 
 #registration #subdomain_section .or {
@@ -936,4 +947,14 @@ button.login-google-button {
     .flex {
         min-height: calc(100vh - 560px);
     }
+}
+
+#login_form .loader {
+    display: none;
+    vertical-align: top;
+    position: relative;
+
+    height: 30px;
+    margin-top: -10px;
+    top: 5px;
 }

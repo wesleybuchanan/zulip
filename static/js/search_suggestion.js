@@ -166,7 +166,7 @@ function get_group_suggestions(all_persons, last, operators) {
             negated: negated,
         };
         var name = highlight_person(last_part, person);
-        var description = prefix + ' ' + all_but_last_part + ',' + name;
+        var description = prefix + ' ' + Handlebars.Utils.escapeExpression(all_but_last_part) + ',' + name;
         var terms = [term];
         if (negated) {
             terms = [{operator: 'is', operand: 'private'}, term];
@@ -429,7 +429,7 @@ function get_special_filter_suggestions(last, operators) {
 
     // Only show home if there's an empty bar
     if (operators.length === 0 && last_string === '') {
-        suggestions.unshift({search_string: '', description: 'Home'});
+        suggestions.unshift({search_string: '', description: 'All messages'});
     }
     return suggestions;
 }

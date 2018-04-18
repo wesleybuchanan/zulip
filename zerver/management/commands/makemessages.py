@@ -1,6 +1,6 @@
 """
 The contents of this file are taken from
-[Django-admin](https://github.com/niwinz/django-jinja/blob/master/django_jinja/management/commands/makemessages.py)
+https://github.com/niwinz/django-jinja/blob/master/django_jinja/management/commands/makemessages.py
 
 Jinja2's i18n functionality is not exactly the same as Django's.
 In particular, the tags names and their syntax are different:
@@ -25,29 +25,27 @@ unfortunately isn't extensible, so we can:
 We are currently doing that last thing. It turns out there we are lucky
 for once: It's simply a matter of extending two regular expressions.
 Credit for the approach goes to:
-http://stackoverflow.com/questions/2090717/getting-translation-strings-for-jinja2-templates-integrated-with-django-1-x
+http://stackoverflow.com/questions/2090717
 
 """
 
-from typing import Any, Dict, Iterable, Mapping, Text, List
-
-from argparse import ArgumentParser
-import os
-import re
 import glob
 import json
-from six.moves import zip
+import os
+import re
+from argparse import ArgumentParser
+from typing import Any, Dict, Iterable, List, Mapping, Text
 
-import django
-from django.core.management.commands import makemessages
-from django.template.base import BLOCK_TAG_START, BLOCK_TAG_END
 from django.conf import settings
+from django.core.management.commands import makemessages
+from django.template.base import BLOCK_TAG_END, BLOCK_TAG_START
 from django.utils.translation import template
 
 from zerver.lib.str_utils import force_text
 
-strip_whitespace_right = re.compile(u"(%s-?\\s*(trans|pluralize).*?-%s)\\s+" % (BLOCK_TAG_START, BLOCK_TAG_END), re.U)
-strip_whitespace_left = re.compile(u"\\s+(%s-\\s*(endtrans|pluralize).*?-?%s)" % (
+strip_whitespace_right = re.compile("(%s-?\\s*(trans|pluralize).*?-%s)\\s+" % (
+                                    BLOCK_TAG_START, BLOCK_TAG_END), re.U)
+strip_whitespace_left = re.compile("\\s+(%s-\\s*(endtrans|pluralize).*?-?%s)" % (
                                    BLOCK_TAG_START, BLOCK_TAG_END), re.U)
 
 regexes = ['{{#tr .*?}}([\s\S]*?){{/tr}}',  # '.' doesn't match '\n' by default
@@ -58,21 +56,25 @@ regexes = ['{{#tr .*?}}([\s\S]*?){{/tr}}',  # '.' doesn't match '\n' by default
            'i18n\.t\("([^\"]*?)"\)',
            'i18n\.t\("(.*?)",\s*.*?[^,]\)',
            ]
+tags = [('err_', "error"),
+        ]
 
 frontend_compiled_regexes = [re.compile(regex) for regex in regexes]
 multiline_js_comment = re.compile("/\*.*?\*/", re.DOTALL)
 singleline_js_comment = re.compile("//.*?\n")
 
-def strip_whitespaces(src):
-    # type: (Text) -> Text
-    src = strip_whitespace_left.sub(u'\\1', src)
-    src = strip_whitespace_right.sub(u'\\1', src)
+def strip_whitespaces(src: Text) -> Text:
+    src = strip_whitespace_left.sub('\\1', src)
+    src = strip_whitespace_right.sub('\\1', src)
     return src
 
 class Command(makemessages.Command):
 
-    def add_arguments(self, parser):
-        # type: (ArgumentParser) -> None
+    xgettext_options = makemessages.Command.xgettext_options
+    for func, tag in tags:
+        xgettext_options += ['--keyword={}:1,"{}"'.format(func, tag)]
+
+    def add_arguments(self, parser: ArgumentParser) -> None:
         super(Command, self).add_arguments(parser)
         parser.add_argument('--frontend-source', type=str,
                             default='static/templates',
@@ -84,25 +86,29 @@ class Command(makemessages.Command):
                             default='translations.json',
                             help='Namespace of the frontend locale file')
 
-    def handle(self, *args, **options):
-        # type: (*Any, **Any) -> None
+    def handle(self, *args: Any, **options: Any) -> None:
         self.handle_django_locales(*args, **options)
-        self.handle_frontend_locales(*args, **options)
+        self.handle_frontend_locales(**options)
 
-    def handle_frontend_locales(self, *args, **options):
-        # type: (*Any, **Any) -> None
-        self.frontend_source = options.get('frontend_source')
-        self.frontend_output = options.get('frontend_output')
-        self.frontend_namespace = options.get('frontend_namespace')
-        self.frontend_locale = options.get('locale')
-        self.frontend_exclude = options.get('exclude')
-        self.frontend_all = options.get('all')
+    def handle_frontend_locales(self, *,
+                                frontend_source: str,
+                                frontend_output: str,
+                                frontend_namespace: str,
+                                locale: List[str],
+                                exclude: List[str],
+                                all: bool,
+                                **options: Any) -> None:
+        self.frontend_source = frontend_source
+        self.frontend_output = frontend_output
+        self.frontend_namespace = frontend_namespace
+        self.frontend_locale = locale
+        self.frontend_exclude = exclude
+        self.frontend_all = all
 
         translation_strings = self.get_translation_strings()
         self.write_translation_strings(translation_strings)
 
-    def handle_django_locales(self, *args, **options):
-        # type: (*Any, **Any) -> None
+    def handle_django_locales(self, *args: Any, **options: Any) -> None:
         old_endblock_re = template.endblock_re
         old_block_re = template.block_re
         old_constant_re = template.constant_re
@@ -118,8 +124,7 @@ class Command(makemessages.Command):
             template.plural_re.pattern + '|' + r"""^-?\s*pluralize(?:\s+.+|-?$)""")
         template.constant_re = re.compile(r"""_\(((?:".*?")|(?:'.*?')).*\)""")
 
-        def my_templatize(src, *args, **kwargs):
-            # type: (Text, *Any, **Any) -> Text
+        def my_templatize(src: Text, *args: Any, **kwargs: Any) -> Text:
             new_src = strip_whitespaces(src)
             return old_templatize(new_src, *args, **kwargs)
 
@@ -128,16 +133,16 @@ class Command(makemessages.Command):
         try:
             ignore_patterns = options.get('ignore_patterns', [])
             ignore_patterns.append('docs/*')
+            ignore_patterns.append('var/*')
             options['ignore_patterns'] = ignore_patterns
-            super(Command, self).handle(*args, **options)
+            super().handle(*args, **options)
         finally:
             template.endblock_re = old_endblock_re
             template.block_re = old_block_re
             template.templatize = old_templatize
             template.constant_re = old_constant_re
 
-    def extract_strings(self, data):
-        # type: (str) -> List[str]
+    def extract_strings(self, data: str) -> List[str]:
         translation_strings = []  # type: List[str]
         for regex in frontend_compiled_regexes:
             for match in regex.findall(data):
@@ -148,16 +153,14 @@ class Command(makemessages.Command):
 
         return translation_strings
 
-    def ignore_javascript_comments(self, data):
-        # type: (str) -> str
+    def ignore_javascript_comments(self, data: str) -> str:
         # Removes multi line comments.
         data = multiline_js_comment.sub('', data)
         # Removes single line (//) comments.
         data = singleline_js_comment.sub('', data)
         return data
 
-    def get_translation_strings(self):
-        # type: () -> List[str]
+    def get_translation_strings(self) -> List[str]:
         translation_strings = []  # type: List[str]
         dirname = self.get_template_dir()
 
@@ -179,16 +182,13 @@ class Command(makemessages.Command):
 
         return list(set(translation_strings))
 
-    def get_template_dir(self):
-        # type: () -> str
+    def get_template_dir(self) -> str:
         return self.frontend_source
 
-    def get_namespace(self):
-        # type: () -> str
+    def get_namespace(self) -> str:
         return self.frontend_namespace
 
-    def get_locales(self):
-        # type: () -> Iterable[str]
+    def get_locales(self) -> Iterable[str]:
         locale = self.frontend_locale
         exclude = self.frontend_exclude
         process_all = self.frontend_all
@@ -203,12 +203,10 @@ class Command(makemessages.Command):
             locales = locale or all_locales
             return set(locales) - set(exclude)
 
-    def get_base_path(self):
-        # type: () -> str
+    def get_base_path(self) -> str:
         return self.frontend_output
 
-    def get_output_paths(self):
-        # type: () -> Iterable[str]
+    def get_output_paths(self) -> Iterable[str]:
         base_path = self.get_base_path()
         locales = self.get_locales()
         for path in [os.path.join(base_path, locale) for locale in locales]:
@@ -217,8 +215,8 @@ class Command(makemessages.Command):
 
             yield os.path.join(path, self.get_namespace())
 
-    def get_new_strings(self, old_strings, translation_strings, locale):
-        # type: (Mapping[str, str], List[str], str) -> Dict[str, str]
+    def get_new_strings(self, old_strings: Mapping[str, str],
+                        translation_strings: List[str], locale: str) -> Dict[str, str]:
         """
         Missing strings are removed, new strings are added and already
         translated strings are not touched.
@@ -241,8 +239,7 @@ class Command(makemessages.Command):
 
         return new_strings
 
-    def write_translation_strings(self, translation_strings):
-        # type: (List[str]) -> None
+    def write_translation_strings(self, translation_strings: List[str]) -> None:
         for locale, output_path in zip(self.get_locales(), self.get_output_paths()):
             self.stdout.write("[frontend] processing locale {}".format(locale))
             try:

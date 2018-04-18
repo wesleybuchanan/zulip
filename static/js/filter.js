@@ -169,7 +169,7 @@ Filter.canonicalize_term = function (opts) {
     var operator = opts.operator;
     var operand = opts.operand;
 
-    // Make negated be explictly false for both clarity and
+    // Make negated be explicitly false for both clarity and
     // simplifying deepEqual checks in the tests.
     if (!negated) {
         negated = false;
@@ -485,7 +485,7 @@ Filter.operator_to_prefix = function (operator, negated) {
 // Convert a list of operators to a human-readable description.
 function describe_unescaped(operators) {
     if (operators.length === 0) {
-        return 'Go to Home view';
+        return 'all messages';
     }
 
     var parts = [];

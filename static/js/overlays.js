@@ -49,13 +49,15 @@ exports.active_modal = function () {
 };
 
 exports.open_overlay = function (opts) {
+    popovers.hide_all();
+
     if (!opts.name || !opts.overlay || !opts.on_close) {
         blueslip.error('Programming error in open_overlay');
         return;
     }
 
     if (active_overlay || open_overlay_name || close_handler) {
-        blueslip.error('Programming error--trying to open ' + opts.name +
+        blueslip.error('Programming error — trying to open ' + opts.name +
             ' before closing ' + open_overlay_name);
         return;
     }
@@ -100,6 +102,8 @@ exports.open_modal = function (name) {
     blueslip.debug('open modal: ' + name);
 
     $("#" + name).modal("show").attr("aria-hidden", false);
+    // Remove previous alert messsages from modal, if exists.
+    $("#" + name).find(".alert").hide();
 };
 
 exports.close_overlay = function (name) {

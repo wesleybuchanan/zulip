@@ -130,7 +130,7 @@ configure_nginx() {
 configure_certs() {
     echo "Executing certificates configuration..."
     if [ ! -f "$DATA_DIR/certs/zulip.key" ] && [ ! -f "$DATA_DIR/certs/zulip.combined-chain.crt" ]; then
-        /root/zulip/scripts/setup/generate-self-signed-certs "$ZULIP_USER_DOMAIN"
+        /root/zulip/scripts/setup/generate-self-signed-cert "$ZULIP_USER_DOMAIN"
         mv /etc/ssl/private/zulip.key "$DATA_DIR/certs/zulip.key"
         mv /etc/ssl/certs/zulip.combined-chain.crt "$DATA_DIR/certs/zulip.combined-chain.crt"
     fi
@@ -349,10 +349,10 @@ zulip_first_start_init() {
     fi
     set -e
     touch "$DATA_DIR/.initiated"
-    echo "Zulip first start init sucessful."
+    echo "Zulip first start init successful."
 }
 # migrate_zulip_database Runs the zulip database migrations
-# This runs the migration everytime the container runs, to make sure Zulip has the
+# This runs the migration every time the container runs, to make sure Zulip has the
 # uptodate database version.
 migrate_zulip_database() {
     echo "Migrating Zulip to new version ..."

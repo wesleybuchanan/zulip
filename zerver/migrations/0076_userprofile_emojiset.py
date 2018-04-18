@@ -3,7 +3,6 @@
 
 from django.db import migrations, models
 
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -14,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='userprofile',
             name='emojiset',
-            field=models.CharField(choices=[('apple', 'Apple style'), ('emojione', 'Emoji One style'), ('google', 'Google style'), ('twitter', 'Twitter style')], default='google', max_length=20),
+            field=models.CharField(choices=[('apple', 'Apple'), ('emojione', 'Emoji One'), ('google', 'Google'), ('twitter', 'Twitter')], default='google', max_length=20),
         ),
     ]

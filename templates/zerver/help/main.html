@@ -4,9 +4,10 @@
 
 {% block portico_content %}
 <div class="app help terms-page inline-block">
-    <div class="sidebar">
-        <h2 class="no-arrow"><a href="/help/" class="no-underline">Index</a></h2>
-        {{ render_markdown_path("zerver/help/include/sidebar.md") }}
+    <div class="sidebar slide">
+        <h1><a href="/help/" class="no-underline">Index</a></h1>
+        {{ render_markdown_path("zerver/help/include/sidebar.md", api_uri_context) }}
+        <h1 class="home-link"><a href="/" class="no-underline">Back to Home</a></h1>
     </div>
 
     <svg height="32px" class="hamburger" style="enable-background:new 0 0 32 32;" version="1.1" viewBox="0 0 32 32" width="32px" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
@@ -15,13 +16,13 @@
 
     <div class="markdown">
         <div class="content">
-            {{ render_markdown_path(article) }}
+            {{ render_markdown_path(article, api_uri_context) }}
             <div id="footer" class="documentation-footer">
                 <hr />
                 <p>
                     <a href="/help/">Documentation home</a>.
                     The Zulip software, including this documentation, is open source! Learn how
-                    you can contribute <a href="https://zulip.readthedocs.io/en/latest/user-docs.html">here</a>.
+                    you can contribute <a href="https://zulip.readthedocs.io/en/latest/subsystems/user-docs.html">here</a>.
                 </p>
             </div>
 

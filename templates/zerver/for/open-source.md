@@ -64,6 +64,12 @@ Efficiently refer to issues or code reviews with notation like `#1234` or
 [custom linkification filter](/help/add-a-custom-linkification-filter) for
 your organization.
 
+### Enforce a code of conduct
+
+Link to your community norms or give other instructions right on your Zulip
+registration page. Admins can delete messages and deactivate (ban) users at
+any time.
+
 ### Hundreds of integrations
 
 Get events from GitHub, Travis CI, JIRA, and
@@ -74,7 +80,7 @@ issue its own place for discussion.
 
 Don’t like something? You can
 [open an issue](https://github.com/zulip/zulip/issues),
-[submit a patch](http://zulip.readthedocs.io/en/latest/dev-overview.html),
+[submit a patch](https://zulip.readthedocs.io/en/latest/development/overview.html),
 [fork the project](https://github.com/zulip/zulip), or chat with us directly
 at [chat.zulip.org](https://chat.zulip.org). All code, including the
 [desktop](https://github.com/zulip/zulip-electron) and
