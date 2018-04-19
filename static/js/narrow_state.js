@@ -41,7 +41,7 @@ exports.update_email = function (user_id, new_email) {
 /* Operators we should send to the server. */
 exports.public_operators = function () {
     if (current_filter === undefined) {
-        return undefined;
+        return;
     }
     return current_filter.public_operators();
 };
@@ -73,7 +73,8 @@ function collect_single(operators) {
 // This logic is here and not in the 'compose' module because
 // it will get more complicated as we add things to the narrow
 // operator language.
-exports.set_compose_defaults = function (opts) {
+exports.set_compose_defaults = function () {
+    var opts = {};
     var single = collect_single(exports.operators());
 
     // Set the stream, subject, and/or PM recipient if they are
@@ -90,11 +91,12 @@ exports.set_compose_defaults = function (opts) {
     if (single.has('pm-with')) {
         opts.private_message_recipient = single.get('pm-with');
     }
+    return opts;
 };
 
 exports.stream = function () {
     if (current_filter === undefined) {
-        return undefined;
+        return;
     }
     var stream_operands = current_filter.operands("stream");
     if (stream_operands.length === 1) {
@@ -104,18 +106,42 @@ exports.stream = function () {
         // name (considering renames and capitalization).
         return stream_data.get_name(name);
     }
-    return undefined;
+    return;
 };
 
 exports.topic = function () {
     if (current_filter === undefined) {
-        return undefined;
+        return;
     }
     var operands = current_filter.operands("topic");
     if (operands.length === 1) {
         return operands[0];
     }
-    return undefined;
+    return;
+};
+
+exports.pm_string = function () {
+    // If you are narrowed to a PM conversation
+    // with users 4, 5, and 99, this will return "4,5,99"
+
+    if (current_filter === undefined) {
+        return;
+    }
+
+    var operands = current_filter.operands("pm-with");
+    if (operands.length !== 1) {
+        return;
+    }
+
+    var emails_string = operands[0];
+
+    if (!emails_string) {
+        return;
+    }
+
+    var user_ids_string = people.emails_strings_to_user_ids_string(emails_string);
+
+    return user_ids_string;
 };
 
 // Are we narrowed to PMs: all PMs or PMs with particular people.

@@ -1,4 +1,3 @@
-var assert = require('assert');
 var noop = function () {};
 var return_true = function () { return true; };
 set_global('$', global.make_zjquery());
@@ -11,11 +10,8 @@ set_global('colorspace', {
     },
 });
 
-add_dependencies({
-    stream_data: 'js/stream_data.js',
-});
-
-var stream_events = require('js/stream_events.js');
+zrequire('stream_data');
+zrequire('stream_events');
 var with_overrides = global.with_overrides;
 
 var frontend = {
@@ -151,6 +147,7 @@ stream_data.add_sub('Frontend', frontend);
         subscribe_myself: noop,
         set_subscribers: noop,
         get_colors: noop,
+        update_calculated_fields: noop,
     });
     set_global('subs', { update_settings_for_subscribed: noop });
     set_global('narrow_state', { is_for_stream_id: noop });
@@ -194,7 +191,7 @@ stream_data.add_sub('Frontend', frontend);
         assert.equal(updated, true);
     });
 
-    // reset overriden value
+    // reset overridden value
     set_global('narrow_state', { is_for_stream_id: noop });
 
     with_overrides(function (override) {

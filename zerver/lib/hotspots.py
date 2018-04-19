@@ -25,13 +25,13 @@ ALL_HOTSPOTS = {
         'description': 'Click here to start a new conversation. Pick a topic '
         '(2-3 words is best), and give it a go!',
     },
-}  # type Dict[str, Dict[str, Text]]
+}  # type: Dict[str, Dict[str, Text]]
 
-def get_next_hotspots(user):
-    # type: (UserProfile) -> List[Dict[str, object]]
-    # Only used for manual testing
-    SEND_ALL = False
-    if settings.DEVELOPMENT and SEND_ALL:
+def get_next_hotspots(user: UserProfile) -> List[Dict[str, object]]:
+    # For manual testing, it can be convenient to set
+    # ALWAYS_SEND_ALL_HOTSPOTS=True in `zproject/dev_settings.py` to
+    # make it easy to click on all of the hotspots.
+    if settings.ALWAYS_SEND_ALL_HOTSPOTS:
         return [{
             'name': hotspot,
             'title': ALL_HOTSPOTS[hotspot]['title'],

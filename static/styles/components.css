@@ -26,7 +26,7 @@
     line-height: 0.8;
     font-size: 1.3rem;
     text-align: center;
-    border: 1px solid hsl(0, 0%, 60%);
+    border: 1px solid hsla(0, 0%, 0%, 0.6);
     color: hsl(0, 0%, 80%);
 
     border-radius: 4px;
@@ -64,4 +64,40 @@ a.no-underline:hover {
 
 .italic {
     font-style: italic;
+}
+
+.ps--scrolling-x > .ps__rail-x > .ps__thumb-x:hover {
+    background-color: #606060;
+}
+
+.ps--scrolling-y > .ps__rail-y > .ps__thumb-y:hover {
+    background-color: #606060;
+}
+
+/* -- flex forms -- */
+.flex-row * {
+    box-sizing: border-box;
+}
+
+.flex-row input[type=text],
+.flex-row input[type=password] {
+    height: auto;
+    width: 100%;
+}
+
+.flex-row {
+    display: flex;
+}
+
+.flex-row.normal {
+    width: 500px;
+}
+
+.flex-row .field {
+    margin: 10px 10px;
+    width: 100%;
+}
+
+.flex-row .field + .field {
+    margin-left: 10px;
 }

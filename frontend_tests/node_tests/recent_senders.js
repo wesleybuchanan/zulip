@@ -1,6 +1,4 @@
-var assert = require('assert');
-var rs = require('js/recent_senders.js');
-var _ = require('node_modules/underscore/underscore.js');
+var rs = zrequire('recent_senders');
 
 (function test_process_message_for_senders() {
     var stream1 = 1;
@@ -18,13 +16,13 @@ var _ = require('node_modules/underscore/underscore.js');
     // New stream
     var message1 = {
         stream_id: stream1,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic1,
         sender_id: sender1,
     };
     var message2 = {
         stream_id: stream2,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic1,
         sender_id: sender2,
     };
@@ -47,7 +45,7 @@ var _ = require('node_modules/underscore/underscore.js');
     // New topic
     var message3 = {
         stream_id: stream1,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic2,
         sender_id: sender3,
     };
@@ -59,7 +57,7 @@ var _ = require('node_modules/underscore/underscore.js');
     // New sender
     var message4 = {
         stream_id: stream1,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic1,
         sender_id: sender2,
     };
@@ -71,7 +69,7 @@ var _ = require('node_modules/underscore/underscore.js');
     // More recent message
     var message5 = {
         stream_id: stream1,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic1,
         sender_id: sender1,
     };
@@ -83,19 +81,19 @@ var _ = require('node_modules/underscore/underscore.js');
     // Same stream, but different topics
     var message6 = {
         stream_id: stream3,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic1,
         sender_id: sender1,
     };
     var message7 = {
         stream_id: stream3,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic2,
         sender_id: sender2,
     };
     var message8 = {
         stream_id: stream3,
-        timestamp: _.uniqueId(),
+        id: _.uniqueId(),
         subject: topic3,
         sender_id: sender3,
     };

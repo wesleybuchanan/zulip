@@ -11,35 +11,18 @@ var exports = {};
    true: user clicked YES */
 
 var user_acknowledged_all_everyone;
+var user_acknowledged_announce;
 
 exports.all_everyone_warn_threshold = 15;
+exports.announce_warn_threshold = 60;
 
-var uploads_domain = document.location.protocol + '//' + document.location.host;
-var uploads_path = '/user_uploads';
-var uploads_re = new RegExp("\\]\\(" + uploads_domain + "(" + uploads_path + "[^\\)]+)\\)", 'g');
-var clone_file_input;
-function make_upload_absolute(uri) {
-    if (uri.indexOf(uploads_path) === 0) {
-        // Rewrite the URI to a usable link
-        return uploads_domain + uri;
-    }
-    return uri;
-}
+exports.uploads_domain = document.location.protocol + '//' + document.location.host;
+exports.uploads_path = '/user_uploads';
+exports.uploads_re = new RegExp("\\]\\(" + exports.uploads_domain + "(" + exports.uploads_path + "[^\\)]+)\\)", 'g');
 
 function make_uploads_relative(content) {
     // Rewrite uploads in markdown links back to domain-relative form
-    return content.replace(uploads_re, "]($1)");
-}
-
-// This function resets an input type="file".  Pass in the
-// jquery object.
-function clear_out_file_list(jq_file_list) {
-    if (clone_file_input !== undefined) {
-        jq_file_list.replaceWith(clone_file_input.clone(true));
-    }
-    // Hack explanation:
-    // IE won't let you do this (untested, but so says StackOverflow):
-    //    $("#file_input").val("");
+    return content.replace(exports.uploads_re, "]($1)");
 }
 
 function show_all_everyone_warnings() {
@@ -60,7 +43,35 @@ function show_all_everyone_warnings() {
 exports.clear_all_everyone_warnings = function () {
     $("#compose-all-everyone").hide();
     $("#compose-all-everyone").empty();
-    $("#send-status").hide();
+    $("#compose-send-status").hide();
+};
+
+function show_sending_indicator(whats_happening) {
+    if (whats_happening === undefined) {
+        whats_happening = 'Sending...';
+    }
+    $("#sending-indicator").html(i18n.t(whats_happening));
+    $("#sending-indicator").show();
+}
+
+function show_announce_warnings() {
+    var stream_count = stream_data.get_subscriber_count(compose_state.stream_name()) || 0;
+
+    var announce_template = templates.render("compose_announce", {count: stream_count});
+    var error_area_announce = $("#compose-announce");
+
+    if (!error_area_announce.is(':visible')) {
+        error_area_announce.append(announce_template);
+    }
+
+    error_area_announce.show();
+    user_acknowledged_announce = false;
+}
+
+exports.clear_announce_warnings = function () {
+    $("#compose-announce").hide();
+    $("#compose-announce").empty();
+    $("#compose-send-status").hide();
 };
 
 exports.clear_invites = function () {
@@ -68,12 +79,21 @@ exports.clear_invites = function () {
     $("#compose_invite_users").empty();
 };
 
+exports.clear_private_stream_alert = function () {
+    $("#compose_private_stream_alert").hide();
+    $("#compose_private_stream_alert").empty();
+};
+
 exports.reset_user_acknowledged_all_everyone_flag = function () {
     user_acknowledged_all_everyone = undefined;
 };
 
+exports.reset_user_acknowledged_announce_flag = function () {
+    user_acknowledged_announce = undefined;
+};
+
 exports.clear_preview_area = function () {
-    $("#new_message_content").show();
+    $("#compose-textarea").show();
     $("#undo_markdown_preview").hide();
     $("#preview_message_area").hide();
     $("#preview_content").empty();
@@ -146,10 +166,10 @@ function create_message_object() {
 exports.create_message_object = create_message_object;
 
 function compose_error(error_text, bad_input) {
-    $('#send-status').removeClass(common.status_classes)
+    $('#compose-send-status').removeClass(common.status_classes)
                .addClass('alert-error')
                .stop(true).fadeTo(0, 1);
-    $('#error-msg').html(error_text);
+    $('#compose-error-msg').html(error_text);
     $("#compose-send-button").prop('disabled', false);
     $("#sending-indicator").hide();
     if (bad_input !== undefined) {
@@ -157,51 +177,34 @@ function compose_error(error_text, bad_input) {
     }
 }
 
-function send_message_ajax(request, success, error) {
-    channel.post({
-        url: '/json/messages',
-        data: request,
-        success: success,
-        error: function (xhr, error_type) {
-            if (error_type !== 'timeout' && reload.is_pending()) {
-                // The error might be due to the server changing
-                reload.initiate({immediate: true,
-                                 save_pointer: true,
-                                 save_narrow: true,
-                                 save_compose: true,
-                                 send_after_reload: true});
-                return;
-            }
-
-            var response = channel.xhr_error_message("Error sending message", xhr);
-            error(response);
-        },
-    });
+function nonexistent_stream_reply_error() {
+    $("#nonexistent_stream_reply_error").show();
+    $("#compose-reply-error-msg").html("There are no messages to reply to yet.");
+    setTimeout(function () {
+        $("#nonexistent_stream_reply_error").hide();
+    }, 5000);
 }
 
-var socket;
-if (page_params.use_websockets) {
-    socket = new Socket("/sockjs");
+function compose_not_subscribed_error(error_text, bad_input) {
+    $('#compose-send-status').removeClass(common.status_classes)
+               .addClass('home-error-bar')
+               .stop(true).fadeTo(0, 1);
+    $('#compose-error-msg').html(error_text);
+    $("#compose-send-button").prop('disabled', false);
+    $("#sending-indicator").hide();
+    $(".compose-send-status-close").hide();
+    if (bad_input !== undefined) {
+        bad_input.focus().select();
+    }
 }
-// For debugging.  The socket will eventually move out of this file anyway.
-exports._socket = socket;
 
-function send_message_socket(request, success, error) {
-    request.socket_user_agent = navigator.userAgent;
-    socket.send(request, success, function (type, resp) {
-        var err_msg = "Error sending message";
-        if (type === 'response') {
-            err_msg += ": " + resp.msg;
-        }
-        error(err_msg);
-    });
-}
+exports.nonexistent_stream_reply_error = nonexistent_stream_reply_error;
 
 function clear_compose_box() {
-    $("#new_message_content").val('').focus();
+    $("#compose-textarea").val('').focus();
     drafts.delete_draft_after_send();
     compose_ui.autosize_textarea();
-    $("#send-status").hide(0);
+    $("#compose-send-status").hide(0);
     $("#compose-send-button").prop('disabled', false);
     $("#sending-indicator").hide();
     resize.resize_bottom_whitespace();
@@ -213,24 +216,6 @@ exports.send_message_success = function (local_id, message_id, locally_echoed) {
     }
 
     echo.reify_message_id(local_id, message_id);
-};
-
-exports.transmit_message = function (request, on_success, error) {
-
-    function success(data) {
-        // Call back to our callers to do things like closing the compose
-        // box and turning off spinners and reifying locally echoed messages.
-        on_success(data);
-
-        // Once everything is done, get ready to report times to the server.
-        sent_messages.report_server_ack(request.local_id);
-    }
-
-    if (page_params.use_websockets) {
-        send_message_socket(request, success, error);
-    } else {
-        send_message_ajax(request, success, error);
-    }
 };
 
 exports.send_message = function send_message(request) {
@@ -279,19 +264,115 @@ exports.send_message = function send_message(request) {
         // If we're not local echo'ing messages, or if this message was not
         // locally echoed, show error in compose box
         if (!locally_echoed) {
-            compose_error(response, $('#new_message_content'));
+            compose_error(response, $('#compose-textarea'));
             return;
         }
 
         echo.message_send_error(local_id, response);
     }
 
-    exports.transmit_message(request, success, error);
+    transmit.send_message(request, success, error);
     server_events.assert_get_events_running("Restarting get_events because it was not running during send");
 
     if (locally_echoed) {
         clear_compose_box();
     }
+};
+
+exports.deferred_message_types = {
+    scheduled: {
+        delivery_type: 'send_later',
+        test: /^\/schedule/,
+        slash_command: '/schedule',
+    },
+    reminders: {
+        delivery_type: 'remind',
+        test: /^\/remind/,
+        slash_command: '/remind',
+    },
+};
+
+function is_deferred_delivery(message_content) {
+    var reminders_test = exports.deferred_message_types.reminders.test;
+    var scheduled_test = exports.deferred_message_types.scheduled.test;
+    return (reminders_test.test(message_content) ||
+            scheduled_test.test(message_content));
+}
+
+function patch_request_for_scheduling(request) {
+    var new_request = request;
+    var raw_message = request.content.split('\n');
+    var command_line = raw_message[0];
+    var message = raw_message.slice(1).join('\n');
+
+    var deferred_message_type = _.filter(exports.deferred_message_types, function (props) {
+        return command_line.match(props.test) !== null;
+    })[0];
+    var command = command_line.match(deferred_message_type.test)[0];
+
+    var deliver_at = command_line.slice(command.length + 1);
+
+    if (message.trim() === '' || deliver_at.trim() === '' ||
+        command_line.slice(command.length, command.length + 1) !== ' ') {
+
+        $("#compose-textarea").attr('disabled', false);
+        if (command_line.slice(command.length, command.length + 1) !== ' ') {
+            compose_error(i18n.t('Invalid slash command. Check if you are missing a space after the command.'), $('#compose-textarea'));
+        } else if (deliver_at.trim() === '') {
+            compose_error(i18n.t('Please specify time for your reminder.'), $('#compose-textarea'));
+        } else {
+            compose_error(i18n.t('Your reminder note is empty!'), $('#compose-textarea'));
+        }
+        return;
+    }
+
+    new_request.content = message;
+    new_request.deliver_at = deliver_at;
+    new_request.delivery_type = deferred_message_type.delivery_type;
+    new_request.tz_guess = moment.tz.guess();
+    return new_request;
+}
+
+exports.schedule_message = function schedule_message(request, success, error) {
+    if (request === undefined) {
+        request = create_message_object();
+    }
+
+    if (request.type === "private") {
+        request.to = JSON.stringify(request.to);
+    } else {
+        request.to = JSON.stringify([request.to]);
+    }
+
+    /* success and error callbacks are kind of a package deal here. When scheduling
+    a message either by means of slash command or from message feed, if we need to do
+    something special on success then we will also need to know if our request errored
+    and do something appropriate. Therefore we just check if success callback is not
+    defined and just assume request to be coming from compose box. This is correct
+    because we won't ever actually have success operate in different context than error. */
+    if (success === undefined) {
+        success = function (data) {
+            notifications.notify_above_composebox('Scheduled your Message to be delivered at: ' + data.deliver_at);
+            $("#compose-textarea").attr('disabled', false);
+            clear_compose_box();
+        };
+        error = function (response) {
+            $("#compose-textarea").attr('disabled', false);
+            compose_error(response, $('#compose-textarea'));
+        };
+        /* We are adding a disable on compose under this block since it actually
+        has its place with the branch of code which does stuff when slash command
+        is incoming from compose_box */
+        $("#compose-textarea").attr('disabled', true);
+    }
+
+    request = patch_request_for_scheduling(request);
+
+    if (request === undefined) {
+       return;
+    }
+
+    transmit.send_message(request, success, error);
 };
 
 exports.enter_with_preview_open = function () {
@@ -301,17 +382,25 @@ exports.enter_with_preview_open = function () {
         exports.finish();
     } else {
         // Otherwise, we return to the compose box and focus it
-        $("#new_message_content").focus();
+        $("#compose-textarea").focus();
     }
 };
 
 exports.finish = function () {
     exports.clear_invites();
+    exports.clear_private_stream_alert();
+    notifications.clear_compose_notifications();
 
     if (! compose.validate()) {
         return false;
     }
-    exports.send_message();
+
+    var message_content = compose_state.message_content();
+    if (is_deferred_delivery(message_content)) {
+        exports.schedule_message();
+    } else {
+        exports.send_message();
+    }
     exports.clear_preview_area();
     // TODO: Do we want to fire the event even if the send failed due
     // to a server-side error?
@@ -333,16 +422,7 @@ exports.update_email = function (user_id, new_email) {
 
 exports.get_invalid_recipient_emails = function () {
     var private_recipients = util.extract_pm_recipients(compose_state.recipient());
-    var invalid_recipients = [];
-    _.each(private_recipients, function (email) {
-        if (people.realm_get(email) !== undefined) {
-            return;
-        }
-        if (people.is_cross_realm_email(email)) {
-            return;
-        }
-        invalid_recipients.push(email);
-    });
+    var invalid_recipients = _.reject(private_recipients, people.is_valid_email_for_compose);
 
     return invalid_recipients;
 };
@@ -408,32 +488,58 @@ function validate_stream_message_mentions(stream_name) {
     return true;
 }
 
-exports.validate_stream_message_address_info = function (stream_name) {
-    if (stream_data.is_subscribed(stream_name)) {
-        return true;
-    }
+function validate_stream_message_announce(stream_name) {
+    var stream_count = stream_data.get_subscriber_count(stream_name) || 0;
 
+    if (stream_name === "announce" &&
+        stream_count > compose.announce_warn_threshold) {
+        if (user_acknowledged_announce === undefined ||
+            user_acknowledged_announce === false) {
+            // user has not seen a warning message yet if undefined
+            show_announce_warnings();
+
+            $("#compose-send-button").prop('disabled', false);
+            $("#sending-indicator").hide();
+            return false;
+        }
+    } else {
+        exports.clear_announce_warnings();
+    }
+    // at this point, the user has acknowledged the warning
+    user_acknowledged_announce = undefined;
+
+    return true;
+}
+
+exports.validation_error = function (error_type, stream_name) {
     var response;
 
-    switch (check_unsubscribed_stream_for_send(stream_name,
-                                               page_params.narrow_stream !== undefined)) {
+    var context = {};
+    context.stream_name = Handlebars.Utils.escapeExpression(stream_name);
+
+    switch (error_type) {
     case "does-not-exist":
-        response = "<p>The stream <b>" +
-            Handlebars.Utils.escapeExpression(stream_name) + "</b> does not exist.</p>" +
-            "<p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>";
+        response = i18n.t("<p>The stream <b>__stream_name__</b> does not exist.</p><p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>", context);
         compose_error(response, $('#stream'));
         return false;
     case "error":
         compose_error(i18n.t("Error checking subscription"), $("#stream"));
         return false;
     case "not-subscribed":
-        response = "<p>You're not subscribed to the stream <b>" +
-            Handlebars.Utils.escapeExpression(stream_name) + "</b>.</p>" +
-            "<p>Manage your subscriptions <a href='#streams/all'>on your Streams page</a>.</p>";
-        compose_error(response, $('#stream'));
+        var new_row = templates.render("compose_not_subscribed");
+        compose_not_subscribed_error(new_row, $('#stream'));
         return false;
     }
     return true;
+};
+
+exports.validate_stream_message_address_info = function (stream_name) {
+    if (stream_data.is_subscribed(stream_name)) {
+        return true;
+    }
+    var autosubscribe = page_params.narrow_stream !== undefined;
+    var error_type = check_unsubscribed_stream_for_send(stream_name, autosubscribe);
+    return exports.validation_error(error_type, stream_name);
 };
 
 function validate_stream_message() {
@@ -451,9 +557,21 @@ function validate_stream_message() {
         }
     }
 
-    if (!exports.validate_stream_message_address_info(stream_name) ||
-        !validate_stream_message_mentions(stream_name)) {
-        return false;
+    // If both `@all` is mentioned and it's in `#announce`, just validate
+    // for `@all`. Users shouldn't have to hit "yes" more than once.
+    if (util.is_all_or_everyone_mentioned(compose_state.message_content()) &&
+        stream_name === "announce") {
+        if (!exports.validate_stream_message_address_info(stream_name) ||
+            !validate_stream_message_mentions(stream_name)) {
+            return false;
+        }
+    // If either criteria isn't met, just do the normal validation.
+    } else {
+      if (!exports.validate_stream_message_address_info(stream_name) ||
+          !validate_stream_message_mentions(stream_name) ||
+          !validate_stream_message_announce(stream_name)) {
+          return false;
+      }
     }
 
     return true;
@@ -462,8 +580,8 @@ function validate_stream_message() {
 // The function checks whether the recipients are users of the realm or cross realm users (bots
 // for now)
 function validate_private_message() {
-    if (compose_state.recipient() === "") {
-        compose_error(i18n.t("Please specify at least one recipient"), $("#private_message_recipient"));
+    if (compose_state.recipient().length === 0) {
+        compose_error(i18n.t("Please specify at least one valid recipient"), $("#private_message_recipient"));
         return false;
     } else if (page_params.realm_is_zephyr_mirror_realm) {
         // For Zephyr mirroring realms, the frontend doesn't know which users exist
@@ -487,10 +605,15 @@ function validate_private_message() {
 
 exports.validate = function () {
     $("#compose-send-button").attr('disabled', 'disabled').blur();
-    $("#sending-indicator").show();
+    var message_content = compose_state.message_content();
+    if (is_deferred_delivery(message_content)) {
+        show_sending_indicator('Scheduling...');
+    } else {
+        show_sending_indicator();
+    }
 
-    if (/^\s*$/.test(compose_state.message_content())) {
-        compose_error(i18n.t("You have nothing to send!"), $("#new_message_content"));
+    if (/^\s*$/.test(message_content)) {
+        compose_error(i18n.t("You have nothing to send!"), $("#compose-textarea"));
         return false;
     }
 
@@ -505,38 +628,82 @@ exports.validate = function () {
     return validate_stream_message();
 };
 
+exports.handle_keydown = function (event) {
+    var code = event.keyCode || event.which;
+    var textarea = $("#compose-textarea");
+    var range = textarea.range();
+    var isBold = code === 66;
+    var isItalic = code === 73 && !event.shiftKey;
+    var isLink = code === 76 && event.shiftKey;
+
+    // detect command and ctrl key
+    var isCmdOrCtrl = /Mac/i.test(navigator.userAgent) ? event.metaKey : event.ctrlKey;
+
+    if ((isBold || isItalic || isLink) && isCmdOrCtrl) {
+        function add_markdown(markdown) {
+            var textarea = $("#compose-textarea");
+            var range = textarea.range();
+            if (!document.execCommand('insertText', false, markdown)) {
+                textarea.range(range.start, range.end).range(markdown);
+            }
+            event.preventDefault();
+        }
+
+        if (isBold) {
+            // ctrl + b: Convert selected text to bold text
+            add_markdown("**" + range.text + "**");
+            if (!range.length) {
+                textarea.caret(textarea.caret() - 2);
+            }
+        }
+        if (isItalic) {
+            // ctrl + i: Convert selected text to italic text
+            add_markdown("*" + range.text + "*");
+            if (!range.length) {
+                textarea.caret(textarea.caret() - 1);
+            }
+        }
+        if (isLink) {
+            // ctrl + l: Insert a link to selected text
+            add_markdown("[" + range.text + "](url)");
+            var position = textarea.caret();
+            var txt = document.getElementById("compose-textarea");
+
+            // Include selected text in between [] parantheses and insert '(url)'
+            // where "url" should be automatically selected.
+            // Position of cursor depends on whether browser supports exec
+            // command or not. So set cursor position accrodingly.
+            if (range.length > 0) {
+                if (document.queryCommandEnabled('insertText')) {
+                    txt.selectionStart = position - 4;
+                    txt.selectionEnd = position - 1;
+                } else {
+                    txt.selectionStart = position + range.length + 3;
+                    txt.selectionEnd = position + range.length + 6;
+                }
+            } else {
+                textarea.caret(textarea.caret() - 6);
+            }
+        }
+
+        compose_ui.autosize_textarea();
+        return;
+    }
+};
+
 exports.initialize = function () {
     $('#stream,#subject,#private_message_recipient').on('keyup', update_fade);
     $('#stream,#subject,#private_message_recipient').on('change', update_fade);
+    $('#compose-textarea').on('keydown', exports.handle_keydown);
 
     $("#compose form").on("submit", function (e) {
        e.preventDefault();
        compose.finish();
     });
 
-    resize.watch_manual_resize("#new_message_content");
+    resize.watch_manual_resize("#compose-textarea");
 
-    // Run a feature test and decide whether to display
-    // the "Attach files" button
-    if (window.XMLHttpRequest && (new XMLHttpRequest()).upload) {
-        $("#compose #attach_files").removeClass("notdisplayed");
-    }
-
-    // Lazy load the Dropbox script, since it can slow our page load
-    // otherwise, and isn't enabled for all users. Also, this Dropbox
-    // script isn't under an open source license, so we can't (for legal
-    // reasons) minify it with our own code.
-    if (feature_flags.dropbox_integration) {
-        LazyLoad.js('https://www.dropbox.com/static/api/1/dropins.js', function () {
-            // Successful load. We should now have window.Dropbox.
-            if (! _.has(window, 'Dropbox')) {
-                blueslip.error('Dropbox script reports loading but window.Dropbox undefined');
-            } else if (Dropbox.isBrowserSupported()) {
-                Dropbox.init({appKey: window.dropboxAppKey});
-                $("#compose #attach_dropbox_files").removeClass("notdisplayed");
-            }
-        });
-    }
+    upload.feature_check($("#compose #attach_files"));
 
     // Show a warning if a user @-mentions someone who will not receive this message
     $(document).on('usermention_completed.zulip', function (event, data) {
@@ -552,8 +719,8 @@ exports.initialize = function () {
         if (data !== undefined && data.mentioned !== undefined) {
             var email = data.mentioned.email;
 
-            // warn if @all or @everyone is mentioned
-            if (data.mentioned.full_name  === 'all' || data.mentioned.full_name === 'everyone') {
+            // warn if @all, @everyone or @stream is mentioned
+            if (data.mentioned.full_name  === 'all' || data.mentioned.full_name === 'everyone' || data.mentioned.full_name === 'stream') {
                 return; // don't check if @all or @everyone is subscribed to a stream
             }
 
@@ -575,6 +742,10 @@ exports.initialize = function () {
             }
         }
 
+        // User group mentions will fall through here.  In the future,
+        // we may want to add some sort of similar warning for cases
+        // where nobody in the group is subscribed, but that decision
+        // can wait on user feedback.
     });
 
     $("#compose-all-everyone").on('click', '.compose-all-everyone-confirm', function (event) {
@@ -584,6 +755,33 @@ exports.initialize = function () {
         user_acknowledged_all_everyone = true;
         exports.clear_all_everyone_warnings();
         compose.finish();
+    });
+
+    $("#compose-announce").on('click', '.compose-announce-confirm', function (event) {
+        event.preventDefault();
+
+        $(event.target).parents('.compose-announce').remove();
+        user_acknowledged_announce = true;
+        exports.clear_announce_warnings();
+        compose.finish();
+    });
+
+    $("#compose-send-status").on('click', '.sub_unsub_button', function (event) {
+        event.preventDefault();
+
+        var stream_name = $('#stream').val();
+        if (stream_name === undefined) {
+            return;
+        }
+        var sub = stream_data.get_sub(stream_name);
+        subs.sub_or_unsub(sub);
+        $("#compose-send-status").hide();
+    });
+
+    $("#compose-send-status").on('click', '#compose_not_subscribed_close', function (event) {
+        event.preventDefault();
+
+        $("#compose-send-status").hide();
     });
 
     $("#compose_invite_users").on('click', '.compose_invite_link', function (event) {
@@ -637,32 +835,105 @@ exports.initialize = function () {
         }
     });
 
+    // Show a warning if a private stream is linked
+    $(document).on('streamname_completed.zulip', function (event, data) {
+        // For PMs, we don't warn about links to private streams, since
+        // you are often specifically encouraging somebody to subscribe
+        // to the stream over PMs.
+        if (compose_state.get_message_type() !== 'stream') {
+            return;
+        }
+
+        if (data === undefined || data.stream === undefined) {
+            blueslip.error('Invalid options passed into handler.');
+            return;
+        }
+
+        var compose_stream = stream_data.get_sub(compose_state.stream_name());
+        if (compose_stream.subscribers && data.stream.subscribers) {
+            var compose_stream_sub = compose_stream.subscribers.keys();
+            var mentioned_stream_sub = data.stream.subscribers.keys();
+            // Don't warn if subscribers list of current compose_stream is a subset of
+            // mentioned_stream subscribers list.
+            if (_.difference(compose_stream_sub, mentioned_stream_sub).length === 0) {
+                return;
+            }
+        }
+
+        // data.stream refers to the stream we're linking to in
+        // typeahead.  If it's not invite-only, then it's public, and
+        // there is no need to warn about it, since all users can already
+        // see all the public streams.
+        if (!data.stream.invite_only) {
+            return;
+        }
+
+        var stream_name = data.stream.name;
+
+        var warning_area = $("#compose_private_stream_alert");
+        var context = { stream_name: stream_name };
+        var new_row = templates.render("compose_private_stream_alert", context);
+
+        warning_area.append(new_row);
+        warning_area.show();
+    });
+
+    $("#compose_private_stream_alert").on('click', '.compose_private_stream_alert_close', function (event) {
+        var stream_alert_row = $(event.target).parents('.compose_private_stream_alert');
+        var stream_alert = $("#compose_private_stream_alert");
+
+        stream_alert_row.remove();
+
+        if (stream_alert.children().length === 0) {
+            stream_alert.hide();
+        }
+    });
+
     // Click event binding for "Attach files" button
     // Triggers a click on a hidden file input field
 
     $("#compose").on("click", "#attach_files", function (e) {
         e.preventDefault();
-        if (clone_file_input === undefined) {
-            clone_file_input = $('#file_input').clone(true);
-        }
         $("#compose #file_input").trigger("click");
     });
 
-    function show_preview(rendered_content) {
-        var preview_html;
-        if (rendered_content.indexOf("<p>/me ") === 0) {
+    // content is passed to check for status messages ("/me ...")
+    // and will be undefined in case of errors
+    function show_preview(rendered_content, content) {
+        var rendered_preview_html;
+        if (content !== undefined && markdown.is_status_message(content, rendered_content)) {
             // Handle previews of /me messages
-            preview_html = "<strong>" + page_params.full_name + "</strong> " + rendered_content.slice(4 + 3, -4);
+            rendered_preview_html = "<strong>" + page_params.full_name + "</strong> " + rendered_content.slice(4 + 3, -4);
         } else {
-            preview_html = rendered_content;
+            rendered_preview_html = rendered_content;
         }
-        $("#preview_content").html(preview_html);
+
+        $("#preview_content").html(rendered_preview_html);
+        if (page_params.emojiset === "text") {
+            $("#preview_content").find(".emoji").replaceWith(function () {
+                var text = $(this).attr("title");
+                return ":" + text + ":";
+            });
+         }
     }
+
+    $('#compose').on('click', '#video_link', function (e) {
+        e.preventDefault();
+
+        if (page_params.jitsi_server_url === null) {
+            return;
+        }
+
+        var video_call_id = util.random_int(100000000000000, 999999999999999);
+        var video_call_link = page_params.jitsi_server_url + "/" +  video_call_id;
+        var video_call_link_text = '[' + _('Click to join video call') + '](' + video_call_link + ')';
+        compose_ui.insert_syntax_and_focus(video_call_link_text);
+    });
 
     $("#compose").on("click", "#markdown_preview", function (e) {
         e.preventDefault();
-        var content = $("#new_message_content").val();
-        $("#new_message_content").hide();
+        var content = $("#compose-textarea").val();
+        $("#compose-textarea").hide();
         $("#markdown_preview").hide();
         $("#undo_markdown_preview").show();
         $("#preview_message_area").show();
@@ -694,7 +965,7 @@ exports.initialize = function () {
                     if (markdown.contains_backend_only_syntax(content)) {
                         loading.destroy_indicator($("#markdown_preview_spinner"));
                     }
-                    show_preview(response_data.rendered);
+                    show_preview(response_data.rendered, content);
                 },
                 error: function () {
                     if (markdown.contains_backend_only_syntax(content)) {
@@ -711,140 +982,11 @@ exports.initialize = function () {
         exports.clear_preview_area();
     });
 
-    $("#compose").on("click", "#attach_dropbox_files", function (e) {
-        e.preventDefault();
-        var options = {
-            // Required. Called when a user selects an item in the Chooser.
-            success: function (files) {
-                var textbox = $("#new_message_content");
-                var links = _.map(files, function (file) { return '[' + file.name + '](' + file.link +')'; })
-                             .join(' ') + ' ';
-                textbox.val(textbox.val() + links);
-            },
-            // Optional. A value of false (default) limits selection to a single file, while
-            // true enables multiple file selection.
-            multiselect: true,
-            iframe: true,
-        };
-        Dropbox.choose(options);
-    });
-
-    function uploadStarted() {
-        $("#compose-send-button").attr("disabled", "");
-        $("#send-status").addClass("alert-info")
-                         .show();
-        $(".send-status-close").one('click', exports.abort_xhr);
-        $("#error-msg").html(
-            $("<p>").text(i18n.t("Uploading…"))
-                    .after('<div class="progress progress-striped active">' +
-                           '<div class="bar" id="upload-bar" style="width: 00%;"></div>' +
-                           '</div>'));
-    }
-
-    function progressUpdated(i, file, progress) {
-        $("#upload-bar").width(progress + "%");
-    }
-
-    function uploadError(err, file) {
-        var msg;
-        $("#send-status").addClass("alert-error")
-                        .removeClass("alert-info");
-        $("#compose-send-button").prop("disabled", false);
-        switch (err) {
-        case 'BrowserNotSupported':
-            msg = i18n.t("File upload is not yet available for your browser.");
-            break;
-        case 'TooManyFiles':
-            msg = i18n.t("Unable to upload that many files at once.");
-            break;
-        case 'FileTooLarge':
-            // sanitization not needed as the file name is not potentially parsed as HTML, etc.
-            var context = { file_name: file.name };
-            msg = i18n.t('"__file_name__" was too large; the maximum file size is 25MiB.', context);
-            break;
-        case 'REQUEST ENTITY TOO LARGE':
-            msg = i18n.t("Sorry, the file was too large.");
-            break;
-        case 'QuotaExceeded':
-            var translation_part1 = i18n.t('Upload would exceed your maximum quota. You can delete old attachments to free up space.');
-            var translation_part2 = i18n.t('Click here');
-            msg = translation_part1 + ' <a href="#settings/uploaded-files">' + translation_part2 + '</a>';
-            $("#error-msg").html(msg);
-            return;
-        default:
-            msg = i18n.t("An unknown error occurred.");
-            break;
-        }
-        $("#error-msg").text(msg);
-    }
-
-    function uploadFinished(i, file, response) {
-        if (response.uri === undefined) {
-            return;
-        }
-        var textbox = $("#new_message_content");
-        var split_uri = response.uri.split("/");
-        var filename = split_uri[split_uri.length - 1];
-        // Urgh, yet another hack to make sure we're "composing"
-        // when text gets added into the composebox.
-        if (!compose_state.composing()) {
-            compose_actions.start('stream');
-        }
-
-        var uri = make_upload_absolute(response.uri);
-
-        if (i === -1) {
-            // This is a paste, so there's no filename. Show the image directly
-            textbox.val(textbox.val() + "[pasted image](" + uri + ") ");
-        } else {
-            // This is a dropped file, so make the filename a link to the image
-            textbox.val(textbox.val() + "[" + filename + "](" + uri + ")" + " ");
-        }
-        compose_ui.autosize_textarea();
-        $("#compose-send-button").prop("disabled", false);
-        $("#send-status").removeClass("alert-info")
-                         .hide();
-
-        // In order to upload the same file twice in a row, we need to clear out
-        // the #file_input element, so that the next time we use the file dialog,
-        // an actual change event is fired.  This is extracted to a function
-        // to abstract away some IE hacks.
-        clear_out_file_list($("#file_input"));
-    }
-
-    // Expose the internal file upload functions to the desktop app,
-    // since the linux/windows QtWebkit based apps upload images
-    // directly to the server
-    if (window.bridge) {
-        exports.uploadStarted = uploadStarted;
-        exports.progressUpdated = progressUpdated;
-        exports.uploadError = uploadError;
-        exports.uploadFinished = uploadFinished;
-    }
-
-    $("#compose").filedrop({
-        url: "/json/user_uploads",
-        fallback_id: "file_input",
-        paramname: "file",
-        maxfilesize: page_params.maxfilesize,
-        data: {
-            // the token isn't automatically included in filedrop's post
-            csrfmiddlewaretoken: csrf_token,
-        },
-        raw_droppable: ['text/uri-list', 'text/plain'],
-        drop: uploadStarted,
-        progressUpdated: progressUpdated,
-        error: uploadError,
-        uploadFinished: uploadFinished,
-        rawDrop: function (contents) {
-            var textbox = $("#new_message_content");
-            if (!compose_state.composing()) {
-                compose_actions.start('stream');
-            }
-            textbox.val(textbox.val() + contents);
-            compose_ui.autosize_textarea();
-        },
-    });
+    $("#compose").filedrop(
+        upload.options({
+            mode: 'compose',
+        })
+    );
 
     if (page_params.narrow !== undefined) {
         if (page_params.narrow_topic !== undefined) {

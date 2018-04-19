@@ -1,19 +1,19 @@
+from typing import Any, Dict, Iterable, Optional, Text
+
+from django.http import HttpRequest, HttpResponse
 from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_stream_message
-from zerver.lib.response import json_success, json_error
-from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
+
+from zerver.decorator import api_key_only_webhook_view
+from zerver.lib.request import REQ, has_request_variables
+from zerver.lib.response import json_error, json_success
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.lib.validator import check_dict, check_string
 from zerver.models import UserProfile
 
-from django.http import HttpRequest, HttpResponse
-from typing import Dict, Any, Iterable, Optional, Text
-
 @api_key_only_webhook_view('OpsGenie')
 @has_request_variables
-def api_opsgenie_webhook(request, user_profile,
-                         payload=REQ(argument_type='body'),
-                         stream=REQ(default='opsgenie')):
-    # type: (HttpRequest, UserProfile, Dict[str, Any], Text) -> HttpResponse
+def api_opsgenie_webhook(request: HttpRequest, user_profile: UserProfile,
+                         payload: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
 
     # construct the body of the message
     info = {"additional_info": '',
@@ -40,12 +40,13 @@ def api_opsgenie_webhook(request, user_profile,
     if 'message' in payload['alert']:
         info['additional_info'] += "Message: *{}*\n".format(payload['alert']['message'])
     body = ''
-    body_template = "**OpsGenie: [Alert for {integration_name}.](https://app.opsgenie.com/alert/V2#/show/{alert_id})**\n" \
+    body_template = "**OpsGenie: [Alert for {integration_name}.]" \
+                    "(https://app.opsgenie.com/alert/V2#/show/{alert_id})**\n" \
                     "Type: *{alert_type}*\n" \
                     "{additional_info}" \
                     "{tags}"
     body += body_template.format(**info)
     # send the message
-    check_send_stream_message(user_profile, request.client, stream, topic, body)
+    check_send_webhook_message(request, user_profile, topic, body)
 
     return json_success()

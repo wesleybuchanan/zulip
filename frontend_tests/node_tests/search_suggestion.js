@@ -1,24 +1,12 @@
-// Unit test the search_suggestion.js module.
-//
-// These tests are framework-free and run sequentially; they are invoked
-// immediately after being defined.  The contract here is that tests should
-// clean up after themselves, and they should explicitly stub all
-// dependencies.
-
-add_dependencies({
-    util: 'js/util.js',
-    Handlebars: 'handlebars',
-    Filter: 'js/filter.js',
-    typeahead_helper: 'js/typeahead_helper.js',
-    people: 'js/people.js',
-    stream_data: 'js/stream_data.js',
-    topic_data: 'js/topic_data.js',
-    narrow_state: 'js/narrow_state.js',
-});
-
-var people = global.people;
-
-var search = require('js/search_suggestion.js');
+zrequire('util');
+zrequire('typeahead_helper');
+zrequire('Handlebars', 'handlebars');
+zrequire('Filter', 'js/filter');
+zrequire('narrow_state');
+zrequire('stream_data');
+zrequire('topic_data');
+zrequire('people');
+var search = zrequire('search_suggestion');
 
 var bob = {
     email: 'bob@zulip.com',
@@ -65,7 +53,7 @@ topic_data.reset();
     };
 
     global.narrow_state.stream = function () {
-        return undefined;
+        return;
     };
 
     var suggestions = search.get_suggestions(query);
@@ -85,7 +73,7 @@ topic_data.reset();
     };
 
     global.narrow_state.stream = function () {
-        return undefined;
+        return;
     };
 
     var ted =
@@ -256,7 +244,7 @@ topic_data.reset();
     };
 
     global.narrow_state.stream = function () {
-        return undefined;
+        return;
     };
 
     set_global('activity', {
@@ -442,7 +430,7 @@ init();
     };
 
     global.narrow_state.stream = function () {
-        return undefined;
+        return;
     };
 
     var suggestions = search.get_suggestions(query);
@@ -478,7 +466,7 @@ init();
     };
 
     global.narrow_state.stream = function () {
-        return undefined;
+        return;
     };
 
     var query = '';

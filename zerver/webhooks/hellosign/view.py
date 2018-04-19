@@ -1,18 +1,16 @@
-from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_stream_message
-from zerver.lib.response import json_success, json_error
-from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-
-from zerver.models import UserProfile
-
-from django.http import HttpRequest, HttpResponse
-from six import text_type
 from typing import Any, Dict, List
 
-def format_body(signatories, model_payload):
-    # type: (List[Dict[str, Any]], Dict[str, Any]) -> str
-    def append_separator(i):
-        # type: (int) -> None
+from django.http import HttpRequest, HttpResponse
+from django.utils.translation import ugettext as _
+
+from zerver.decorator import api_key_only_webhook_view
+from zerver.lib.request import REQ, has_request_variables
+from zerver.lib.response import json_error, json_success
+from zerver.lib.webhooks.common import check_send_webhook_message
+from zerver.models import UserProfile
+
+def format_body(signatories: List[Dict[str, Any]], model_payload: Dict[str, Any]) -> str:
+    def append_separator(i: int) -> None:
         if i + 1 == len(signatories):
             result.append('.')
         elif i + 2 == len(signatories):
@@ -32,8 +30,8 @@ def format_body(signatories, model_payload):
         append_separator(i)
     return ''.join(result)
 
-def ready_payload(signatories, payload):
-    # type: (List[Dict[str, Any]], Dict[str, Dict[str, Any]]) -> Dict[str, Any]
+def ready_payload(signatories: List[Dict[str, Any]],
+                  payload: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     model_payload = {'contract_title': payload['signature_request']['title']}
     for i, signatory in enumerate(signatories):
         model_payload['name_{}'.format(i)] = signatory['signer_name']
@@ -42,13 +40,10 @@ def ready_payload(signatories, payload):
 
 @api_key_only_webhook_view('HelloSign')
 @has_request_variables
-def api_hellosign_webhook(request, user_profile,
-                          payload=REQ(argument_type='body'),
-                          stream=REQ(default='hellosign'),
-                          topic=REQ(default=None)):
-    # type: (HttpRequest, UserProfile, Dict[str, Dict[str, Any]], text_type, text_type) -> HttpResponse
+def api_hellosign_webhook(request: HttpRequest, user_profile: UserProfile,
+                          payload: Dict[str, Dict[str, Any]]=REQ(argument_type='body')) -> HttpResponse:
     model_payload = ready_payload(payload['signature_request']['signatures'], payload)
     body = format_body(payload['signature_request']['signatures'], model_payload)
-    topic = topic or model_payload['contract_title']
-    check_send_stream_message(user_profile, request.client, stream, topic, body)
+    topic = model_payload['contract_title']
+    check_send_webhook_message(request, user_profile, topic, body)
     return json_success()

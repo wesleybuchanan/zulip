@@ -1,22 +1,21 @@
 
 import logging
+from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional, Text
 
-from argparse import ArgumentParser
-from zerver.models import UserProfile
-from django.utils.http import urlsafe_base64_encode
+from django.contrib.auth.tokens import PasswordResetTokenGenerator, \
+    default_token_generator
 from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 
-from django.contrib.auth.tokens import default_token_generator, PasswordResetTokenGenerator
-
-from zerver.lib.send_email import send_email, FromAddress
-from zerver.lib.management import ZulipBaseCommand, CommandError
+from zerver.lib.management import CommandError, ZulipBaseCommand
+from zerver.lib.send_email import FromAddress, send_email
+from zerver.models import UserProfile
 
 class Command(ZulipBaseCommand):
     help = """Send email to specified email address."""
 
-    def add_arguments(self, parser):
-        # type: (ArgumentParser) -> None
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('--entire-server', action="store_true", default=False,
                             help="Send to every user on the server. ")
         self.add_user_list_args(parser,
@@ -24,8 +23,7 @@ class Command(ZulipBaseCommand):
                                 all_users_help="Send to every user on the realm.")
         self.add_realm_args(parser)
 
-    def handle(self, *args, **options):
-        # type: (*Any, **str) -> None
+    def handle(self, *args: Any, **options: str) -> None:
         if options["entire_server"]:
             users = UserProfile.objects.filter(is_active=True, is_bot=False,
                                                is_mirror_dummy=False)
@@ -40,10 +38,10 @@ class Command(ZulipBaseCommand):
 
         self.send(users)
 
-    def send(self, users, subject_template_name='', email_template_name='',
-             use_https=True, token_generator=default_token_generator,
-             from_email=None, html_email_template_name=None):
-        # type: (List[UserProfile], str, str, bool, PasswordResetTokenGenerator, Optional[Text], Optional[str]) -> None
+    def send(self, users: List[UserProfile], subject_template_name: str='',
+             email_template_name: str='', use_https: bool=True,
+             token_generator: PasswordResetTokenGenerator=default_token_generator,
+             from_email: Optional[Text]=None, html_email_template_name: Optional[str]=None) -> None:
         """Sends one-use only links for resetting password to target users
 
         """

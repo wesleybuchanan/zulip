@@ -18,6 +18,9 @@ if os.getenv("EXTERNAL_HOST") is None:
     os.environ["EXTERNAL_HOST"] = "testserver"
 from .settings import *
 
+# Clear out the REALM_HOSTS set in dev_settings.py
+REALM_HOSTS = {}
+
 # Used to clone DBs in backend tests.
 BACKEND_DATABASE_TEMPLATE = 'zulip_test_template'
 
@@ -103,21 +106,25 @@ else:
     WEBPACK_FILE = os.path.join('var', 'webpack-stats-test.json')
 WEBPACK_LOADER['DEFAULT']['STATS_FILE'] = os.path.join(DEPLOY_ROOT, WEBPACK_FILE)
 
-if CASPER_TESTS:
-    # Don't auto-restart Tornado server during casper tests
-    AUTORELOAD = False
-else:
+# Don't auto-restart Tornado server during automated tests
+AUTORELOAD = False
+
+if not CASPER_TESTS:
     # Use local memory cache for backend tests.
     CACHES['default'] = {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
     }
 
-    def set_loglevel(logger_name, level):
+    def set_loglevel(logger_name, level) -> None:
         LOGGING['loggers'].setdefault(logger_name, {})['level'] = level
     set_loglevel('zulip.requests', 'CRITICAL')
     set_loglevel('zulip.management', 'CRITICAL')
     set_loglevel('django.request', 'ERROR')
     set_loglevel('fakeldap', 'ERROR')
+    set_loglevel('zulip.send_email', 'ERROR')
+    set_loglevel('zerver.lib.digest', 'ERROR')
+    set_loglevel('zerver.lib.email_mirror', 'ERROR')
+    set_loglevel('zerver.worker.queue_processors', 'WARNING')
 
 # Enable file:/// hyperlink support by default in tests
 ENABLE_FILE_LINKS = True
@@ -128,6 +135,7 @@ LOCAL_UPLOADS_DIR = 'var/test_uploads'
 S3_KEY = 'test-key'
 S3_SECRET_KEY = 'test-secret-key'
 S3_AUTH_UPLOADS_BUCKET = 'test-authed-bucket'
+S3_AVATAR_BUCKET = 'test-avatar-bucket'
 
 # Test Custom TOS template rendering
 TERMS_OF_SERVICE = 'corporate/terms.md'
@@ -146,3 +154,7 @@ GOOGLE_OAUTH2_CLIENT_SECRET = "secret"
 
 SOCIAL_AUTH_GITHUB_KEY = "key"
 SOCIAL_AUTH_GITHUB_SECRET = "secret"
+
+# By default two factor authentication is disabled in tests.
+# Explicitly set this to True within tests that must have this on.
+TWO_FACTOR_AUTHENTICATION_ENABLED = False

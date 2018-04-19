@@ -3,6 +3,21 @@ var exports = {};
 
 exports.view = {}; // function namespace
 
+exports.get_local_reaction_id = function (reaction_info) {
+    return [reaction_info.reaction_type,
+            reaction_info.emoji_name,
+            reaction_info.emoji_code].join(',');
+};
+
+exports.get_reaction_info = function (reaction_id) {
+    var reaction_info = reaction_id.split(',');
+    return {
+        reaction_type: reaction_info[0],
+        emoji_name: reaction_info[1],
+        emoji_code: reaction_info[2],
+    };
+};
+
 exports.open_reactions_popover = function () {
     var message = current_msg_list.selected_message();
     var target = $(current_msg_list.selected_row()).find(".actions_hover")[0];
@@ -13,38 +28,58 @@ exports.open_reactions_popover = function () {
     return true;
 };
 
-function should_send_reaction(emoji_name, operation) {
-    // If a default emoji with this name exists then always send it irrespective
-    // of whether a realm emoji with this name exists or not.
-    if (!emoji_codes.name_to_codepoint.hasOwnProperty(emoji_name)) {
-        // When the user attempts to add a reaction for a given emoji
-        // name, and a built-in emoji with this name doesn't exist,
-        // then send the request only if there is an active realm
-        // emoji with this name.
-        //
-        // This behavior isn't exactly correct: A user should be add
-        // their support to an emoji reaction for a deactivated (no
-        // longer available for new messages) realm emoji, but more
-        // backend work is required to support that anyway.
-        if (operation === "add") {
-            return emoji.active_realm_emojis.hasOwnProperty(emoji_name);
-        }
-        // While removing a reaction and a default emoji with this name doesn't
-        // exist then send the request if there is any realm emoji with this name
-        // whether active or inactive.
-        return emoji.all_realm_emojis.hasOwnProperty(emoji_name);
-    }
-    return true;
-}
+exports.current_user_has_reacted_to_emoji = function (message, emoji_code, type) {
+    var user_id = page_params.user_id;
+    return _.any(message.reactions, function (r) {
+        return (r.user.id === user_id) &&
+               (r.reaction_type === type) &&
+               (r.emoji_code === emoji_code);
+    });
+};
 
-function send_reaction_ajax(message_id, emoji_name, operation) {
-    if (!should_send_reaction(emoji_name, operation)) {
-        // Emoji doesn't exist
+function get_message(message_id) {
+    var message = message_store.get(message_id);
+    if (!message) {
+        blueslip.error('reactions: Bad message id: ' + message_id);
         return;
     }
+
+    return message;
+}
+
+function create_reaction(message_id, reaction_info) {
+    return {
+        message_id: message_id,
+        user: {
+            user_id: page_params.user_id,
+            id: page_params.user_id,
+        },
+        local_id: exports.get_local_reaction_id(reaction_info),
+        reaction_type: reaction_info.reaction_type,
+        emoji_name: reaction_info.emoji_name,
+        emoji_code: reaction_info.emoji_code,
+    };
+}
+
+function update_ui_and_send_reaction_ajax(message_id, reaction_info) {
+    var message = get_message(message_id);
+    var has_reacted = exports.current_user_has_reacted_to_emoji(
+        message,
+        reaction_info.emoji_code,
+        reaction_info.reaction_type
+    );
+    var operation = has_reacted ? 'remove' : 'add';
+    var reaction = create_reaction(message_id, reaction_info);
+
+    if (operation === "add") {
+        exports.add_reaction(reaction);
+    } else {
+        exports.remove_reaction(reaction);
+    }
+
     var args = {
-        url: '/json/messages/' + message_id + '/emoji_reactions/' + encodeURIComponent(emoji_name),
-        data: {},
+        url: '/json/messages/' + message_id + '/reactions',
+        data: reaction_info,
         success: function () {},
         error: function (xhr) {
             var response = channel.xhr_error_message("Error sending reaction", xhr);
@@ -57,54 +92,57 @@ function send_reaction_ajax(message_id, emoji_name, operation) {
         },
     };
     if (operation === 'add') {
-        channel.put(args);
+        channel.post(args);
     } else if (operation === 'remove') {
         channel.del(args);
     }
 }
 
-exports.current_user_has_reacted_to_emoji = function (message, emoji_name) {
-    var user_id = page_params.user_id;
-    return _.any(message.reactions, function (r) {
-        return (r.user.id === user_id) &&  (r.emoji_name === emoji_name);
-    });
-};
-
-function get_user_list_for_message_reaction(message, emoji_name) {
+function get_user_list_for_message_reaction(message, local_id) {
     var matching_reactions = message.reactions.filter(function (reaction) {
-        return reaction.emoji_name === emoji_name;
+        return reaction.local_id === local_id;
     });
     return matching_reactions.map(function (reaction) {
         return reaction.user.id;
     });
 }
 
-function get_message(message_id) {
-    var message = message_store.get(message_id);
-    if (!message) {
-        blueslip.error('reactions: Bad message id: ' + message_id);
-        return;
-    }
-
-    return message;
-}
-
 exports.toggle_emoji_reaction = function (message_id, emoji_name) {
-    // This toggles the current user's reaction to the clicked emoji.
+    // This codepath doesn't support toggling a deactivated realm emoji.
+    // Since an user can interact with a deactivated realm emoji only by
+    // clicking on a reaction and that is handled by `process_reaction_click()`
+    // method. This codepath is to be used only where there is no chance of an
+    // user interacting with a deactivated realm emoji like emoji picker.
+    var reaction_info = {
+        emoji_name: emoji_name,
+    };
 
-    var message = get_message(message_id);
-    if (!message) {
+    if (emoji.active_realm_emojis.hasOwnProperty(emoji_name)) {
+        if (emoji_name === 'zulip') {
+            reaction_info.reaction_type = 'zulip_extra_emoji';
+        } else {
+            reaction_info.reaction_type = 'realm_emoji';
+        }
+        reaction_info.emoji_code = emoji.active_realm_emojis[emoji_name].id;
+    } else if (emoji_codes.name_to_codepoint.hasOwnProperty(emoji_name)) {
+        reaction_info.reaction_type = 'unicode_emoji';
+        reaction_info.emoji_code = emoji_codes.name_to_codepoint[emoji_name];
+    } else {
+        blueslip.warn('Bad emoji name: ' + emoji_name);
         return;
     }
 
-    var has_reacted = exports.current_user_has_reacted_to_emoji(message, emoji_name);
-    var operation = has_reacted ? 'remove' : 'add';
-
-    send_reaction_ajax(message_id, emoji_name, operation);
+    update_ui_and_send_reaction_ajax(message_id, reaction_info);
 
     // The next line isn't always necessary, but it is harmless/quick
     // when no popovers are there.
     emoji_picker.hide_emoji_popover();
+};
+
+exports.process_reaction_click = function (message_id, local_id) {
+    var reaction_info = exports.get_reaction_info(local_id);
+
+    update_ui_and_send_reaction_ajax(message_id, reaction_info);
 };
 
 function full_name(user_id) {
@@ -135,9 +173,9 @@ exports.get_reaction_section = function (message_id) {
     return section;
 };
 
-exports.find_reaction = function (message_id, emoji_name) {
+exports.find_reaction = function (message_id, local_id) {
     var reaction_section = exports.get_reaction_section(message_id);
-    var reaction = reaction_section.find("[data-emoji-name='" + emoji_name + "']");
+    var reaction = reaction_section.find("[data-reaction-id='" + local_id + "']");
     return reaction;
 };
 
@@ -149,14 +187,13 @@ exports.get_add_reaction_button = function (message_id) {
 
 exports.set_reaction_count = function (reaction, count) {
     var count_element = reaction.find('.message_reaction_count');
-    count_element.html(count);
+    count_element.text(count);
 };
 
 exports.add_reaction = function (event) {
     var message_id = event.message_id;
-    var emoji_name = event.emoji_name;
-
     var message = message_store.get(message_id);
+
     if (message === undefined) {
         // If we don't have the message in cache, do nothing; if we
         // ever fetch it from the server, it'll come with the
@@ -164,25 +201,32 @@ exports.add_reaction = function (event) {
         return;
     }
 
+    var reacted = exports.current_user_has_reacted_to_emoji(message,
+                                                            event.emoji_code,
+                                                            event.reaction_type);
+    if (reacted && (event.user.user_id === page_params.user_id)) {
+        return;
+    }
+
     event.user.id = event.user.user_id;
+    event.local_id = exports.get_local_reaction_id(event);
 
     message.reactions.push(event);
 
-    var user_list = get_user_list_for_message_reaction(message, emoji_name);
+    var user_list = get_user_list_for_message_reaction(message, event.local_id);
+    var opts = {
+        message_id: event.message_id,
+        reaction_type: event.reaction_type,
+        emoji_name: event.emoji_name,
+        emoji_code: event.emoji_code,
+        user_id: event.user.id,
+    };
 
     if (user_list.length > 1) {
-        exports.view.update_existing_reaction({
-            message_id: event.message_id,
-            emoji_name: event.emoji_name,
-            user_list: user_list,
-            user_id: event.user.id,
-        });
+        opts.user_list = user_list;
+        exports.view.update_existing_reaction(opts);
     } else {
-        exports.view.insert_new_reaction({
-            message_id: event.message_id,
-            emoji_name: event.emoji_name,
-            user_id: event.user.id,
-        });
+        exports.view.insert_new_reaction(opts);
     }
 };
 
@@ -195,8 +239,8 @@ exports.view.update_existing_reaction = function (opts) {
     var emoji_name = opts.emoji_name;
     var user_list = opts.user_list;
     var user_id = opts.user_id;
-
-    var reaction = exports.find_reaction(message_id, emoji_name);
+    var local_id = exports.get_local_reaction_id(opts);
+    var reaction = exports.find_reaction(message_id, local_id);
 
     exports.set_reaction_count(reaction, user_list.length);
 
@@ -216,25 +260,27 @@ exports.view.insert_new_reaction = function (opts) {
 
     var message_id = opts.message_id;
     var emoji_name = opts.emoji_name;
+    var emoji_code = opts.emoji_code;
     var user_id = opts.user_id;
     var user_list = [user_id];
 
     var context = {
         message_id: message_id,
         emoji_name: emoji_name,
+        emoji_code: emoji_code,
     };
 
     var new_title = generate_title(emoji_name, user_list);
 
-    if (emoji.active_realm_emojis[emoji_name]) {
+    if (opts.reaction_type !== 'unicode_emoji') {
         context.is_realm_emoji = true;
-        context.url = emoji.active_realm_emojis[emoji_name].emoji_url;
+        context.url = emoji.all_realm_emojis[emoji_code].emoji_url;
     }
 
     context.count = 1;
     context.title = new_title;
-    context.emoji_alt_code = page_params.emoji_alt_code;
-    context.emoji_name_css_class = emoji.emojis_name_to_css_class[emoji_name];
+    context.local_id = exports.get_local_reaction_id(opts);
+    context.emoji_alt_code = (page_params.emojiset === 'text');
 
     if (opts.user_id === page_params.user_id) {
         context.class = "message_reaction reacted";
@@ -250,11 +296,14 @@ exports.view.insert_new_reaction = function (opts) {
 };
 
 exports.remove_reaction = function (event) {
+    var reaction_type = event.reaction_type;
     var emoji_name = event.emoji_name;
+    var emoji_code = event.emoji_code;
     var message_id = event.message_id;
     var user_id = event.user.user_id;
     var i = -1;
     var message = message_store.get(message_id);
+    var local_id = exports.get_local_reaction_id(event);
 
     if (message === undefined) {
         // If we don't have the message in cache, do nothing; if we
@@ -263,10 +312,17 @@ exports.remove_reaction = function (event) {
         return;
     }
 
+    var not_reacted = !exports.current_user_has_reacted_to_emoji(message,
+                                                                 emoji_code,
+                                                                 reaction_type);
+    if (not_reacted && (event.user.user_id === page_params.user_id)) {
+        return;
+    }
+
     // Do the data part first:
     // Remove reactions from our message object.
     _.each(message.reactions, function (reaction, index) {
-        if (reaction.emoji_name === emoji_name && reaction.user.id === user_id) {
+        if (reaction.local_id === local_id && reaction.user.id === user_id) {
             i = index;
         }
     });
@@ -276,11 +332,13 @@ exports.remove_reaction = function (event) {
     }
 
     // Compute the new user list for this reaction.
-    var user_list = get_user_list_for_message_reaction(message, emoji_name);
+    var user_list = get_user_list_for_message_reaction(message, local_id);
 
     exports.view.remove_reaction({
         message_id: message_id,
+        reaction_type: reaction_type,
         emoji_name: emoji_name,
+        emoji_code: emoji_code,
         user_list: user_list,
         user_id: user_id,
     });
@@ -292,8 +350,8 @@ exports.view.remove_reaction = function (opts) {
     var emoji_name = opts.emoji_name;
     var user_list = opts.user_list;
     var user_id = opts.user_id;
-
-    var reaction = exports.find_reaction(message_id, emoji_name);
+    var local_id = exports.get_local_reaction_id(opts);
+    var reaction = exports.find_reaction(message_id, local_id);
 
     if (user_list.length === 0) {
         // If this user was the only one reacting for this emoji, we simply
@@ -331,6 +389,7 @@ exports.get_message_reactions = function (message) {
     var message_reactions = new Dict();
     _.each(message.reactions, function (reaction) {
         var user_id = reaction.user.id;
+        reaction.local_id = exports.get_local_reaction_id(reaction);
         if (!people.is_known_user_id(user_id)) {
             blueslip.warn('Unknown user_id ' + user_id +
                           'in reaction for message ' + message.id);
@@ -338,21 +397,24 @@ exports.get_message_reactions = function (message) {
         }
         reaction.user_ids = [];
         var collapsed_reaction = message_reactions.setdefault(
-            reaction.emoji_name,
+            reaction.local_id,
             _.omit(reaction, 'user')
         );
         collapsed_reaction.user_ids.push(user_id);
     });
     var reactions = message_reactions.items().map(function (item) {
         var reaction = item[1];
-        reaction.emoji_name_css_class = reaction.emoji_code;
+        reaction.local_id = reaction.local_id;
+        reaction.reaction_type = reaction.reaction_type;
+        reaction.emoji_name = reaction.emoji_name;
+        reaction.emoji_code = reaction.emoji_code;
         reaction.count = reaction.user_ids.length;
         reaction.title = generate_title(reaction.emoji_name, reaction.user_ids);
-        reaction.emoji_alt_code = page_params.emoji_alt_code;
+        reaction.emoji_alt_code = (page_params.emojiset === 'text');
 
         if (reaction.reaction_type !== 'unicode_emoji') {
             reaction.is_realm_emoji = true;
-            reaction.url = emoji.all_realm_emojis[reaction.emoji_name].emoji_url;
+            reaction.url = emoji.all_realm_emojis[reaction.emoji_code].emoji_url;
         }
         if (reaction.user_ids.indexOf(page_params.user_id) !== -1) {
             reaction.class = "message_reaction reacted";

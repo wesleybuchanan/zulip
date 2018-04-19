@@ -3,15 +3,13 @@
 import os
 
 from django.db import migrations, models
-
 from django.db.backends.postgresql_psycopg2.schema import DatabaseSchemaEditor
 from django.db.migrations.state import StateApps
 
 from zerver.lib.upload import attachment_url_re, attachment_url_to_path_id
 
-
-def check_and_create_attachments(apps, schema_editor):
-    # type: (StateApps, DatabaseSchemaEditor) -> None
+def check_and_create_attachments(apps: StateApps,
+                                 schema_editor: DatabaseSchemaEditor) -> None:
     STREAM = 2
     Message = apps.get_model('zerver', 'Message')
     Attachment = apps.get_model('zerver', 'Attachment')

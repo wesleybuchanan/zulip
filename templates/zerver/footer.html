@@ -6,19 +6,17 @@
             <li><a href="/why-zulip/">{{ _("Why Zulip") }}</a></li>
             <li><a href="/features/">{{ _("Features") }}</a></li>
             <li><a href="/plans/">{{ _("Plans &amp; pricing") }}</a></li>
-            {% if about_link_disabled %}
-            {% else %}
-            <li><a href="/about/">{{ _("About") }}</a></li>
-            {% endif %}
+            <li><a href="/team/">{{ _("Team") }}</a></li>
         </ul>
     </section>
     <section>
         <h3>{{ _("Help &amp; community") }}</h3>
         <ul>
+            <li><a href="https://zulip.readthedocs.io/en/latest/contributing/chat-zulip-org.html">{{ _("Community chat") }}</a></li>
             <li><a href="/help/">{{ _("Help center") }}</a></li>
+            <li><a href="https://zulip.readthedocs.io/en/latest/">{{ _("Documentation") }}</a></li>
             <li><a href="https://twitter.com/zulip/">Twitter</a></li>
             <li><a href="https://github.com/zulip/zulip/">GitHub</a></li>
-            <li><a href="https://zulip.readthedocs.io/en/latest/">ReadTheDocs</a></li>
         </ul>
     </section>
     <section>
@@ -29,7 +27,7 @@
             <li><a href="{{ root_domain_uri }}/accounts/find">{{ _("Find account") }}</a></li>
             {% endif %}
             {% if open_realm_creation %}
-            <li><a href="{{ root_domain_uri }}/create_realm/">{{ _("New organization") }}</a></li>
+            <li><a href="{{ root_domain_uri }}/new/">{{ _("New organization") }}</a></li>
             {% endif %}
             {% if login_link_disabled %}
             {% else %}
@@ -38,7 +36,7 @@
             {% if register_link_disabled %}
             {% elif only_sso %}
             {% else %}
-            <li><a href="{{ url('register') }}">{{ _("Register") }}</a></li>
+            <li><a href="{{ url('register') }}">{{ _("Sign up") }}</a></li>
             {% endif %}
             <li><a href="{{ root_domain_uri }}/terms/">{{ _("Terms of Service") }}</a></li>
             <li><a href="{{ root_domain_uri }}/privacy/">{{ _("Privacy policy") }}</a></li>

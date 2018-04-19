@@ -15,8 +15,7 @@ from zerver.models import (
 
 class UserSoftDeactivationTests(ZulipTestCase):
 
-    def test_do_soft_deactivate_user(self):
-        # type: () -> None
+    def test_do_soft_deactivate_user(self) -> None:
         user = self.example_user('hamlet')
         self.assertFalse(user.long_term_idle)
 
@@ -25,8 +24,7 @@ class UserSoftDeactivationTests(ZulipTestCase):
         user.refresh_from_db()
         self.assertTrue(user.long_term_idle)
 
-    def test_do_soft_deactivate_users(self):
-        # type: () -> None
+    def test_do_soft_deactivate_users(self) -> None:
         users = [
             self.example_user('hamlet'),
             self.example_user('iago'),
@@ -37,17 +35,15 @@ class UserSoftDeactivationTests(ZulipTestCase):
 
         # We are sending this message to ensure that users have at least
         # one UserMessage row.
-        self.send_message(users[0].email,
-                          [user.email for user in users],
-                          Recipient.HUDDLE)
+        self.send_huddle_message(users[0].email,
+                                 [user.email for user in users])
         do_soft_deactivate_users(users)
 
         for user in users:
             user.refresh_from_db()
             self.assertTrue(user.long_term_idle)
 
-    def test_get_users_for_soft_deactivation(self):
-        # type: () -> None
+    def test_get_users_for_soft_deactivation(self) -> None:
         users = [
             self.example_user('hamlet'),
             self.example_user('iago'),
@@ -76,16 +72,14 @@ class UserSoftDeactivationTests(ZulipTestCase):
         for user in users_to_deactivate:
             self.assertTrue(user in users)
 
-    def test_do_soft_activate_users(self):
-        # type: () -> None
+    def test_do_soft_activate_users(self) -> None:
         users = [
             self.example_user('hamlet'),
             self.example_user('iago'),
             self.example_user('cordelia'),
         ]
-        self.send_message(users[0].email,
-                          [user.email for user in users],
-                          Recipient.HUDDLE)
+        self.send_huddle_message(users[0].email,
+                                 [user.email for user in users])
         do_soft_deactivate_users(users)
         for user in users:
             self.assertTrue(user.long_term_idle)

@@ -15,16 +15,20 @@ import ujson
 import shutil
 import subprocess
 import tempfile
+from zerver.lib.upload import random_name, sanitize_name
 from zerver.lib.avatar_hash import user_avatar_hash, user_avatar_path_from_ids
+from zerver.lib.upload import S3UploadBackend, LocalUploadBackend
 from zerver.lib.create_user import random_api_key
+from zerver.lib.bulk_create import bulk_create_users
 from zerver.models import UserProfile, Realm, Client, Huddle, Stream, \
     UserMessage, Subscription, Message, RealmEmoji, RealmFilter, \
     RealmDomain, Recipient, DefaultStream, get_user_profile_by_id, \
-    UserPresence, UserActivity, UserActivityInterval, \
-    get_display_recipient, Attachment, get_system_bot
+    UserPresence, UserActivity, UserActivityInterval, Reaction, \
+    CustomProfileField, CustomProfileFieldValue, \
+    get_display_recipient, Attachment, get_system_bot, email_to_username
 from zerver.lib.parallel import run_parallel
-from zerver.lib.utils import mkdir_p
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, \
+    Iterable, Text
 
 # Custom mypy types follow:
 Record = Dict[str, Any]
@@ -51,10 +55,10 @@ PostProcessData = Any  # TODO: make more specific
 # TODO: tighten this up with a union.
 MessageOutput = Dict[str, Any]
 
-realm_tables = [("zerver_defaultstream", DefaultStream),
-                ("zerver_realmemoji", RealmEmoji),
-                ("zerver_realmdomain", RealmDomain),
-                ("zerver_realmfilter", RealmFilter)]  # List[Tuple[TableName, Any]]
+realm_tables = [("zerver_defaultstream", DefaultStream, "defaultstream"),
+                ("zerver_realmemoji", RealmEmoji, "realmemoji"),
+                ("zerver_realmdomain", RealmDomain, "realmdomain"),
+                ("zerver_realmfilter", RealmFilter, "realmfilter")]  # List[Tuple[TableName, Any, str]]
 
 
 ALL_ZERVER_TABLES = [
@@ -126,8 +130,7 @@ DATE_FIELDS = {
     'zerver_userprofile': ['date_joined', 'last_login', 'last_reminder'],
 }  # type: Dict[TableName, List[Field]]
 
-def sanity_check_output(data):
-    # type: (TableData) -> None
+def sanity_check_output(data: TableData) -> None:
     tables = set(ALL_ZERVER_TABLES)
     tables -= set(NON_EXPORTED_TABLES)
     tables -= set(IMPLICIT_TABLES)
@@ -138,13 +141,11 @@ def sanity_check_output(data):
         if table not in data:
             logging.warning('??? NO DATA EXPORTED FOR TABLE %s!!!' % (table,))
 
-def write_data_to_file(output_file, data):
-    # type: (Path, Any) -> None
+def write_data_to_file(output_file: Path, data: Any) -> None:
     with open(output_file, "w") as f:
         f.write(ujson.dumps(data, indent=4))
 
-def make_raw(query, exclude=None):
-    # type: (Any, List[Field]) -> List[Record]
+def make_raw(query: Any, exclude: Optional[List[Field]]=None) -> List[Record]:
     '''
     Takes a Django query and returns a JSONable list
     of dictionaries corresponding to the database rows.
@@ -166,8 +167,7 @@ def make_raw(query, exclude=None):
 
     return rows
 
-def floatify_datetime_fields(data, table):
-    # type: (TableData, TableName) -> None
+def floatify_datetime_fields(data: TableData, table: TableName) -> None:
     for item in data[table]:
         for field in DATE_FIELDS[table]:
             orig_dt = item[field]
@@ -181,7 +181,7 @@ def floatify_datetime_fields(data, table):
             utc_naive  = dt.replace(tzinfo=None) - dt.utcoffset()
             item[field] = (utc_naive - datetime.datetime(1970, 1, 1)).total_seconds()
 
-class Config(object):
+class Config:
     '''
     A Config object configures a single table for exporting (and,
     maybe some day importing as well.
@@ -196,14 +196,21 @@ class Config(object):
 
     '''
 
-    def __init__(self, table=None, model=None,
-                 normal_parent=None, virtual_parent=None,
-                 filter_args=None, custom_fetch=None, custom_tables=None,
-                 post_process_data=None,
-                 concat_and_destroy=None, id_source=None, source_filter=None,
-                 parent_key=None, use_all=False, is_seeded=False, exclude=None):
-        # type: (str, Any, Config, Config, FilterArgs, CustomFetch, List[TableName], PostProcessData, List[TableName], IdSource, SourceFilter, Field, bool, bool, List[Field]) -> None
-
+    def __init__(self, table: Optional[str]=None,
+                 model: Optional[Any]=None,
+                 normal_parent: Optional['Config']=None,
+                 virtual_parent: Optional['Config']=None,
+                 filter_args: Optional[FilterArgs]=None,
+                 custom_fetch: Optional[CustomFetch]=None,
+                 custom_tables: Optional[List[TableName]]=None,
+                 post_process_data: Optional[PostProcessData]=None,
+                 concat_and_destroy: Optional[List[TableName]]=None,
+                 id_source: Optional[IdSource]=None,
+                 source_filter: Optional[SourceFilter]=None,
+                 parent_key: Optional[Field]=None,
+                 use_all: bool=False,
+                 is_seeded: bool=False,
+                 exclude: Optional[List[Field]]=None) -> None:
         assert table or custom_tables
         self.table = table
         self.model = model
@@ -262,8 +269,8 @@ class Config(object):
                     self.virtual_parent.table))
 
 
-def export_from_config(response, config, seed_object=None, context=None):
-    # type: (TableData, Config, Any, Context) -> None
+def export_from_config(response: TableData, config: Config, seed_object: Optional[Any]=None,
+                       context: Optional[Context]=None) -> None:
     table = config.table
     parent = config.parent
     model = config.model
@@ -373,8 +380,7 @@ def export_from_config(response, config, seed_object=None, context=None):
             context=context,
         )
 
-def get_realm_config():
-    # type: () -> Config
+def get_realm_config() -> Config:
     # This is common, public information about the realm that we can share
     # with all realm users.
 
@@ -537,8 +543,7 @@ def get_realm_config():
 
     return realm_config
 
-def sanity_check_stream_data(response, config, context):
-    # type: (TableData, Config, Context) -> None
+def sanity_check_stream_data(response: TableData, config: Config, context: Context) -> None:
 
     if context['exportable_user_ids'] is not None:
         # If we restrict which user ids are exportable,
@@ -546,7 +551,8 @@ def sanity_check_stream_data(response, config, context):
         # complex to have a sanity check.
         return
 
-    actual_streams = set([stream.name for stream in Stream.objects.filter(realm=response["zerver_realm"][0]['id'])])
+    actual_streams = set([stream.name for stream in Stream.objects.filter(
+        realm=response["zerver_realm"][0]['id'])])
     streams_in_response = set([stream['name'] for stream in response['zerver_stream']])
 
     if streams_in_response != actual_streams:
@@ -559,8 +565,7 @@ def sanity_check_stream_data(response, config, context):
             Please investigate!
             ''')
 
-def fetch_user_profile(response, config, context):
-    # type: (TableData, Config, Context) -> None
+def fetch_user_profile(response: TableData, config: Config, context: Context) -> None:
     realm = context['realm']
     exportable_user_ids = context['exportable_user_ids']
 
@@ -589,11 +594,10 @@ def fetch_user_profile(response, config, context):
     response['zerver_userprofile'] = normal_rows
     response['zerver_userprofile_mirrordummy'] = dummy_rows
 
-def fetch_user_profile_cross_realm(response, config, context):
-    # type: (TableData, Config, Context) -> None
+def fetch_user_profile_cross_realm(response: TableData, config: Config, context: Context) -> None:
     realm = context['realm']
 
-    if realm.string_id == "zulip":
+    if realm.string_id == settings.SYSTEM_BOT_REALM:
         response['zerver_userprofile_crossrealm'] = []
     else:
         response['zerver_userprofile_crossrealm'] = [dict(email=x.email, id=x.id) for x in [
@@ -602,8 +606,7 @@ def fetch_user_profile_cross_realm(response, config, context):
             get_system_bot(settings.WELCOME_BOT),
         ]]
 
-def fetch_attachment_data(response, realm_id, message_ids):
-    # type: (TableData, int, Set[int]) -> None
+def fetch_attachment_data(response: TableData, realm_id: int, message_ids: Set[int]) -> None:
     filter_args = {'realm_id': realm_id}
     query = Attachment.objects.filter(**filter_args)
     response['zerver_attachment'] = make_raw(list(query))
@@ -630,8 +633,7 @@ def fetch_attachment_data(response, realm_id, message_ids):
         row for row in response['zerver_attachment']
         if row['messages']]
 
-def fetch_huddle_objects(response, config, context):
-    # type: (TableData, Config, Context) -> None
+def fetch_huddle_objects(response: TableData, config: Config, context: Context) -> None:
 
     realm = context['realm']
     assert config.parent is not None
@@ -639,8 +641,8 @@ def fetch_huddle_objects(response, config, context):
     user_profile_ids = set(r['id'] for r in response[config.parent.table])
 
     # First we get all huddles involving someone in the realm.
-    realm_huddle_subs = Subscription.objects.select_related("recipient").filter(recipient__type=Recipient.HUDDLE,
-                                                                                user_profile__in=user_profile_ids)
+    realm_huddle_subs = Subscription.objects.select_related("recipient").filter(
+        recipient__type=Recipient.HUDDLE, user_profile__in=user_profile_ids)
     realm_huddle_recipient_ids = set(sub.recipient_id for sub in realm_huddle_subs)
 
     # Mark all Huddles whose recipient ID contains a cross-realm user.
@@ -667,8 +669,10 @@ def fetch_huddle_objects(response, config, context):
     response['_huddle_subscription'] = huddle_subscription_dicts
     response['zerver_huddle'] = make_raw(Huddle.objects.filter(id__in=huddle_ids))
 
-def fetch_usermessages(realm, message_ids, user_profile_ids, message_filename):
-    # type: (Realm, Set[int], Set[int], Path) -> List[Record]
+def fetch_usermessages(realm: Realm,
+                       message_ids: Set[int],
+                       user_profile_ids: Set[int],
+                       message_filename: Path) -> List[Record]:
     # UserMessage export security rule: You can export UserMessages
     # for the messages you exported for the users in your realm.
     user_message_query = UserMessage.objects.filter(user_profile__realm=realm,
@@ -684,8 +688,7 @@ def fetch_usermessages(realm, message_ids, user_profile_ids, message_filename):
     logging.info("Fetched UserMessages for %s" % (message_filename,))
     return user_message_chunk
 
-def export_usermessages_batch(input_path, output_path):
-    # type: (Path, Path) -> None
+def export_usermessages_batch(input_path: Path, output_path: Path) -> None:
     """As part of the system for doing parallel exports, this runs on one
     batch of Message objects and adds the corresponding UserMessage
     objects. (This is called by the export_usermessage_batch
@@ -701,18 +704,18 @@ def export_usermessages_batch(input_path, output_path):
     write_message_export(output_path, output)
     os.unlink(input_path)
 
-def write_message_export(message_filename, output):
-    # type: (Path, MessageOutput) -> None
+def write_message_export(message_filename: Path, output: MessageOutput) -> None:
     write_data_to_file(output_file=message_filename, data=output)
     logging.info("Dumped to %s" % (message_filename,))
 
-def export_partial_message_files(realm, response, chunk_size=1000, output_dir=None):
-    # type: (Realm, TableData, int, Path) -> Set[int]
+def export_partial_message_files(realm: Realm,
+                                 response: TableData,
+                                 chunk_size: int=1000,
+                                 output_dir: Optional[Path]=None) -> Set[int]:
     if output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="zulip-export")
 
-    def get_ids(records):
-        # type: (List[Record]) -> Set[int]
+    def get_ids(records: List[Record]) -> Set[int]:
         return set(x['id'] for x in records)
 
     # Basic security rule: You can export everything either...
@@ -782,10 +785,9 @@ def export_partial_message_files(realm, response, chunk_size=1000, output_dir=No
 
     return all_message_ids
 
-def write_message_partial_for_query(realm, message_query, dump_file_id,
-                                    all_message_ids, output_dir,
-                                    chunk_size, user_profile_ids):
-    # type: (Realm, Any, int, Set[int], Path, int, Set[int]) -> int
+def write_message_partial_for_query(realm: Realm, message_query: Any, dump_file_id: int,
+                                    all_message_ids: Set[int], output_dir: Path,
+                                    chunk_size: int, user_profile_ids: Set[int]) -> int:
     min_id = -1
 
     while True:
@@ -824,8 +826,7 @@ def write_message_partial_for_query(realm, message_query, dump_file_id,
 
     return dump_file_id
 
-def export_uploads_and_avatars(realm, output_dir):
-    # type: (Realm, Path) -> None
+def export_uploads_and_avatars(realm: Realm, output_dir: Path) -> None:
     uploads_output_dir = os.path.join(output_dir, 'uploads')
     avatars_output_dir = os.path.join(output_dir, 'avatars')
 
@@ -851,8 +852,8 @@ def export_uploads_and_avatars(realm, output_dir):
                              settings.S3_AUTH_UPLOADS_BUCKET,
                              output_dir=uploads_output_dir)
 
-def export_files_from_s3(realm, bucket_name, output_dir, processing_avatars=False):
-    # type: (Realm, str, Path, bool) -> None
+def export_files_from_s3(realm: Realm, bucket_name: str, output_dir: Path,
+                         processing_avatars: bool=False) -> None:
     conn = S3Connection(settings.S3_KEY, settings.S3_SECRET_KEY)
     bucket = conn.get_bucket(bucket_name, validate=True)
     records = []
@@ -872,7 +873,7 @@ def export_files_from_s3(realm, bucket_name, output_dir, processing_avatars=Fals
         bucket_list = bucket.list(prefix="%s/" % (realm.id,))
 
     if settings.EMAIL_GATEWAY_BOT is not None:
-        email_gateway_bot = get_system_bot(settings.EMAIL_GATEWAY_BOT)
+        email_gateway_bot = get_system_bot(settings.EMAIL_GATEWAY_BOT)  # type: Optional[UserProfile]
     else:
         email_gateway_bot = None
 
@@ -932,15 +933,14 @@ def export_files_from_s3(realm, bucket_name, output_dir, processing_avatars=Fals
     with open(os.path.join(output_dir, "records.json"), "w") as records_file:
         ujson.dump(records, records_file, indent=4)
 
-def export_uploads_from_local(realm, local_dir, output_dir):
-    # type: (Realm, Path, Path) -> None
+def export_uploads_from_local(realm: Realm, local_dir: Path, output_dir: Path) -> None:
 
     count = 0
     records = []
     for attachment in Attachment.objects.filter(realm_id=realm.id):
         local_path = os.path.join(local_dir, attachment.path_id)
         output_path = os.path.join(output_dir, attachment.path_id)
-        mkdir_p(os.path.dirname(output_path))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         subprocess.check_call(["cp", "-a", local_path, output_path])
         stat = os.stat(local_path)
         record = dict(realm_id=attachment.realm_id,
@@ -960,8 +960,7 @@ def export_uploads_from_local(realm, local_dir, output_dir):
     with open(os.path.join(output_dir, "records.json"), "w") as records_file:
         ujson.dump(records, records_file, indent=4)
 
-def export_avatars_from_local(realm, local_dir, output_dir):
-    # type: (Realm, Path, Path) -> None
+def export_avatars_from_local(realm: Realm, local_dir: Path, output_dir: Path) -> None:
 
     count = 0
     records = []
@@ -984,7 +983,7 @@ def export_avatars_from_local(realm, local_dir, output_dir):
                 user.email, local_path))
             fn = os.path.relpath(local_path, local_dir)
             output_path = os.path.join(output_dir, fn)
-            mkdir_p(str(os.path.dirname(output_path)))
+            os.makedirs(str(os.path.dirname(output_path)), exist_ok=True)
             subprocess.check_call(["cp", "-a", str(local_path), str(output_path)])
             stat = os.stat(local_path)
             record = dict(realm_id=realm.id,
@@ -1005,8 +1004,7 @@ def export_avatars_from_local(realm, local_dir, output_dir):
     with open(os.path.join(output_dir, "records.json"), "w") as records_file:
         ujson.dump(records, records_file, indent=4)
 
-def do_write_stats_file_for_realm_export(output_dir):
-    # type: (Path) -> None
+def do_write_stats_file_for_realm_export(output_dir: Path) -> None:
     stats_file = os.path.join(output_dir, 'stats.txt')
     realm_file = os.path.join(output_dir, 'realm.json')
     attachment_file = os.path.join(output_dir, 'attachment.json')
@@ -1033,8 +1031,8 @@ def do_write_stats_file_for_realm_export(output_dir):
             f.write('%5d records\n' % len(data))
             f.write('\n')
 
-def do_export_realm(realm, output_dir, threads, exportable_user_ids=None):
-    # type: (Realm, Path, int, Set[int]) -> None
+def do_export_realm(realm: Realm, output_dir: Path, threads: int,
+                    exportable_user_ids: Optional[Set[int]]=None) -> None:
     response = {}  # type: TableData
 
     # We need at least one thread running to export
@@ -1084,16 +1082,14 @@ def do_export_realm(realm, output_dir, threads, exportable_user_ids=None):
     logging.info("Finished exporting %s" % (realm.string_id))
     create_soft_link(source=output_dir, in_progress=False)
 
-def export_attachment_table(realm, output_dir, message_ids):
-    # type: (Realm, Path, Set[int]) -> None
+def export_attachment_table(realm: Realm, output_dir: Path, message_ids: Set[int]) -> None:
     response = {}  # type: TableData
     fetch_attachment_data(response=response, realm_id=realm.id, message_ids=message_ids)
     output_file = os.path.join(output_dir, "attachment.json")
     logging.info('Writing attachment table data to %s' % (output_file,))
     write_data_to_file(output_file=output_file, data=response)
 
-def create_soft_link(source, in_progress=True):
-    # type: (Path, bool) -> None
+def create_soft_link(source: Path, in_progress: bool=True) -> None:
     is_done = not in_progress
     in_progress_link = '/tmp/zulip-export-in-progress'
     done_link = '/tmp/zulip-export-most-recent'
@@ -1109,12 +1105,10 @@ def create_soft_link(source, in_progress=True):
         logging.info('See %s for output files' % (new_target,))
 
 
-def launch_user_message_subprocesses(threads, output_dir):
-    # type: (int, Path) -> None
+def launch_user_message_subprocesses(threads: int, output_dir: Path) -> None:
     logging.info('Launching %d PARALLEL subprocesses to export UserMessage rows' % (threads,))
 
-    def run_job(shard):
-        # type: (str) -> int
+    def run_job(shard: str) -> int:
         subprocess.call(["./manage.py", 'export_usermessage_batch', '--path',
                          str(output_dir), '--thread', shard])
         return 0
@@ -1124,8 +1118,7 @@ def launch_user_message_subprocesses(threads, output_dir):
                                       threads=threads):
         print("Shard %s finished, status %s" % (job, status))
 
-def do_export_user(user_profile, output_dir):
-    # type: (UserProfile, Path) -> None
+def do_export_user(user_profile: UserProfile, output_dir: Path) -> None:
     response = {}  # type: TableData
 
     export_single_user(user_profile, response)
@@ -1134,8 +1127,7 @@ def do_export_user(user_profile, output_dir):
     logging.info("Exporting messages")
     export_messages_single_user(user_profile, output_dir)
 
-def export_single_user(user_profile, response):
-    # type: (UserProfile, TableData) -> None
+def export_single_user(user_profile: UserProfile, response: TableData) -> None:
 
     config = get_single_user_config()
     export_from_config(
@@ -1144,8 +1136,7 @@ def export_single_user(user_profile, response):
         seed_object=user_profile,
     )
 
-def get_single_user_config():
-    # type: () -> Config
+def get_single_user_config() -> Config:
 
     # zerver_userprofile
     user_profile_config = Config(
@@ -1182,13 +1173,13 @@ def get_single_user_config():
 
     return user_profile_config
 
-def export_messages_single_user(user_profile, output_dir, chunk_size=1000):
-    # type: (UserProfile, Path, int) -> None
+def export_messages_single_user(user_profile: UserProfile, output_dir: Path, chunk_size: int=1000) -> None:
     user_message_query = UserMessage.objects.filter(user_profile=user_profile).order_by("id")
     min_id = -1
     dump_file_id = 1
     while True:
-        actual_query = user_message_query.select_related("message", "message__sending_client").filter(id__gt=min_id)[0:chunk_size]
+        actual_query = user_message_query.select_related(
+            "message", "message__sending_client").filter(id__gt=min_id)[0:chunk_size]
         user_message_chunk = [um for um in actual_query]
         user_message_ids = set(um.id for um in user_message_chunk)
 
@@ -1229,10 +1220,30 @@ def export_messages_single_user(user_profile, output_dir, chunk_size=1000):
 id_maps = {
     'client': {},
     'user_profile': {},
+    'realm': {},
+    'stream': {},
+    'recipient': {},
+    'subscription': {},
+    'defaultstream': {},
+    'reaction': {},
+    'realmemoji': {},
+    'realmdomain': {},
+    'realmfilter': {},
+    'message': {},
+    'user_presence': {},
+    'useractivity': {},
+    'useractivityinterval': {},
+    'usermessage': {},
+    'customprofilefield': {},
+    'customprofilefield_value': {},
+    'attachment': {},
 }  # type: Dict[str, Dict[int, int]]
 
-def update_id_map(table, old_id, new_id):
-    # type: (TableName, int, int) -> None
+path_maps = {
+    'attachment_path': {},
+}  # type: Dict[str, Dict[str, str]]
+
+def update_id_map(table: TableName, old_id: int, new_id: int) -> None:
     if table not in id_maps:
         raise Exception('''
             Table %s is not initialized in id_maps, which could
@@ -1241,15 +1252,57 @@ def update_id_map(table, old_id, new_id):
             ''' % (table,))
     id_maps[table][old_id] = new_id
 
-def fix_datetime_fields(data, table):
-    # type: (TableData, TableName) -> None
+def fix_datetime_fields(data: TableData, table: TableName) -> None:
     for item in data[table]:
         for field_name in DATE_FIELDS[table]:
             if item[field_name] is not None:
                 item[field_name] = datetime.datetime.fromtimestamp(item[field_name], tz=timezone_utc)
 
-def convert_to_id_fields(data, table, field_name):
-    # type: (TableData, TableName, Field) -> None
+def fix_upload_links(data: TableData, message_table: TableName) -> None:
+    """
+    Because the URLs for uploaded files encode the realm ID of the
+    organization being imported (which is only determined at import
+    time), we need to rewrite the URLs of links to uploaded files
+    during the import process.
+    """
+    for message in data[message_table]:
+        if message['has_attachment'] is True:
+            for key, value in path_maps['attachment_path'].items():
+                if key in message['content']:
+                    message['content'] = message['content'].replace(key, value)
+                    if message['rendered_content']:
+                        message['rendered_content'] = message['rendered_content'].replace(key, value)
+
+def current_table_ids(data: TableData, table: TableName) -> List[int]:
+    """
+    Returns the ids present in the current table
+    """
+    id_list = []
+    for item in data[table]:
+        id_list.append(item["id"])
+    return id_list
+
+def idseq(model_class: Any) -> str:
+    if model_class == RealmDomain:
+        return 'zerver_realmalias_id_seq'
+    return '{}_id_seq'.format(model_class._meta.db_table)
+
+def allocate_ids(model_class: Any, count: int) -> List[int]:
+    """
+    Increases the sequence number for a given table by the amount of objects being
+    imported into that table. Hence, this gives a reserved range of ids to import the
+    converted slack objects into the tables.
+    """
+    conn = connection.cursor()
+    sequence = idseq(model_class)
+    conn.execute("select nextval('%s') from generate_series(1,%s)" %
+                 (sequence, str(count)))
+    query = conn.fetchall()  # Each element in the result is a tuple like (5,)
+    conn.close()
+    # convert List[Tuple[int]] to List[int]
+    return [item[0] for item in query]
+
+def convert_to_id_fields(data: TableData, table: TableName, field_name: Field) -> None:
     '''
     When Django gives us dict objects via model_to_dict, the foreign
     key fields are `foo`, but we want `foo_id` for the bulk insert.
@@ -1261,8 +1314,29 @@ def convert_to_id_fields(data, table, field_name):
         item[field_name + "_id"] = item[field_name]
         del item[field_name]
 
-def re_map_foreign_keys(data, table, field_name, related_table, verbose=False):
-    # type: (TableData, TableName, Field, TableName, bool) -> None
+def re_map_foreign_keys(data: TableData,
+                        table: TableName,
+                        field_name: Field,
+                        related_table: TableName,
+                        verbose: bool=False,
+                        id_field: bool=False,
+                        recipient_field: bool=False) -> None:
+    """
+    This is a wrapper function for all the realm data tables
+    and only avatar and attachment records need to be passed through the internal function
+    because of the difference in data format (TableData corresponding to realm data tables
+    and List[Record] corresponding to the avatar and attachment records)
+    """
+    re_map_foreign_keys_internal(data[table], table, field_name, related_table, verbose, id_field,
+                                 recipient_field)
+
+def re_map_foreign_keys_internal(data_table: List[Record],
+                                 table: TableName,
+                                 field_name: Field,
+                                 related_table: TableName,
+                                 verbose: bool=False,
+                                 id_field: bool=False,
+                                 recipient_field: bool=False) -> None:
     '''
     We occasionally need to assign new ids to rows during the
     import/export process, to accommodate things like existing rows
@@ -1273,28 +1347,36 @@ def re_map_foreign_keys(data, table, field_name, related_table, verbose=False):
     the re-mapping.  (It also appends `_id` to the field.)
     '''
     lookup_table = id_maps[related_table]
-    for item in data[table]:
+    for item in data_table:
+        if recipient_field:
+            if related_table == "stream" and item['type'] == 2:
+                pass
+            elif related_table == "user_profile" and item['type'] == 1:
+                pass
+            else:
+                continue
         old_id = item[field_name]
         if old_id in lookup_table:
             new_id = lookup_table[old_id]
             if verbose:
-                logging.info('Remapping %s%s from %s to %s' % (table,
-                                                               field_name + '_id',
-                                                               old_id,
-                                                               new_id))
+                logging.info('Remapping %s %s from %s to %s' % (table,
+                                                                field_name + '_id',
+                                                                old_id,
+                                                                new_id))
         else:
             new_id = old_id
-        item[field_name + "_id"] = new_id
-        del item[field_name]
+        if not id_field:
+            item[field_name + "_id"] = new_id
+            del item[field_name]
+        else:
+            item[field_name] = new_id
 
-def fix_bitfield_keys(data, table, field_name):
-    # type: (TableData, TableName, Field) -> None
+def fix_bitfield_keys(data: TableData, table: TableName, field_name: Field) -> None:
     for item in data[table]:
         item[field_name] = item[field_name + '_mask']
         del item[field_name + '_mask']
 
-def fix_realm_authentication_bitfield(data, table, field_name):
-    # type: (TableData, TableName, Field) -> None
+def fix_realm_authentication_bitfield(data: TableData, table: TableName, field_name: Field) -> None:
     """Used to fixup the authentication_methods bitfield to be a string"""
     for item in data[table]:
         values_as_bitstring = ''.join(['1' if field[1] else '0' for field in
@@ -1302,8 +1384,15 @@ def fix_realm_authentication_bitfield(data, table, field_name):
         values_as_int = int(values_as_bitstring, 2)
         item[field_name] = values_as_int
 
-def bulk_import_model(data, model, table, dump_file_id=None):
-    # type: (TableData, Any, TableName, str) -> None
+def update_model_ids(model: Any, data: TableData, table: TableName, related_table: TableName) -> None:
+    old_id_list = current_table_ids(data, table)
+    allocated_id_list = allocate_ids(model, len(data[table]))
+    for item in range(len(data[table])):
+        update_id_map(related_table, old_id_list[item], allocated_id_list[item])
+    re_map_foreign_keys(data, table, 'id', related_table=related_table, id_field=True)
+
+def bulk_import_model(data: TableData, model: Any, table: TableName,
+                      dump_file_id: Optional[str]=None) -> None:
     # TODO, deprecate dump_file_id
     model.objects.bulk_create(model(**item) for item in data[table])
     if dump_file_id is None:
@@ -1315,8 +1404,7 @@ def bulk_import_model(data, model, table, dump_file_id=None):
 # correctly import multiple realms into the same server, we need to
 # check if a Client object already exists, and so we need to support
 # remap all Client IDs to the values in the new DB.
-def bulk_import_client(data, model, table):
-    # type: (TableData, Any, TableName) -> None
+def bulk_import_client(data: TableData, model: Any, table: TableName) -> None:
     for item in data[table]:
         try:
             client = Client.objects.get(name=item['name'])
@@ -1324,12 +1412,17 @@ def bulk_import_client(data, model, table):
             client = Client.objects.create(name=item['name'])
         update_id_map(table='client', old_id=item['id'], new_id=client.id)
 
-def import_uploads_local(import_dir, processing_avatars=False):
-    # type: (Path, bool) -> None
+def import_uploads_local(import_dir: Path, processing_avatars: bool=False,
+                         processing_emojis: bool=False) -> None:
     records_filename = os.path.join(import_dir, "records.json")
     with open(records_filename) as records_file:
         records = ujson.loads(records_file.read())
 
+    re_map_foreign_keys_internal(records, 'records', 'realm_id', related_table="realm",
+                                 id_field=True)
+    if not processing_emojis:
+        re_map_foreign_keys_internal(records, 'records', 'user_profile_id',
+                                     related_table="user_profile", id_field=True)
     for record in records:
         if processing_avatars:
             # For avatars, we need to rehash the user ID with the
@@ -1340,16 +1433,51 @@ def import_uploads_local(import_dir, processing_avatars=False):
                 file_path += '.original'
             else:
                 file_path += '.png'
+        elif processing_emojis:
+            # For emojis we follow the function 'upload_emoji_image'
+            emoji_path = RealmEmoji.PATH_ID_TEMPLATE.format(
+                realm_id=record['realm_id'],
+                emoji_file_name=record['file_name'])
+            file_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars", emoji_path)
         else:
-            file_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "files", record['s3_path'])
+            # Should be kept in sync with its equivalent in zerver/lib/uploads in the
+            # function 'upload_message_image'
+            s3_file_name = "/".join([
+                str(record['realm_id']),
+                random_name(18),
+                sanitize_name(os.path.basename(record['path']))
+            ])
+            file_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "files", s3_file_name)
+            path_maps['attachment_path'][record['path']] = s3_file_name
 
         orig_file_path = os.path.join(import_dir, record['path'])
         if not os.path.exists(os.path.dirname(file_path)):
             subprocess.check_call(["mkdir", "-p", os.path.dirname(file_path)])
         shutil.copy(orig_file_path, file_path)
 
-def import_uploads_s3(bucket_name, import_dir, processing_avatars=False):
-    # type: (str, Path, bool) -> None
+    if processing_avatars:
+        # Ensure that we have medium-size avatar images for every
+        # avatar.  TODO: This implementation is hacky, both in that it
+        # does get_user_profile_by_id for each user, and in that it
+        # might be better to require the export to just have these.
+        upload_backend = LocalUploadBackend()
+        for record in records:
+            if record['s3_path'].endswith('.original'):
+                user_profile = get_user_profile_by_id(record['user_profile_id'])
+                avatar_path = user_avatar_path_from_ids(user_profile.id, record['realm_id'])
+                medium_file_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars",
+                                                avatar_path) + '-medium.png'
+                if os.path.exists(medium_file_path):
+                    # We remove the image here primarily to deal with
+                    # issues when running the import script multiple
+                    # times in development (where one might reuse the
+                    # same realm ID from a previous iteration).
+                    os.remove(medium_file_path)
+                upload_backend.ensure_medium_avatar_image(user_profile=user_profile)
+
+def import_uploads_s3(bucket_name: str, import_dir: Path, processing_avatars: bool=False,
+                      processing_emojis: bool=False) -> None:
+    upload_backend = S3UploadBackend()
     conn = S3Connection(settings.S3_KEY, settings.S3_SECRET_KEY)
     bucket = conn.get_bucket(bucket_name, validate=True)
 
@@ -1357,6 +1485,10 @@ def import_uploads_s3(bucket_name, import_dir, processing_avatars=False):
     with open(records_filename) as records_file:
         records = ujson.loads(records_file.read())
 
+    re_map_foreign_keys_internal(records, 'records', 'realm_id', related_table="realm",
+                                 id_field=True)
+    re_map_foreign_keys_internal(records, 'records', 'user_profile_id',
+                                 related_table="user_profile", id_field=True)
     for record in records:
         key = Key(bucket)
 
@@ -1367,8 +1499,22 @@ def import_uploads_s3(bucket_name, import_dir, processing_avatars=False):
             key.key = avatar_path
             if record['s3_path'].endswith('.original'):
                 key.key += '.original'
+        if processing_emojis:
+            # For emojis we follow the function 'upload_emoji_image'
+            emoji_path = RealmEmoji.PATH_ID_TEMPLATE.format(
+                realm_id=record['realm_id'],
+                emoji_file_name=record['file_name'])
+            key.key = emoji_path
         else:
-            key.key = record['s3_path']
+            # Should be kept in sync with its equivalent in zerver/lib/uploads in the
+            # function 'upload_message_image'
+            s3_file_name = "/".join([
+                str(record['realm_id']),
+                random_name(18),
+                sanitize_name(os.path.basename(record['path']))
+            ])
+            key.key = s3_file_name
+            path_maps['attachment_path'][record['path']] = s3_file_name
 
         user_profile_id = int(record['user_profile_id'])
         # Support email gateway bot and other cross-realm messages
@@ -1380,20 +1526,31 @@ def import_uploads_s3(bucket_name, import_dir, processing_avatars=False):
         key.set_metadata("realm_id", str(user_profile.realm_id))
         key.set_metadata("orig_last_modified", record['last_modified'])
 
-        headers = {u'Content-Type': record['content_type']}
+        headers = {'Content-Type': record['content_type']}
 
         key.set_contents_from_filename(os.path.join(import_dir, record['path']), headers=headers)
 
-def import_uploads(import_dir, processing_avatars=False):
-    # type: (Path, bool) -> None
+        if processing_avatars:
+            # TODO: Ideally, we'd do this in a separate pass, after
+            # all the avatars have been uploaded, since we may end up
+            # unnecssarily resizing images just before the medium-size
+            # image in the export is uploaded.  See the local uplods
+            # code path for more notes.
+            upload_backend.ensure_medium_avatar_image(user_profile=user_profile)
+
+def import_uploads(import_dir: Path, processing_avatars: bool=False,
+                   processing_emojis: bool=False) -> None:
     if processing_avatars:
         logging.info("Importing avatars")
+    elif processing_emojis:
+        logging.info("Importing emojis")
     else:
         logging.info("Importing uploaded files")
     if settings.LOCAL_UPLOADS_DIR:
-        import_uploads_local(import_dir, processing_avatars=processing_avatars)
+        import_uploads_local(import_dir, processing_avatars=processing_avatars,
+                             processing_emojis=processing_emojis)
     else:
-        if processing_avatars:
+        if processing_avatars or processing_emojis:
             bucket_name = settings.S3_AVATAR_BUCKET
         else:
             bucket_name = settings.S3_AUTH_UPLOADS_BUCKET
@@ -1417,8 +1574,7 @@ def import_uploads(import_dir, processing_avatars=False):
 # Because the Python object => JSON conversion process is not fully
 # faithful, we have to use a set of fixers (e.g. on DateTime objects
 # and Foreign Keys) to do the import correctly.
-def do_import_realm(import_dir):
-    # type: (Path) -> None
+def do_import_realm(import_dir: Path, subdomain: str) -> Realm:
     logging.info("Importing realm dump %s" % (import_dir,))
     if not os.path.exists(import_dir):
         raise Exception("Missing import directory!")
@@ -1431,9 +1587,16 @@ def do_import_realm(import_dir):
     with open(realm_data_filename) as f:
         data = ujson.load(f)
 
-    convert_to_id_fields(data, 'zerver_realm', 'notifications_stream')
+    update_model_ids(Stream, data, 'zerver_stream', 'stream')
+    re_map_foreign_keys(data, 'zerver_realm', 'notifications_stream', related_table="stream")
+
     fix_datetime_fields(data, 'zerver_realm')
+    # Fix realm subdomain information
+    data['zerver_realm'][0]['string_id'] = subdomain
+    data['zerver_realm'][0]['name'] = subdomain
     fix_realm_authentication_bitfield(data, 'zerver_realm', 'authentication_methods')
+    update_model_ids(Realm, data, 'zerver_realm', 'realm')
+
     realm = Realm(**data['zerver_realm'][0])
     if realm.notifications_stream_id is not None:
         notifications_stream_id = int(realm.notifications_stream_id)  # type: Optional[int]
@@ -1446,15 +1609,17 @@ def do_import_realm(import_dir):
     # Email tokens will automatically be randomly generated when the
     # Stream objects are created by Django.
     fix_datetime_fields(data, 'zerver_stream')
-    convert_to_id_fields(data, 'zerver_stream', 'realm')
+    re_map_foreign_keys(data, 'zerver_stream', 'realm', related_table="realm")
     bulk_import_model(data, Stream, 'zerver_stream')
 
     realm.notifications_stream_id = notifications_stream_id
     realm.save()
 
-    convert_to_id_fields(data, "zerver_defaultstream", 'stream')
-    for (table, model) in realm_tables:
-        convert_to_id_fields(data, table, 'realm')
+    re_map_foreign_keys(data, 'zerver_defaultstream', 'stream', related_table="stream")
+    re_map_foreign_keys(data, 'zerver_realmemoji', 'author', related_table="user_profile")
+    for (table, model, related_table) in realm_tables:
+        re_map_foreign_keys(data, table, 'realm', related_table="realm")
+        update_model_ids(model, data, table, related_table)
         bulk_import_model(data, model, table)
 
     # Remap the user IDs for notification_bot and friends to their
@@ -1469,17 +1634,26 @@ def do_import_realm(import_dir):
     del data['zerver_userprofile_mirrordummy']
     data['zerver_userprofile'].sort(key=lambda r: r['id'])
 
+    # To remap foreign key for UserProfile.last_active_message_id
+    update_message_foreign_keys(import_dir)
+
     fix_datetime_fields(data, 'zerver_userprofile')
-    convert_to_id_fields(data, 'zerver_userprofile', 'realm')
+    update_model_ids(UserProfile, data, 'zerver_userprofile', 'user_profile')
+    re_map_foreign_keys(data, 'zerver_userprofile', 'realm', related_table="realm")
     re_map_foreign_keys(data, 'zerver_userprofile', 'bot_owner', related_table="user_profile")
-    convert_to_id_fields(data, 'zerver_userprofile', 'default_sending_stream')
-    convert_to_id_fields(data, 'zerver_userprofile', 'default_events_register_stream')
+    re_map_foreign_keys(data, 'zerver_userprofile', 'default_sending_stream',
+                        related_table="stream")
+    re_map_foreign_keys(data, 'zerver_userprofile', 'default_events_register_stream',
+                        related_table="stream")
+    re_map_foreign_keys(data, 'zerver_userprofile', 'last_active_message_id',
+                        related_table="message", id_field=True)
     for user_profile_dict in data['zerver_userprofile']:
         user_profile_dict['password'] = None
         user_profile_dict['api_key'] = random_api_key()
         # Since Zulip doesn't use these permissions, drop them
         del user_profile_dict['user_permissions']
         del user_profile_dict['groups']
+
     user_profiles = [UserProfile(**item) for item in data['zerver_userprofile']]
     for user_profile in user_profiles:
         user_profile.set_unusable_password()
@@ -1488,28 +1662,62 @@ def do_import_realm(import_dir):
     if 'zerver_huddle' in data:
         bulk_import_model(data, Huddle, 'zerver_huddle')
 
+    re_map_foreign_keys(data, 'zerver_recipient', 'type_id', related_table="stream",
+                        recipient_field=True, id_field=True)
+    re_map_foreign_keys(data, 'zerver_recipient', 'type_id', related_table="user_profile",
+                        recipient_field=True, id_field=True)
+    update_model_ids(Recipient, data, 'zerver_recipient', 'recipient')
     bulk_import_model(data, Recipient, 'zerver_recipient')
+
     re_map_foreign_keys(data, 'zerver_subscription', 'user_profile', related_table="user_profile")
-    convert_to_id_fields(data, 'zerver_subscription', 'recipient')
+    re_map_foreign_keys(data, 'zerver_subscription', 'recipient', related_table="recipient")
+    update_model_ids(Subscription, data, 'zerver_subscription', 'subscription')
     bulk_import_model(data, Subscription, 'zerver_subscription')
 
     fix_datetime_fields(data, 'zerver_userpresence')
     re_map_foreign_keys(data, 'zerver_userpresence', 'user_profile', related_table="user_profile")
     re_map_foreign_keys(data, 'zerver_userpresence', 'client', related_table='client')
+    update_model_ids(UserPresence, data, 'zerver_userpresence', 'user_presence')
     bulk_import_model(data, UserPresence, 'zerver_userpresence')
 
     fix_datetime_fields(data, 'zerver_useractivity')
     re_map_foreign_keys(data, 'zerver_useractivity', 'user_profile', related_table="user_profile")
     re_map_foreign_keys(data, 'zerver_useractivity', 'client', related_table='client')
+    update_model_ids(UserActivity, data, 'zerver_useractivity', 'useractivity')
     bulk_import_model(data, UserActivity, 'zerver_useractivity')
 
     fix_datetime_fields(data, 'zerver_useractivityinterval')
     re_map_foreign_keys(data, 'zerver_useractivityinterval', 'user_profile', related_table="user_profile")
+    update_model_ids(UserActivityInterval, data, 'zerver_useractivityinterval',
+                     'useractivityinterval')
     bulk_import_model(data, UserActivityInterval, 'zerver_useractivityinterval')
+
+    if 'zerver_customprofilefield' in data:
+        # As the export of Custom Profile fields is not supported, Zulip exported
+        # data would not contain this field.
+        # However this is supported in slack importer script
+        re_map_foreign_keys(data, 'zerver_customprofilefield', 'realm', related_table="realm")
+        update_model_ids(CustomProfileField, data, 'zerver_customprofilefield',
+                         related_table="customprofilefield")
+        bulk_import_model(data, CustomProfileField, 'zerver_customprofilefield')
+
+        re_map_foreign_keys(data, 'zerver_customprofilefield_value', 'user_profile',
+                            related_table="user_profile")
+        re_map_foreign_keys(data, 'zerver_customprofilefield_value', 'field',
+                            related_table="customprofilefield")
+        update_model_ids(CustomProfileFieldValue, data, 'zerver_customprofilefield_value',
+                         related_table="customprofilefield_value")
+        bulk_import_model(data, CustomProfileFieldValue, 'zerver_customprofilefield_value')
 
     # Import uploaded files and avatars
     import_uploads(os.path.join(import_dir, "avatars"), processing_avatars=True)
     import_uploads(os.path.join(import_dir, "uploads"))
+
+    # We need to have this check as the emoji files are only present in the data
+    # importer from slack
+    # For Zulip export, this doesn't exist
+    if os.path.exists(os.path.join(import_dir, "emoji")):
+        import_uploads(os.path.join(import_dir, "emoji"), processing_emojis=True)
 
     # Import zerver_message and zerver_usermessage
     import_message_data(import_dir)
@@ -1525,9 +1733,42 @@ def do_import_realm(import_dir):
         data = ujson.load(f)
 
     import_attachments(data)
+    return realm
 
-def import_message_data(import_dir):
-    # type: (Path) -> None
+# create_users and do_import_system_bots differ from their equivalent in
+# zerver/management/commands/initialize_voyager_db.py because here we check if the bots
+# don't already exist and only then create a user for these bots.
+def do_import_system_bots(realm: Any) -> None:
+    internal_bots = [(bot['name'], bot['email_template'] % (settings.INTERNAL_BOT_DOMAIN,))
+                     for bot in settings.INTERNAL_BOTS]
+    create_users(realm, internal_bots, bot_type=UserProfile.DEFAULT_BOT)
+    names = [(settings.FEEDBACK_BOT_NAME, settings.FEEDBACK_BOT)]
+    create_users(realm, names, bot_type=UserProfile.DEFAULT_BOT)
+    print("Finished importing system bots.")
+
+def create_users(realm: Realm, name_list: Iterable[Tuple[Text, Text]],
+                 bot_type: Optional[int]=None) -> None:
+    user_set = set()
+    for full_name, email in name_list:
+        short_name = email_to_username(email)
+        if not UserProfile.objects.filter(email=email):
+            user_set.add((email, full_name, short_name, True))
+    bulk_create_users(realm, user_set, bot_type)
+
+def update_message_foreign_keys(import_dir: Path) -> None:
+    dump_file_id = 1
+    while True:
+        message_filename = os.path.join(import_dir, "messages-%06d.json" % (dump_file_id,))
+        if not os.path.exists(message_filename):
+            break
+
+        with open(message_filename) as f:
+            data = ujson.load(f)
+
+        update_model_ids(Message, data, 'zerver_message', 'message')
+        dump_file_id += 1
+
+def import_message_data(import_dir: Path) -> None:
     dump_file_id = 1
     while True:
         message_filename = os.path.join(import_dir, "messages-%06d.json" % (dump_file_id,))
@@ -1539,29 +1780,46 @@ def import_message_data(import_dir):
 
         logging.info("Importing message dump %s" % (message_filename,))
         re_map_foreign_keys(data, 'zerver_message', 'sender', related_table="user_profile")
-        convert_to_id_fields(data, 'zerver_message', 'recipient')
+        re_map_foreign_keys(data, 'zerver_message', 'recipient', related_table="recipient")
         re_map_foreign_keys(data, 'zerver_message', 'sending_client', related_table='client')
         fix_datetime_fields(data, 'zerver_message')
+        # Parser to update message content with the updated attachment urls
+        fix_upload_links(data, 'zerver_message')
+
+        re_map_foreign_keys(data, 'zerver_message', 'id', related_table='message', id_field=True)
         bulk_import_model(data, Message, 'zerver_message')
 
         # Due to the structure of these message chunks, we're
         # guaranteed to have already imported all the Message objects
         # for this batch of UserMessage objects.
-        convert_to_id_fields(data, 'zerver_usermessage', 'message')
+        re_map_foreign_keys(data, 'zerver_usermessage', 'message', related_table="message")
         re_map_foreign_keys(data, 'zerver_usermessage', 'user_profile', related_table="user_profile")
         fix_bitfield_keys(data, 'zerver_usermessage', 'flags')
+        update_model_ids(UserMessage, data, 'zerver_usermessage', 'usermessage')
         bulk_import_model(data, UserMessage, 'zerver_usermessage')
+
+        # As the export of Reactions is not supported, Zulip exported
+        # data would not contain this field.
+        # However this is supported in slack importer script
+        if 'zerver_reaction' in data:
+            re_map_foreign_keys(data, 'zerver_reaction', 'message', related_table="message")
+            re_map_foreign_keys(data, 'zerver_reaction', 'user_profile', related_table="user_profile")
+            for reaction in data['zerver_reaction']:
+                if reaction['reaction_type'] == Reaction.REALM_EMOJI:
+                    re_map_foreign_keys(data, 'zerver_reaction', 'emoji_code',
+                                        related_table="realmemoji", id_field=True)
+            update_model_ids(Reaction, data, 'zerver_reaction', 'reaction')
+            bulk_import_model(data, Reaction, 'zerver_reaction')
 
         dump_file_id += 1
 
-def import_attachments(data):
-    # type: (TableData) -> None
+def import_attachments(data: TableData) -> None:
 
     # Clean up the data in zerver_attachment that is not
     # relevant to our many-to-many import.
     fix_datetime_fields(data, 'zerver_attachment')
     re_map_foreign_keys(data, 'zerver_attachment', 'owner', related_table="user_profile")
-    convert_to_id_fields(data, 'zerver_attachment', 'realm')
+    re_map_foreign_keys(data, 'zerver_attachment', 'realm', related_table="realm")
 
     # Configure ourselves.  Django models many-to-many (m2m)
     # relations asymmetrically. The parent here refers to the
@@ -1577,6 +1835,7 @@ def import_attachments(data):
     parent_id = 'attachment_id'
     child_id = 'message_id'
 
+    update_model_ids(parent_model, data, parent_db_table_name, 'attachment')
     # First, build our list of many-to-many (m2m) rows.
     # We do this in a slightly convoluted way to anticipate
     # a future where we may need to call re_map_foreign_keys.
@@ -1586,7 +1845,7 @@ def import_attachments(data):
         for fk_id in parent_row[child_plural]:
             m2m_row = {}  # type: Record
             m2m_row[parent_singular] = parent_row['id']
-            m2m_row[child_singular] = fk_id
+            m2m_row[child_singular] = id_maps['message'][fk_id]
             m2m_rows.append(m2m_row)
 
     # Create our table data for insert.
@@ -1598,6 +1857,10 @@ def import_attachments(data):
     # Next, delete out our child data from the parent rows.
     for parent_row in data[parent_db_table_name]:
         del parent_row[child_plural]
+
+    # Update 'path_id' for the attachments
+    for attachment in data[parent_db_table_name]:
+        attachment['path_id'] = path_maps['attachment_path'][attachment['path_id']]
 
     # Next, load the parent rows.
     bulk_import_model(data, parent_model, parent_db_table_name)

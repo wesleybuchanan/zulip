@@ -1,22 +1,22 @@
 # Webhooks for external integrations.
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Text
+from typing import Any, Callable, Dict, Iterable, Optional, Text, Tuple
 
-from django.utils.translation import ugettext as _
 from django.http import HttpRequest, HttpResponse
+from django.utils.translation import ugettext as _
 
-from zerver.lib.actions import check_send_stream_message
-from zerver.lib.response import json_success, json_error
+from zerver.decorator import api_key_only_webhook_view
+from zerver.lib.request import REQ, has_request_variables
+from zerver.lib.response import json_error, json_success
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.lib.validator import check_dict
-from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-from zerver.models import UserProfile, Stream
-
+from zerver.models import Stream, UserProfile
 
 @api_key_only_webhook_view("NewRelic")
 @has_request_variables
-def api_newrelic_webhook(request, user_profile, stream=REQ(default='newrelic'),
-                         alert=REQ(validator=check_dict([]), default=None),
-                         deployment=REQ(validator=check_dict([]), default=None)):
-    # type: (HttpRequest, UserProfile, Text, Optional[Dict[str, Any]], Optional[Dict[str, Any]]) -> HttpResponse
+def api_newrelic_webhook(request: HttpRequest, user_profile: UserProfile,
+                         alert: Optional[Dict[str, Any]]=REQ(validator=check_dict([]), default=None),
+                         deployment: Optional[Dict[str, Any]]=REQ(validator=check_dict([]), default=None)
+                         )-> HttpResponse:
     if alert:
         # Use the message as the subject because it stays the same for
         # "opened", "acknowledged", and "closed" messages that should be
@@ -32,5 +32,5 @@ def api_newrelic_webhook(request, user_profile, stream=REQ(default='newrelic'),
     else:
         return json_error(_("Unknown webhook request"))
 
-    check_send_stream_message(user_profile, request.client, stream, subject, content)
+    check_send_webhook_message(request, user_profile, subject, content)
     return json_success()

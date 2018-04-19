@@ -1,14 +1,17 @@
-# System documented in https://zulip.readthedocs.io/en/latest/logging.html
+# System documented in https://zulip.readthedocs.io/en/latest/subsystems/logging.html
 
-from typing import Any, Dict, Optional, Text
+from typing import Any, Dict, Optional, Text, Union
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
-
-from zerver.decorator import authenticated_json_post_view, has_request_variables, REQ, \
+from django.utils.translation import ugettext as _
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from zerver.decorator import human_users_only, \
     to_non_negative_int
 from zerver.lib.bugdown import privacy_clean_markdown
-from zerver.lib.response import json_success
+from zerver.lib.request import has_request_variables, REQ
+from zerver.lib.response import json_success, json_error
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.unminify import SourceMap
 from zerver.lib.utils import statsd, statsd_key
@@ -17,12 +20,13 @@ from zerver.models import UserProfile
 
 import subprocess
 import os
+import logging
+import ujson
 
 js_source_map = None
 
 # Read the source map information for decoding JavaScript backtraces.
-def get_js_source_map():
-    # type: () -> Optional[SourceMap]
+def get_js_source_map() -> Optional[SourceMap]:
     global js_source_map
     if not js_source_map and not (settings.DEVELOPMENT or settings.TEST_SUITE):
         js_source_map = SourceMap([
@@ -31,21 +35,30 @@ def get_js_source_map():
         ])
     return js_source_map
 
+@human_users_only
 @has_request_variables
-def report_send_times(request, user_profile,
-                      time=REQ(converter=to_non_negative_int),
-                      received=REQ(converter=to_non_negative_int, default="(unknown)"),
-                      displayed=REQ(converter=to_non_negative_int, default="(unknown)"),
-                      locally_echoed=REQ(validator=check_bool, default=False),
-                      rendered_content_disparity=REQ(validator=check_bool, default=False)):
-    # type: (HttpRequest, UserProfile, int, int, int, bool, bool) -> HttpResponse
+def report_send_times(request: HttpRequest, user_profile: UserProfile,
+                      time: int=REQ(converter=to_non_negative_int),
+                      received: int=REQ(converter=to_non_negative_int, default=-1),
+                      displayed: int=REQ(converter=to_non_negative_int, default=-1),
+                      locally_echoed: bool=REQ(validator=check_bool, default=False),
+                      rendered_content_disparity: bool=REQ(validator=check_bool,
+                                                           default=False)) -> HttpResponse:
+    received_str = "(unknown)"
+    if received > 0:
+        received_str = str(received)
+    displayed_str = "(unknown)"
+    if displayed > 0:
+        displayed_str = str(displayed)
+
     request._log_data["extra"] = "[%sms/%sms/%sms/echo:%s/diff:%s]" \
-        % (time, received, displayed, locally_echoed, rendered_content_disparity)
+        % (time, received_str, displayed_str, locally_echoed, rendered_content_disparity)
+
     base_key = statsd_key(user_profile.realm.string_id, clean_periods=True)
     statsd.timing("endtoend.send_time.%s" % (base_key,), time)
-    if received != "(unknown)":
+    if received > 0:
         statsd.timing("endtoend.receive_time.%s" % (base_key,), received)
-    if displayed != "(unknown)":
+    if displayed > 0:
         statsd.timing("endtoend.displayed_time.%s" % (base_key,), displayed)
     if locally_echoed:
         statsd.incr('locally_echoed')
@@ -53,12 +66,12 @@ def report_send_times(request, user_profile,
         statsd.incr('render_disparity')
     return json_success()
 
+@human_users_only
 @has_request_variables
-def report_narrow_times(request, user_profile,
-                        initial_core=REQ(converter=to_non_negative_int),
-                        initial_free=REQ(converter=to_non_negative_int),
-                        network=REQ(converter=to_non_negative_int)):
-    # type: (HttpRequest, UserProfile, int, int, int) -> HttpResponse
+def report_narrow_times(request: HttpRequest, user_profile: UserProfile,
+                        initial_core: int=REQ(converter=to_non_negative_int),
+                        initial_free: int=REQ(converter=to_non_negative_int),
+                        network: int=REQ(converter=to_non_negative_int)) -> HttpResponse:
     request._log_data["extra"] = "[%sms/%sms/%sms]" % (initial_core, initial_free, network)
     base_key = statsd_key(user_profile.realm.string_id, clean_periods=True)
     statsd.timing("narrow.initial_core.%s" % (base_key,), initial_core)
@@ -66,23 +79,24 @@ def report_narrow_times(request, user_profile,
     statsd.timing("narrow.network.%s" % (base_key,), network)
     return json_success()
 
+@human_users_only
 @has_request_variables
-def report_unnarrow_times(request, user_profile,
-                          initial_core=REQ(converter=to_non_negative_int),
-                          initial_free=REQ(converter=to_non_negative_int)):
-    # type: (HttpRequest, UserProfile, int, int) -> HttpResponse
+def report_unnarrow_times(request: HttpRequest, user_profile: UserProfile,
+                          initial_core: int=REQ(converter=to_non_negative_int),
+                          initial_free: int=REQ(converter=to_non_negative_int)) -> HttpResponse:
     request._log_data["extra"] = "[%sms/%sms]" % (initial_core, initial_free)
     base_key = statsd_key(user_profile.realm.string_id, clean_periods=True)
     statsd.timing("unnarrow.initial_core.%s" % (base_key,), initial_core)
     statsd.timing("unnarrow.initial_free.%s" % (base_key,), initial_free)
     return json_success()
 
+@human_users_only
 @has_request_variables
-def report_error(request, user_profile, message=REQ(), stacktrace=REQ(),
-                 ui_message=REQ(validator=check_bool), user_agent=REQ(),
-                 href=REQ(), log=REQ(),
-                 more_info=REQ(validator=check_dict([]), default=None)):
-    # type: (HttpRequest, UserProfile, Text, Text, bool, Text, Text, Text, Optional[Dict[str, Any]]) -> HttpResponse
+def report_error(request: HttpRequest, user_profile: UserProfile, message: Text=REQ(),
+                 stacktrace: Text=REQ(), ui_message: bool=REQ(validator=check_bool),
+                 user_agent: Text=REQ(), href: Text=REQ(), log: Text=REQ(),
+                 more_info: Optional[Dict[str, Any]]=REQ(validator=check_dict([]), default=None)
+                 ) -> HttpResponse:
     """Accepts an error report and stores in a queue for processing.  The
     actual error reports are later handled by do_report_error (below)"""
     if not settings.BROWSER_ERROR_REPORTING:
@@ -128,6 +142,30 @@ def report_error(request, user_profile, message=REQ(), stacktrace=REQ(),
             log = log,
             more_info = more_info,
         )
-    ), lambda x: None)
+    ))
+
+    return json_success()
+
+@csrf_exempt
+@require_POST
+@has_request_variables
+def report_csp_violations(request: HttpRequest,
+                          csp_report: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
+    def get_attr(csp_report_attr: str) -> str:
+        return csp_report.get(csp_report_attr, '')
+
+    logging.warning("CSP Violation in Document('%s'). "
+                    "Blocked URI('%s'), Original Policy('%s'), "
+                    "Violated Directive('%s'), Effective Directive('%s'), "
+                    "Disposition('%s'), Referrer('%s'), "
+                    "Status Code('%s'), Script Sample('%s')" % (get_attr('document-uri'),
+                                                                get_attr('blocked-uri'),
+                                                                get_attr('original-policy'),
+                                                                get_attr('violated-directive'),
+                                                                get_attr('effective-directive'),
+                                                                get_attr('disposition'),
+                                                                get_attr('referrer'),
+                                                                get_attr('status-code'),
+                                                                get_attr('script-sample')))
 
     return json_success()

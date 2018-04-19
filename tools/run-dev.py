@@ -9,7 +9,7 @@ import sys
 import time
 import traceback
 
-from six.moves.urllib.parse import urlunparse
+from urllib.parse import urlunparse
 
 # check for the venv
 from lib import sanity_check
@@ -22,8 +22,7 @@ from tornado import web
 from tornado.ioloop import IOLoop
 from tornado.websocket import WebSocketHandler, websocket_connect
 
-if False:
-    from typing import Any, Callable, Generator, List, Optional
+from typing import Any, Callable, Generator, List, Optional
 
 if 'posix' in os.name and os.geteuid() == 0:
     raise RuntimeError("run-dev.py should not be run as root.")
@@ -113,6 +112,7 @@ proxy_port = base_port
 django_port = base_port + 1
 tornado_port = base_port + 2
 webpack_port = base_port + 3
+thumbor_port = base_port + 4
 
 os.chdir(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -152,7 +152,10 @@ cmds = [['./tools/compile-handlebars-templates', 'forever'],
         manage_args + ['127.0.0.1:%d' % (tornado_port,)],
         ['./tools/run-dev-queue-processors'] + manage_args,
         ['env', 'PGHOST=127.0.0.1',  # Force password authentication using .pgpass
-         './puppet/zulip/files/postgresql/process_fts_updates']]
+         './puppet/zulip/files/postgresql/process_fts_updates'],
+        ['./manage.py', 'deliver_scheduled_messages'],
+        ['/srv/zulip-thumbor-venv/bin/thumbor', '-c', './zthumbor/thumbor.conf',
+         '-p', '%s' % (thumbor_port,)]]
 if options.test:
     # Webpack doesn't support 2 copies running on the same system, so
     # in order to support running the Casper tests while a Zulip
@@ -176,6 +179,10 @@ def transform_url(protocol, path, query, target_port, target_host):
     # type: (str, str, str, int, str) -> str
     # generate url with target host
     host = ":".join((target_host, str(target_port)))
+    # Here we are going to rewrite the path a bit so that it is in parity with
+    # what we will have for production
+    if path.startswith('/thumbor'):
+        path = path[len('/thumbor'):]
     newpath = urlunparse((protocol, host, path, '', query, ''))
     return newpath
 
@@ -199,14 +206,14 @@ class BaseWebsocketHandler(WebSocketHandler):
 
     def __init__(self, *args, **kwargs):
         # type: (*Any, **Any) -> None
-        super(BaseWebsocketHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         # define client for target websocket server
         self.client = None  # type: Any
 
     def get(self, *args, **kwargs):
-        # type: (*Any, **Any) -> Optional[Callable]
+        # type: (*Any, **Any) -> Optional[Callable[..., Any]]
         # use get method from WebsocketHandler
-        return super(BaseWebsocketHandler, self).get(*args, **kwargs)
+        return super().get(*args, **kwargs)
 
     def open(self):
         # type: () -> None
@@ -236,7 +243,7 @@ class BaseWebsocketHandler(WebSocketHandler):
             self.write_message(message, False)
 
     def on_message(self, message, binary=False):
-        # type: (str, bool) -> Optional[Callable]
+        # type: (str, bool) -> Optional[Callable[..., Any]]
         if not self.client:
             # close websocket proxy connection if no connection with target websocket server
             return self.close()
@@ -260,9 +267,9 @@ class BaseWebsocketHandler(WebSocketHandler):
 class CombineHandler(BaseWebsocketHandler):
 
     def get(self, *args, **kwargs):
-        # type: (*Any, **Any) -> Optional[Callable]
+        # type: (*Any, **Any) -> Optional[Callable[..., Any]]
         if self.request.headers.get("Upgrade", "").lower() == 'websocket':
-            return super(CombineHandler, self).get(*args, **kwargs)
+            return super().get(*args, **kwargs)
         return None
 
     def head(self):
@@ -314,7 +321,7 @@ class CombineHandler(BaseWebsocketHandler):
         if 'X-REAL-IP' not in self.request.headers:
             self.request.headers['X-REAL-IP'] = self.request.remote_ip
         if self.request.headers.get("Upgrade", "").lower() == 'websocket':
-            return super(CombineHandler, self).prepare()
+            return super().prepare()
         url = transform_url(
             self.request.protocol,
             self.request.path,
@@ -353,6 +360,10 @@ class TornadoHandler(CombineHandler):
     target_port = tornado_port
 
 
+class ThumborHandler(CombineHandler):
+    target_port = thumbor_port
+
+
 class Application(web.Application):
     def __init__(self, enable_logging=False):
         # type: (bool) -> None
@@ -361,14 +372,15 @@ class Application(web.Application):
             (r"/api/v1/events.*", TornadoHandler),
             (r"/webpack.*", WebPackHandler),
             (r"/sockjs.*", TornadoHandler),
+            (r"/thumbor.*", ThumborHandler),
             (r"/.*", DjangoHandler)
         ]
-        super(Application, self).__init__(handlers, enable_logging=enable_logging)
+        super().__init__(handlers, enable_logging=enable_logging)
 
     def log_request(self, handler):
         # type: (BaseWebsocketHandler) -> None
         if self.settings['enable_logging']:
-            super(Application, self).log_request(handler)
+            super().log_request(handler)
 
 
 def on_shutdown():
@@ -380,13 +392,14 @@ def shutdown_handler(*args, **kwargs):
     # type: (*Any, **Any) -> None
     io_loop = IOLoop.instance()
     if io_loop._callbacks:
-        io_loop.add_timeout(time.time() + 1, shutdown_handler)
+        io_loop.call_later(1, shutdown_handler)
     else:
         io_loop.stop()
 
 # log which services/ports will be started
 print("Starting Zulip services on ports: web proxy: {},".format(proxy_port),
-      "Django: {}, Tornado: {}".format(django_port, tornado_port), end='')
+      "Django: {}, Tornado: {}, Thumbor: {}".format(django_port, tornado_port, thumbor_port),
+      end='')
 if options.test:
     print("")  # no webpack for --test
 else:

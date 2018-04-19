@@ -7,7 +7,7 @@
 # * settings.py imports prod_settings.py, and any site-specific configuration
 # belongs there.  The template for prod_settings.py is prod_settings_template.py
 #
-# See http://zulip.readthedocs.io/en/latest/settings.html for more information
+# See https://zulip.readthedocs.io/en/latest/subsystems/settings.html for more information
 #
 ########################################################################
 from copy import deepcopy
@@ -15,7 +15,8 @@ import os
 import platform
 import time
 import sys
-import six.moves.configparser
+from typing import Optional
+import configparser
 
 from zerver.lib.db import TimeTrackingConnection
 import zerver.lib.logging_util
@@ -26,21 +27,20 @@ import zerver.lib.logging_util
 
 DEPLOY_ROOT = os.path.join(os.path.realpath(os.path.dirname(__file__)), '..')
 
-config_file = six.moves.configparser.RawConfigParser()
+config_file = configparser.RawConfigParser()
 config_file.read("/etc/zulip/zulip.conf")
 
 # Whether this instance of Zulip is running in a production environment.
 PRODUCTION = config_file.has_option('machine', 'deploy_type')
 DEVELOPMENT = not PRODUCTION
 
-secrets_file = six.moves.configparser.RawConfigParser()
+secrets_file = configparser.RawConfigParser()
 if PRODUCTION:
     secrets_file.read("/etc/zulip/zulip-secrets.conf")
 else:
     secrets_file.read(os.path.join(DEPLOY_ROOT, "zproject/dev-secrets.conf"))
 
-def get_secret(key):
-    # type: (str) -> None
+def get_secret(key: str) -> Optional[str]:
     if secrets_file.has_option('secrets', key):
         return secrets_file.get('secrets', key)
     return None
@@ -115,10 +115,17 @@ else:
 # prod_settings_template.py, and in the initial /etc/zulip/settings.py on a new
 # install of the Zulip server.
 DEFAULT_SETTINGS = {
+    # Extra HTTP "Host" values to allow (standard ones added below)
+    'ALLOWED_HOSTS': [],
+
     # Basic email settings
-    'EMAIL_HOST': None,
     'NOREPLY_EMAIL_ADDRESS': "noreply@" + EXTERNAL_HOST.split(":")[0],
     'PHYSICAL_ADDRESS': '',
+
+    # SMTP settings
+    'EMAIL_HOST': None,
+    # Other settings, like EMAIL_HOST_USER, EMAIL_PORT, and EMAIL_USE_TLS,
+    # we leave up to Django's defaults.
 
     # Google auth
     'GOOGLE_OAUTH2_CLIENT_ID': None,
@@ -153,19 +160,30 @@ DEFAULT_SETTINGS = {
     'LOCAL_UPLOADS_DIR': None,
     'MAX_FILE_UPLOAD_SIZE': 25,
 
+    # JITSI video call integration; set to None to disable integration.
+    'JITSI_SERVER_URL': 'https://meet.jit.si/',
+
     # Feedback bot settings
     'ENABLE_FEEDBACK': PRODUCTION,
     'FEEDBACK_EMAIL': None,
 
+    # Max state storage per user
+    # TODO: Add this to zproject/prod_settings_template.py once stateful bots are fully functional.
+    'USER_STATE_SIZE_LIMIT': 10000000,
+    # Max size of a single configuration entry of an embedded bot.
+    'BOT_CONFIG_SIZE_LIMIT': 10000,
+
     # External service configuration
     'CAMO_URI': '',
     'MEMCACHED_LOCATION': '127.0.0.1:11211',
-    'RABBITMQ_HOST': 'localhost',
+    'RABBITMQ_HOST': '127.0.0.1',
     'RABBITMQ_USERNAME': 'zulip',
     'REDIS_HOST': '127.0.0.1',
     'REDIS_PORT': 6379,
     'REMOTE_POSTGRES_HOST': '',
     'REMOTE_POSTGRES_SSLMODE': '',
+    'THUMBOR_HOST': '',
+    'SENDFILE_BACKEND': None,
 
     # ToS/Privacy templates
     'PRIVACY_POLICY': None,
@@ -183,6 +201,14 @@ DEFAULT_SETTINGS = {
     'PUSH_NOTIFICATION_REDACT_CONTENT': False,
     'RATE_LIMITING': True,
     'SEND_LOGIN_EMAILS': True,
+    'EMBEDDED_BOTS_ENABLED': False,
+
+    # Two Factor Authentication is not yet implementation-complete
+    'TWO_FACTOR_AUTHENTICATION_ENABLED': False,
+
+    # This is used to send all hotspots for convenient manual testing
+    # in development mode.
+    'ALWAYS_SEND_ALL_HOTSPOTS': False,
 }
 
 # These settings are not documented in prod_settings_template.py.
@@ -203,9 +229,6 @@ DEFAULT_SETTINGS.update({
     # ERROR_BOT sends Django exceptions to an "errors" stream in the
     # system realm.
     'ERROR_BOT': None,
-    # NEW_USER_BOT sends notifications about new user signups to a
-    # "signups" stream in the system realm.
-    'NEW_USER_BOT': None,
     # These are extra bot users for our end-to-end Nagios message
     # sending tests.
     'NAGIOS_STAGING_SEND_BOT': None,
@@ -216,6 +239,10 @@ DEFAULT_SETTINGS.update({
     'FEEDBACK_BOT': 'feedback@zulip.com',
     'FEEDBACK_BOT_NAME': 'Zulip Feedback Bot',
     'FEEDBACK_STREAM': None,
+    # SYSTEM_BOT_REALM would be a constant always set to 'zulip',
+    # except that it isn't that on zulipchat.com.  We will likely do a
+    # migration and eliminate this parameter in the future.
+    'SYSTEM_BOT_REALM': 'zulip',
 
     # Structurally, we will probably eventually merge
     # analytics into part of the main server, rather
@@ -241,6 +268,12 @@ DEFAULT_SETTINGS.update({
     # purpose now that the REALMS_HAVE_SUBDOMAINS migration is finished.
     'SYSTEM_ONLY_REALMS': {"zulip"},
 
+    # Alternate hostnames to serve particular realms on, in addition to
+    # their usual subdomains.  Keys are realm string_ids (aka subdomains),
+    # and values are alternate hosts.
+    # The values will also be added to ALLOWED_HOSTS.
+    'REALM_HOSTS': {},
+
     # Whether the server is using the Pgroonga full-text search
     # backend.  Plan is to turn this on for everyone after further
     # testing.
@@ -250,9 +283,18 @@ DEFAULT_SETTINGS.update({
     # available for sysadmin override in unusual cases.
     'EMAIL_BACKEND': None,
 
+    # Whether to give admins a warning in the web app that email isn't set up.
+    # Set below when email isn't configured.
+    'WARN_NO_EMAIL': False,
+
     # Whether to keep extra frontend stack trace data.
     # TODO: Investigate whether this should be removed and set one way or other.
     'SAVE_FRONTEND_STACKTRACES': False,
+
+    # If True, disable rate-limiting and other filters on sending error messages
+    # to admins, and enable logging on the error-reporting itself.  Useful
+    # mainly in development.
+    'DEBUG_ERROR_REPORTING': False,
 
     # Whether to flush memcached after data migrations.  Because of
     # how we do deployments in a way that avoids reusing memcached,
@@ -261,7 +303,6 @@ DEFAULT_SETTINGS.update({
 
     # Settings for APNS.  Only needed on push.zulipchat.com.
     'APNS_CERT_FILE': None,
-    'APNS_KEY_FILE': None,
     'APNS_SANDBOX': True,
 
     # Limits related to the size of file uploads; last few in MB.
@@ -270,11 +311,29 @@ DEFAULT_SETTINGS.update({
     'MAX_ICON_FILE_SIZE': 5,
     'MAX_EMOJI_FILE_SIZE': 5,
 
+    # TODO: This server setting is a hack to help with folks who are
+    # finding our private stream security model painful.  Future work
+    # will migrate this to be a property of Stream or maybe Realm and
+    # this setting will be deprecated.
+    'PRIVATE_STREAM_HISTORY_FOR_SUBSCRIBERS': False,
+
+    # Limits to help prevent spam, in particular by sending invitations.
+    #
+    # A non-admin user who's joined an open realm this recently can't invite at all.
+    'INVITES_MIN_USER_AGE_DAYS': 3,
+    # Default for a realm's `max_invites`; which applies per day,
+    # and only applies if OPEN_REALM_CREATION is true.
+    'INVITES_DEFAULT_REALM_DAILY_MAX': 100,
+    # Global rate-limit (list of pairs (days, max)) on invites from new realms.
+    # Only applies if OPEN_REALM_CREATION is true.
+    'INVITES_NEW_REALM_LIMIT_DAYS': [(1, 100)],
+    # Definition of a new realm for INVITES_NEW_REALM_LIMIT.
+    'INVITES_NEW_REALM_DAYS': 7,
+
     # Controls for which links are published in portico footers/headers/etc.
     'EMAIL_DELIVERER_DISABLED': False,
     'REGISTER_LINK_DISABLED': None,
     'LOGIN_LINK_DISABLED': False,
-    'ABOUT_LINK_DISABLED': False,
     'FIND_TEAM_LINK_DISABLED': True,
 
     # What domains to treat like the root domain
@@ -324,6 +383,9 @@ DEFAULT_SETTINGS.update({
     # because some transactional email providers reject sending such
     # emails since they can look like spam.
     'SEND_MISSED_MESSAGE_EMAILS_AS_USER': False,
+    # Whether to send periodic digests of activity.  Off by default
+    # because this feature is in beta.
+    'SEND_DIGEST_EMAILS': False,
 
     # Used to change the Zulip logo in portico pages.
     'CUSTOM_LOGO_URL': None,
@@ -350,9 +412,6 @@ DEFAULT_SETTINGS.update({
 for setting_name, setting_val in DEFAULT_SETTINGS.items():
     if setting_name not in vars():
         vars()[setting_name] = setting_val
-
-# Extend ALLOWED_HOSTS with localhost (needed to RPC to Tornado).
-ALLOWED_HOSTS += ['127.0.0.1', 'localhost']
 
 # These are the settings that we will check that the user has filled in for
 # production deployments before starting the app.  It consists of a series
@@ -408,6 +467,14 @@ DEVELOPMENT_LOG_DIRECTORY = os.path.join(DEPLOY_ROOT, 'var', 'log')
 # Make redirects work properly behind a reverse proxy
 USE_X_FORWARDED_HOST = True
 
+# Extend ALLOWED_HOSTS with localhost (needed to RPC to Tornado),
+ALLOWED_HOSTS += ['127.0.0.1', 'localhost']
+# ... with hosts corresponding to EXTERNAL_HOST,
+ALLOWED_HOSTS += [EXTERNAL_HOST.split(":")[0],
+                  '.' + EXTERNAL_HOST.split(":")[0]]
+# ... and with the hosts in REALM_HOSTS.
+ALLOWED_HOSTS += REALM_HOSTS.values()
+
 MIDDLEWARE = (
     # With the exception of it's dependencies,
     # our logging middleware should be the top middleware item.
@@ -423,6 +490,15 @@ MIDDLEWARE = (
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
 )
+
+# Make sure these come after authentication middleware.
+TWO_FACTOR_MIDDLEWARE = (
+    'django_otp.middleware.OTPMiddleware',  # Required by Two Factor auth.
+    'two_factor.middleware.threadlocals.ThreadLocals',  # Required by Twilio
+)
+
+if TWO_FACTOR_AUTHENTICATION_ENABLED:
+    MIDDLEWARE += TWO_FACTOR_MIDDLEWARE
 
 ANONYMOUS_USER_ID = None
 
@@ -451,6 +527,13 @@ INSTALLED_APPS = [
 ]
 if USING_PGROONGA:
     INSTALLED_APPS += ['pgroonga']
+if TWO_FACTOR_AUTHENTICATION_ENABLED:
+    INSTALLED_APPS += [
+        'django_otp',
+        'django_otp.plugins.otp_static',
+        'django_otp.plugins.otp_totp',
+        'two_factor',
+    ]
 INSTALLED_APPS += EXTRA_INSTALLED_APPS
 
 ZILENCER_ENABLED = 'zilencer' in INSTALLED_APPS
@@ -461,6 +544,15 @@ ZILENCER_ENABLED = 'zilencer' in INSTALLED_APPS
 TORNADO_SERVER = 'http://127.0.0.1:9993'
 RUNNING_INSIDE_TORNADO = False
 AUTORELOAD = DEBUG
+
+SILENCED_SYSTEM_CHECKS = [
+    # auth.W004 checks that the UserProfile field named by USERNAME_FIELD has
+    # `unique=True`.  For us this is `email`, and it's unique only per-realm.
+    # Per Django docs, this is perfectly fine so long as our authentication
+    # backends support the username not being unique; and they do.
+    # See: https://docs.djangoproject.com/en/1.11/topics/auth/customizing/#django.contrib.auth.models.CustomUser.USERNAME_FIELD
+    "auth.W004",
+]
 
 ########################################################################
 # DATABASE CONFIGURATION
@@ -551,7 +643,7 @@ CACHES = {
 ########################################################################
 
 RATE_LIMITING_RULES = [
-    (60, 100),  # 100 requests max every minute
+    (60, 200),  # 200 requests max every minute
 ]
 DEBUG_RATE_LIMITING = DEBUG
 REDIS_PASSWORD = get_secret('redis_password')
@@ -572,7 +664,7 @@ try:
     # For get_updates hostname sharding.
     domain = config_file.get('django', 'cookie_domain')
     CSRF_COOKIE_DOMAIN = '.' + domain
-except six.moves.configparser.Error:
+except configparser.Error:
     # Failing here is OK
     pass
 
@@ -602,9 +694,6 @@ else:
 # API/BOT SETTINGS
 ########################################################################
 
-if "EXTERNAL_API_PATH" not in vars():
-    EXTERNAL_API_PATH = EXTERNAL_HOST + "/api"
-EXTERNAL_API_URI = EXTERNAL_URI_SCHEME + EXTERNAL_API_PATH
 ROOT_DOMAIN_URI = EXTERNAL_URI_SCHEME + EXTERNAL_HOST
 
 if "NAGIOS_BOT_HOST" not in vars():
@@ -612,6 +701,12 @@ if "NAGIOS_BOT_HOST" not in vars():
 
 S3_KEY = get_secret("s3_key")
 S3_SECRET_KEY = get_secret("s3_secret_key")
+
+if LOCAL_UPLOADS_DIR is not None:
+    if SENDFILE_BACKEND is None:
+        SENDFILE_BACKEND = 'sendfile.backends.nginx'
+    SENDFILE_ROOT = os.path.join(LOCAL_UPLOADS_DIR, "files")
+    SENDFILE_URL = '/serve_uploads'
 
 # GCM tokens are IP-whitelisted; if we deploy to additional
 # servers you will need to explicitly add their IPs here:
@@ -649,6 +744,10 @@ INTERNAL_BOTS = [{'var_name': 'NOTIFICATION_BOT',
                   'email_template': 'welcome-bot@%s',
                   'name': 'Welcome Bot'}]
 
+REALM_INTERNAL_BOTS = [{'var_name': 'REMINDER_BOT',
+                        'email_template': 'reminder-bot@%s',
+                        'name': 'Reminder Bot'}]
+
 if PRODUCTION:
     INTERNAL_BOTS += [
         {'var_name': 'NAGIOS_STAGING_SEND_BOT',
@@ -662,7 +761,7 @@ if PRODUCTION:
 INTERNAL_BOT_DOMAIN = "zulip.com"
 
 # Set the realm-specific bot names
-for bot in INTERNAL_BOTS:
+for bot in INTERNAL_BOTS + REALM_INTERNAL_BOTS:
     if vars().get(bot['var_name']) is None:
         bot_email = bot['email_template'] % (INTERNAL_BOT_DOMAIN,)
         vars()[bot['var_name']] = bot_email
@@ -747,7 +846,7 @@ STATIC_HEADER_FILE = 'zerver/static_header.txt'
 # static files.
 #
 # Useful reading on how this works is in
-# https://zulip.readthedocs.io/en/latest/front-end-build-process.html
+# https://zulip.readthedocs.io/en/latest/subsystems/front-end-build-process.html
 
 PIPELINE = {
     'PIPELINE_ENABLED': PIPELINE_ENABLED,
@@ -757,7 +856,10 @@ PIPELINE = {
         # If you add a style here, please update stylesheets()
         # in frontend_tests/zjsunit/output.js as needed.
         'activity': {
-            'source_filenames': ('styles/activity.css',),
+            'source_filenames': (
+                'styles/activity.css',
+                'third/thirdparty-fonts.css',
+            ),
             'output_filename': 'min/activity.css'
         },
         'stats': {
@@ -772,6 +874,7 @@ PIPELINE = {
                 'styles/portico-signin.css',
                 'styles/pygments.css',
                 'third/thirdparty-fonts.css',
+                'generated/icons/style.css',
                 'styles/fonts.css',
             ),
             'output_filename': 'min/portico.css'
@@ -788,6 +891,9 @@ PIPELINE = {
                 'third/bootstrap-notify/css/bootstrap-notify.css',
                 'third/spectrum/spectrum.css',
                 'third/thirdparty-fonts.css',
+                'generated/icons/style.css',
+                'node_modules/flatpickr/dist/flatpickr.css',
+                'node_modules/flatpickr/dist/plugins/confirmDate/confirmDate.css',
                 'styles/components.css',
                 'styles/app_components.css',
                 'styles/zulip.css',
@@ -795,6 +901,7 @@ PIPELINE = {
                 'styles/settings.css',
                 'styles/subscriptions.css',
                 'styles/drafts.css',
+                'styles/input_pill.css',
                 'styles/informational-overlays.css',
                 'styles/compose.css',
                 'styles/reactions.css',
@@ -806,6 +913,7 @@ PIPELINE = {
                 'styles/media.css',
                 'styles/typing_notifications.css',
                 'styles/hotspots.css',
+                'styles/night_mode.css',
                 # We don't want fonts.css on QtWebKit, so its omitted here
             ),
             'output_filename': 'min/app-fontcompat.css'
@@ -815,7 +923,10 @@ PIPELINE = {
                 'third/bootstrap-notify/css/bootstrap-notify.css',
                 'third/spectrum/spectrum.css',
                 'third/thirdparty-fonts.css',
+                'generated/icons/style.css',
                 'node_modules/katex/dist/katex.css',
+                'node_modules/flatpickr/dist/flatpickr.css',
+                'node_modules/flatpickr/dist/plugins/confirmDate/confirmDate.css',
                 'styles/components.css',
                 'styles/app_components.css',
                 'styles/zulip.css',
@@ -823,6 +934,7 @@ PIPELINE = {
                 'styles/settings.css',
                 'styles/subscriptions.css',
                 'styles/drafts.css',
+                'styles/input_pill.css',
                 'styles/informational-overlays.css',
                 'styles/compose.css',
                 'styles/reactions.css',
@@ -835,6 +947,7 @@ PIPELINE = {
                 'styles/media.css',
                 'styles/typing_notifications.css',
                 'styles/hotspots.css',
+                'styles/night_mode.css',
             ),
             'output_filename': 'min/app.css'
         },
@@ -843,21 +956,21 @@ PIPELINE = {
                 'third/bootstrap/css/bootstrap.css',
                 'third/bootstrap/css/bootstrap-btn.css',
                 'third/bootstrap/css/bootstrap-responsive.css',
-                'node_modules/perfect-scrollbar/dist/css/perfect-scrollbar.css',
+                'node_modules/perfect-scrollbar/css/perfect-scrollbar.css',
             ),
             'output_filename': 'min/common.css'
         },
         'apple_sprite': {
             'source_filenames': (
-                'generated/emoji/google_sprite.css',
+                'generated/emoji/apple_sprite.css',
             ),
-            'output_filename': 'min/google_sprite.css',
+            'output_filename': 'min/apple_sprite.css',
         },
         'emojione_sprite': {
             'source_filenames': (
-                'generated/emoji/google_sprite.css',
+                'generated/emoji/emojione_sprite.css',
             ),
-            'output_filename': 'min/google_sprite.css',
+            'output_filename': 'min/emojione_sprite.css',
         },
         'google_sprite': {
             'source_filenames': (
@@ -867,22 +980,23 @@ PIPELINE = {
         },
         'twitter_sprite': {
             'source_filenames': (
-                'generated/emoji/google_sprite.css',
+                'generated/emoji/twitter_sprite.css',
             ),
-            'output_filename': 'min/google_sprite.css',
+            'output_filename': 'min/twitter_sprite.css',
         },
     },
     'JAVASCRIPT': {},
 }
 
 # Useful reading on how this works is in
-# https://zulip.readthedocs.io/en/latest/front-end-build-process.html
+# https://zulip.readthedocs.io/en/latest/subsystems/front-end-build-process.html
 JS_SPECS = {
     'app': {
         'source_filenames': [
             'third/bootstrap-notify/js/bootstrap-notify.js',
             'third/html5-formdata/formdata.js',
             'node_modules/jquery-validation/dist/jquery.validate.js',
+            'node_modules/blueimp-md5/js/md5.js',
             'node_modules/clipboard/dist/clipboard.js',
             'third/jquery-form/jquery.form.js',
             'third/jquery-filedrop/jquery.filedrop.js',
@@ -891,13 +1005,16 @@ JS_SPECS = {
             'third/jquery-throttle-debounce/jquery.ba-throttle-debounce.js',
             'third/jquery-idle/jquery.idle.js',
             'third/jquery-autosize/jquery.autosize.js',
-            'node_modules/perfect-scrollbar/dist/js/perfect-scrollbar.jquery.js',
+            'node_modules/perfect-scrollbar/dist/perfect-scrollbar.js',
             'third/lazyload/lazyload.js',
             'third/spectrum/spectrum.js',
             'third/sockjs/sockjs-0.3.4.js',
             'node_modules/string.prototype.codepointat/codepointat.js',
             'node_modules/winchan/winchan.js',
             'node_modules/handlebars/dist/handlebars.runtime.js',
+            'node_modules/to-markdown/dist/to-markdown.js',
+            'node_modules/flatpickr/dist/flatpickr.js',
+            'node_modules/flatpickr/dist/plugins/confirmDate/confirmDate.js',
             'third/marked/lib/marked.js',
             'generated/emoji/emoji_codes.js',
             'generated/pygments_data.js',
@@ -906,12 +1023,16 @@ JS_SPECS = {
             'js/loading.js',
             'js/util.js',
             'js/dynamic_text.js',
+            'js/keydown_util.js',
             'js/lightbox_canvas.js',
             'js/rtl.js',
             'js/dict.js',
             'js/components.js',
             'js/localstorage.js',
             'js/drafts.js',
+            'js/input_pill.js',
+            'js/user_pill.js',
+            'js/compose_pm_pill.js',
             'js/channel.js',
             'js/setup.js',
             'js/unread_ui.js',
@@ -921,6 +1042,7 @@ JS_SPECS = {
             'js/message_viewport.js',
             'js/rows.js',
             'js/people.js',
+            'js/user_groups.js',
             'js/unread.js',
             'js/topic_list.js',
             'js/pm_list.js',
@@ -931,6 +1053,7 @@ JS_SPECS = {
             'js/top_left_corner.js',
             'js/stream_list.js',
             'js/filter.js',
+            'js/fetch_status.js',
             'js/message_list_view.js',
             'js/message_list.js',
             'js/message_live_update.js',
@@ -945,7 +1068,9 @@ JS_SPECS = {
             'js/sent_messages.js',
             'js/compose_state.js',
             'js/compose_actions.js',
+            'js/transmit.js',
             'js/compose.js',
+            'js/upload.js',
             'js/stream_color.js',
             'js/stream_data.js',
             'js/topic_data.js',
@@ -961,7 +1086,10 @@ JS_SPECS = {
             'js/floating_recipient_bar.js',
             'js/lightbox.js',
             'js/ui_report.js',
+            'js/message_scroll.js',
+            'js/info_overlay.js',
             'js/ui.js',
+            'js/night_mode.js',
             'js/ui_util.js',
             'js/pointer.js',
             'js/click_handlers.js',
@@ -1018,12 +1146,14 @@ JS_SPECS = {
             'js/settings_users.js',
             'js/settings_streams.js',
             'js/settings_filters.js',
+            'js/settings_invites.js',
+            'js/settings_user_groups.js',
+            'js/settings_profile_fields.js',
             'js/settings.js',
             'js/admin_sections.js',
             'js/admin.js',
             'js/tab_bar.js',
             'js/emoji.js',
-            'js/custom_markdown.js',
             'js/bot_data.js',
             'js/reactions.js',
             'js/typing.js',
@@ -1033,7 +1163,8 @@ JS_SPECS = {
             'js/ui_init.js',
             'js/emoji_picker.js',
             'js/compose_ui.js',
-            'js/desktop_notifications_panel.js'
+            'js/panels.js',
+            'js/settings_ui.js'
         ],
         'output_filename': 'min/app.js'
     },
@@ -1041,7 +1172,28 @@ JS_SPECS = {
     'sockjs': {
         'source_filenames': ['third/sockjs/sockjs-0.3.4.js'],
         'output_filename': 'min/sockjs-0.3.4.min.js'
-    }
+    },
+    # Even though we've moved the main KaTeX copy into Webpack, we
+    # also need KaTeX to be runnable directly via Node (Called from
+    # zerver/lib/tex.py which calls static/third/katex/cli.js.  Since
+    # our Webpack setup doesn't provide a good way to name the current
+    # version of a module, we use the legacy django-pipeline system
+    # for bundling KaTeX.
+    'katex': {
+        'source_filenames': [
+            'node_modules/katex/dist/katex.js',
+        ],
+        'output_filename': 'min/katex.js',
+    },
+    # The same legacy treatment is required for zxcvbn, in order to
+    # support the settings_account.js use case (where we don't have a
+    # good way to look up the path to the file).
+    'zxcvbn': {
+        'source_filenames': [
+            'node_modules/zxcvbn/dist/zxcvbn.js',
+        ],
+        'output_filename': 'min/zxcvbn.js'
+    },
 }
 
 app_srcs = JS_SPECS['app']['source_filenames']
@@ -1081,7 +1233,6 @@ base_template_engine_settings = {
         ],
         'context_processors': [
             'zerver.context_processors.zulip_default_context',
-            'zerver.context_processors.add_metrics',
             'django.template.context_processors.i18n',
         ],
     },
@@ -1140,6 +1291,9 @@ ZULIP_PATHS = [
     ("ANALYTICS_LOCK_DIR", "/home/zulip/deployments/analytics-lock-dir"),
     ("API_KEY_ONLY_WEBHOOK_LOG_PATH", "/var/log/zulip/webhooks_errors.log"),
     ("SOFT_DEACTIVATION_LOG_PATH", "/var/log/zulip/soft_deactivation.log"),
+    ("TRACEMALLOC_DUMP_DIR", "/var/log/zulip/tracemalloc"),
+    ("SCHEDULED_MESSAGE_DELIVERER_LOG_PATH",
+     "/var/log/zulip/scheduled_message_deliverer.log"),
 ]
 
 # The Event log basically logs most significant database changes,
@@ -1165,8 +1319,9 @@ if IS_WORKER:
     FILE_LOG_PATH = WORKER_LOG_PATH
 else:
     FILE_LOG_PATH = SERVER_LOG_PATH
-# Used for test_logging_handlers
-LOGGING_NOT_DISABLED = True
+
+# This is disabled in a few tests.
+LOGGING_ENABLED = True
 
 DEFAULT_ZULIP_HANDLERS = (
     (['zulip_admins'] if ERROR_REPORTING else []) +
@@ -1219,9 +1374,9 @@ LOGGING = {
     'handlers': {
         'zulip_admins': {
             'level': 'ERROR',
-            'class': 'zerver.logging_handlers.AdminZulipHandler',
-            # For testing the handler delete the next line
-            'filters': ['ZulipLimiter', 'require_debug_false', 'require_really_deployed'],
+            'class': 'zerver.logging_handlers.AdminNotifyHandler',
+            'filters': (['ZulipLimiter', 'require_debug_false', 'require_really_deployed']
+                        if not DEBUG_ERROR_REPORTING else []),
             'formatter': 'default'
         },
         'console': {
@@ -1308,8 +1463,19 @@ LOGGING = {
         # },
 
         # other libraries, alphabetized
-        'pika.adapters': {  # This library is super chatty on INFO.
+        'pika.adapters': {
+            # pika is super chatty on INFO.
             'level': 'WARNING',
+            # pika spews a lot of ERROR logs when a connection fails.
+            # We reconnect automatically, so those should be treated as WARNING --
+            # write to the log for use in debugging, but no error emails/Zulips.
+            'handlers': ['console', 'file', 'errors_file'],
+            'propagate': False,
+        },
+        'pika.connection': {
+            # Leave `zulip_admins` out of the handlers.  See pika.adapters above.
+            'handlers': ['console', 'file', 'errors_file'],
+            'propagate': False,
         },
         'requests': {
             'level': 'WARNING',
@@ -1327,6 +1493,18 @@ LOGGING = {
         },
 
         # our own loggers, alphabetized
+        'zerver.lib.digest': {
+            'level': 'DEBUG',
+        },
+        'zerver.management.commands.deliver_email': {
+            'level': 'DEBUG',
+        },
+        'zerver.management.commands.enqueue_digest_emails': {
+            'level': 'DEBUG',
+        },
+        'zerver.management.commands.deliver_scheduled_messages': {
+            'level': 'DEBUG',
+        },
         'zulip.management': {
             'handlers': ['file', 'errors_file'],
             'propagate': False,
@@ -1339,6 +1517,7 @@ LOGGING = {
             'propagate': False,
         },
         'zulip.zerver.webhooks': {
+            'level': 'DEBUG',
             'handlers': ['file', 'errors_file'],
             'propagate': False,
         },
@@ -1385,7 +1564,9 @@ if POPULATE_PROFILE_VIA_LDAP and \
    'zproject.backends.ZulipLDAPAuthBackend' not in AUTHENTICATION_BACKENDS:
     AUTHENTICATION_BACKENDS += ('zproject.backends.ZulipLDAPUserPopulator',)
 else:
-    POPULATE_PROFILE_VIA_LDAP = 'zproject.backends.ZulipLDAPAuthBackend' in AUTHENTICATION_BACKENDS or POPULATE_PROFILE_VIA_LDAP
+    POPULATE_PROFILE_VIA_LDAP = (
+        'zproject.backends.ZulipLDAPAuthBackend' in AUTHENTICATION_BACKENDS or
+        POPULATE_PROFILE_VIA_LDAP)
 
 if REGISTER_LINK_DISABLED is None:
     # The default for REGISTER_LINK_DISABLED is a bit more
@@ -1421,12 +1602,13 @@ DEFAULT_FROM_EMAIL = ZULIP_ADMINISTRATOR
 if EMAIL_BACKEND is not None:
     # If the server admin specified a custom email backend, use that.
     pass
-elif not EMAIL_HOST and PRODUCTION:
-    # If an email host is not specified, fail silently and gracefully
-    EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'
 elif DEVELOPMENT:
     # In the dev environment, emails are printed to the run-dev.py console.
-    EMAIL_BACKEND = 'zproject.backends.EmailLogBackEnd'
+    EMAIL_BACKEND = 'zproject.email_backends.EmailLogBackEnd'
+elif not EMAIL_HOST:
+    # If an email host is not specified, fail gracefully
+    WARN_NO_EMAIL = True
+    EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
@@ -1449,6 +1631,14 @@ if PRODUCTION:
 # This is a debugging option only
 PROFILE_ALL_REQUESTS = False
 
-CROSS_REALM_BOT_EMAILS = set(('feedback@zulip.com', 'notification-bot@zulip.com', 'welcome-bot@zulip.com'))
+CROSS_REALM_BOT_EMAILS = {
+    'feedback@zulip.com',
+    'notification-bot@zulip.com',
+    'welcome-bot@zulip.com',
+    'new-user-bot@zulip.com',
+    'emailgateway@zulip.com',
+}
 
 CONTRIBUTORS_DATA = os.path.join(STATIC_ROOT, 'generated/github-contributors.json')
+
+THUMBOR_KEY = get_secret('thumbor_key')

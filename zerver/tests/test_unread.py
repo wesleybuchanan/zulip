@@ -6,8 +6,8 @@ from django.db import connection
 
 from zerver.models import (
     get_realm,
-    get_recipient,
     get_stream,
+    get_stream_recipient,
     get_user,
     Recipient,
     Stream,
@@ -34,35 +34,31 @@ import ujson
 
 class PointerTest(ZulipTestCase):
 
-    def test_update_pointer(self):
-        # type: () -> None
+    def test_update_pointer(self) -> None:
         """
         Posting a pointer to /update (in the form {"pointer": pointer}) changes
         the pointer we store for your UserProfile.
         """
         self.login(self.example_email("hamlet"))
         self.assertEqual(self.example_user('hamlet').pointer, -1)
-        msg_id = self.send_message(self.example_email("othello"), "Verona", Recipient.STREAM)
+        msg_id = self.send_stream_message(self.example_email("othello"), "Verona")
         result = self.client_post("/json/users/me/pointer", {"pointer": msg_id})
         self.assert_json_success(result)
         self.assertEqual(self.example_user('hamlet').pointer, msg_id)
 
-    def test_api_update_pointer(self):
-        # type: () -> None
+    def test_api_update_pointer(self) -> None:
         """
         Same as above, but for the API view
         """
         user = self.example_user('hamlet')
         email = user.email
         self.assertEqual(user.pointer, -1)
-        msg_id = self.send_message(self.example_email("othello"), "Verona", Recipient.STREAM)
-        result = self.client_post("/api/v1/users/me/pointer", {"pointer": msg_id},
-                                  **self.api_auth(email))
+        msg_id = self.send_stream_message(self.example_email("othello"), "Verona")
+        result = self.api_post(email, "/api/v1/users/me/pointer", {"pointer": msg_id})
         self.assert_json_success(result)
         self.assertEqual(get_user(email, user.realm).pointer, msg_id)
 
-    def test_missing_pointer(self):
-        # type: () -> None
+    def test_missing_pointer(self) -> None:
         """
         Posting json to /json/users/me/pointer which does not contain a pointer key/value pair
         returns a 400 and error message.
@@ -73,8 +69,7 @@ class PointerTest(ZulipTestCase):
         self.assert_json_error(result, "Missing 'pointer' argument")
         self.assertEqual(self.example_user('hamlet').pointer, -1)
 
-    def test_invalid_pointer(self):
-        # type: () -> None
+    def test_invalid_pointer(self) -> None:
         """
         Posting json to /json/users/me/pointer with an invalid pointer returns a 400 and error
         message.
@@ -85,8 +80,7 @@ class PointerTest(ZulipTestCase):
         self.assert_json_error(result, "Bad value for 'pointer': foo")
         self.assertEqual(self.example_user('hamlet').pointer, -1)
 
-    def test_pointer_out_of_range(self):
-        # type: () -> None
+    def test_pointer_out_of_range(self) -> None:
         """
         Posting json to /json/users/me/pointer with an out of range (< 0) pointer returns a 400
         and error message.
@@ -97,8 +91,7 @@ class PointerTest(ZulipTestCase):
         self.assert_json_error(result, "Bad value for 'pointer': -2")
         self.assertEqual(self.example_user('hamlet').pointer, -1)
 
-    def test_use_first_unread_anchor_interaction_with_pointer(self):
-        # type: () -> None
+    def test_use_first_unread_anchor_interaction_with_pointer(self) -> None:
         """
         Getting old messages (a get request to /json/messages) should never
         return an unread message older than the current pointer, when there's
@@ -113,14 +106,15 @@ class PointerTest(ZulipTestCase):
         self.assert_json_success(result)
 
         # Send a new message (this will be unread)
-        new_message_id = self.send_message(self.example_email("othello"), "Verona",
-                                           Recipient.STREAM, "test")
+        new_message_id = self.send_stream_message(self.example_email("othello"), "Verona",
+                                                  "test")
 
         # If we call get_messages with use_first_unread_anchor=True, we
         # should get the message we just sent
-        messages = self.get_messages(
+        messages_response = self.get_messages_response(
             anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
-        self.assertEqual(messages[0]['id'], new_message_id)
+        self.assertEqual(messages_response['messages'][0]['id'], new_message_id)
+        self.assertEqual(messages_response['anchor'], new_message_id)
 
         # We want to get the message_id of an arbitrar old message. We can
         # call get_messages with use_first_unread_anchor=False and simply
@@ -151,9 +145,10 @@ class PointerTest(ZulipTestCase):
 
         # Now if we call get_messages with use_first_unread_anchor=True,
         # we should get the old message we just set to unread
-        messages = self.get_messages(
+        messages_response = self.get_messages_response(
             anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
-        self.assertEqual(messages[0]['id'], old_message_id)
+        self.assertEqual(messages_response['messages'][0]['id'], old_message_id)
+        self.assertEqual(messages_response['anchor'], old_message_id)
 
         # Let's update the pointer to be *after* this old unread message (but
         # still on or before the new unread message we just sent)
@@ -172,25 +167,56 @@ class PointerTest(ZulipTestCase):
         # Now if we call get_messages with use_first_unread_anchor=True,
         # we should not get the old unread message (because it's before the
         # pointer), and instead should get the newly sent unread message
-        messages = self.get_messages(
+        messages_response = self.get_messages_response(
             anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
-        self.assertEqual(messages[0]['id'], new_message_id)
+        self.assertEqual(messages_response['messages'][0]['id'], new_message_id)
+        self.assertEqual(messages_response['anchor'], new_message_id)
+
+    def test_visible_messages_use_first_unread_anchor(self) -> None:
+        self.login(self.example_email("hamlet"))
+        self.assertEqual(self.example_user('hamlet').pointer, -1)
+
+        result = self.client_post("/json/mark_all_as_read")
+        self.assert_json_success(result)
+
+        new_message_id = self.send_stream_message(self.example_email("othello"), "Verona",
+                                                  "test")
+
+        messages_response = self.get_messages_response(
+            anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
+        self.assertEqual(messages_response['messages'][0]['id'], new_message_id)
+        self.assertEqual(messages_response['anchor'], new_message_id)
+
+        with mock.patch('zerver.views.messages.get_first_visible_message_id', return_value=new_message_id):
+            messages_response = self.get_messages_response(
+                anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
+        self.assertEqual(messages_response['messages'][0]['id'], new_message_id)
+        self.assertEqual(messages_response['anchor'], new_message_id)
+
+        with mock.patch('zerver.views.messages.get_first_visible_message_id', return_value=new_message_id + 1):
+            messages_reponse = self.get_messages_response(
+                anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
+        self.assert_length(messages_reponse['messages'], 0)
+        self.assertIn('anchor', messages_reponse)
+
+        with mock.patch('zerver.views.messages.get_first_visible_message_id', return_value=new_message_id - 1):
+            messages = self.get_messages(
+                anchor=0, num_before=0, num_after=1, use_first_unread_anchor=True)
+        self.assert_length(messages, 1)
 
 class UnreadCountTests(ZulipTestCase):
-    def setUp(self):
-        # type: () -> None
+    def setUp(self) -> None:
         self.unread_msg_ids = [
-            self.send_message(
-                self.example_email("iago"), self.example_email("hamlet"), Recipient.PERSONAL, "hello"),
-            self.send_message(
-                self.example_email("iago"), self.example_email("hamlet"), Recipient.PERSONAL, "hello2")]
+            self.send_personal_message(
+                self.example_email("iago"), self.example_email("hamlet"), "hello"),
+            self.send_personal_message(
+                self.example_email("iago"), self.example_email("hamlet"), "hello2")]
 
     # Sending a new message results in unread UserMessages being created
-    def test_new_message(self):
-        # type: () -> None
+    def test_new_message(self) -> None:
         self.login(self.example_email("hamlet"))
         content = "Test message for unset read bit"
-        last_msg = self.send_message(self.example_email("hamlet"), "Verona", Recipient.STREAM, content)
+        last_msg = self.send_stream_message(self.example_email("hamlet"), "Verona", content)
         user_messages = list(UserMessage.objects.filter(message=last_msg))
         self.assertEqual(len(user_messages) > 0, True)
         for um in user_messages:
@@ -198,8 +224,7 @@ class UnreadCountTests(ZulipTestCase):
             if um.user_profile.email != self.example_email("hamlet"):
                 self.assertFalse(um.flags.read)
 
-    def test_update_flags(self):
-        # type: () -> None
+    def test_update_flags(self) -> None:
         self.login(self.example_email("hamlet"))
 
         result = self.client_post("/json/messages/flags",
@@ -228,15 +253,14 @@ class UnreadCountTests(ZulipTestCase):
             elif msg['id'] == self.unread_msg_ids[1]:
                 self.assertEqual(msg['flags'], [])
 
-    def test_mark_all_in_stream_read(self):
-        # type: () -> None
+    def test_mark_all_in_stream_read(self) -> None:
         self.login(self.example_email("hamlet"))
         user_profile = self.example_user('hamlet')
         stream = self.subscribe(user_profile, "test_stream")
         self.subscribe(self.example_user("cordelia"), "test_stream")
 
-        message_id = self.send_message(self.example_email("hamlet"), "test_stream", Recipient.STREAM, "hello")
-        unrelated_message_id = self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, "hello")
+        message_id = self.send_stream_message(self.example_email("hamlet"), "test_stream", "hello")
+        unrelated_message_id = self.send_stream_message(self.example_email("hamlet"), "Denmark", "hello")
 
         events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
@@ -269,8 +293,7 @@ class UnreadCountTests(ZulipTestCase):
             if msg.user_profile.email == self.example_email("hamlet"):
                 self.assertFalse(msg.flags.read)
 
-    def test_mark_all_in_invalid_stream_read(self):
-        # type: () -> None
+    def test_mark_all_in_invalid_stream_read(self) -> None:
         self.login(self.example_email("hamlet"))
         invalid_stream_id = "12345678"
         result = self.client_post("/json/mark_stream_as_read", {
@@ -278,8 +301,7 @@ class UnreadCountTests(ZulipTestCase):
         })
         self.assert_json_error(result, 'Invalid stream id')
 
-    def test_mark_all_topics_unread_with_invalid_stream_name(self):
-        # type: () -> None
+    def test_mark_all_topics_unread_with_invalid_stream_name(self) -> None:
         self.login(self.example_email("hamlet"))
         invalid_stream_id = "12345678"
         result = self.client_post("/json/mark_topic_as_read", {
@@ -288,14 +310,13 @@ class UnreadCountTests(ZulipTestCase):
         })
         self.assert_json_error(result, "Invalid stream id")
 
-    def test_mark_all_in_stream_topic_read(self):
-        # type: () -> None
+    def test_mark_all_in_stream_topic_read(self) -> None:
         self.login(self.example_email("hamlet"))
         user_profile = self.example_user('hamlet')
         self.subscribe(user_profile, "test_stream")
 
-        message_id = self.send_message(self.example_email("hamlet"), "test_stream", Recipient.STREAM, "hello", "test_topic")
-        unrelated_message_id = self.send_message(self.example_email("hamlet"), "Denmark", Recipient.STREAM, "hello", "Denmark2")
+        message_id = self.send_stream_message(self.example_email("hamlet"), "test_stream", "hello", "test_topic")
+        unrelated_message_id = self.send_stream_message(self.example_email("hamlet"), "Denmark", "hello", "Denmark2")
         events = []  # type: List[Mapping[str, Any]]
         with tornado_redirected_to_list(events):
             result = self.client_post("/json/mark_topic_as_read", {
@@ -326,8 +347,7 @@ class UnreadCountTests(ZulipTestCase):
             if msg.user_profile.email == self.example_email("hamlet"):
                 self.assertFalse(msg.flags.read)
 
-    def test_mark_all_in_invalid_topic_read(self):
-        # type: () -> None
+    def test_mark_all_in_invalid_topic_read(self) -> None:
         self.login(self.example_email("hamlet"))
         invalid_topic_name = "abc"
         result = self.client_post("/json/mark_topic_as_read", {
@@ -337,37 +357,31 @@ class UnreadCountTests(ZulipTestCase):
         self.assert_json_error(result, 'No such topic \'abc\'')
 
 class FixUnreadTests(ZulipTestCase):
-    def test_fix_unreads(self):
-        # type: () -> None
+    def test_fix_unreads(self) -> None:
         user = self.example_user('hamlet')
         realm = get_realm('zulip')
 
-        def send_message(stream_name, topic_name):
-            # type: (Text, Text) -> int
-            msg_id = self.send_message(
+        def send_message(stream_name: Text, topic_name: Text) -> int:
+            msg_id = self.send_stream_message(
                 self.example_email("othello"),
                 stream_name,
-                Recipient.STREAM,
-                subject=topic_name)
+                topic_name=topic_name)
             um = UserMessage.objects.get(
                 user_profile=user,
                 message_id=msg_id)
             return um.id
 
-        def assert_read(user_message_id):
-            # type: (int) -> None
+        def assert_read(user_message_id: int) -> None:
             um = UserMessage.objects.get(id=user_message_id)
             self.assertTrue(um.flags.read)
 
-        def assert_unread(user_message_id):
-            # type: (int) -> None
+        def assert_unread(user_message_id: int) -> None:
             um = UserMessage.objects.get(id=user_message_id)
             self.assertFalse(um.flags.read)
 
-        def mute_stream(stream_name):
-            # type: (Text) -> None
+        def mute_stream(stream_name: Text) -> None:
             stream = get_stream(stream_name, realm)
-            recipient = Recipient.objects.get(type_id=stream.id, type=Recipient.STREAM)
+            recipient = get_stream_recipient(stream.id)
             subscription = Subscription.objects.get(
                 user_profile=user,
                 recipient=recipient
@@ -375,10 +389,9 @@ class FixUnreadTests(ZulipTestCase):
             subscription.in_home_view = False
             subscription.save()
 
-        def mute_topic(stream_name, topic_name):
-            # type: (Text, Text) -> None
+        def mute_topic(stream_name: Text, topic_name: Text) -> None:
             stream = get_stream(stream_name, realm)
-            recipient = get_recipient(Recipient.STREAM, stream.id)
+            recipient = get_stream_recipient(stream.id)
 
             add_topic_mute(
                 user_profile=user,
@@ -387,8 +400,7 @@ class FixUnreadTests(ZulipTestCase):
                 topic_name=topic_name,
             )
 
-        def force_unsubscribe(stream_name):
-            # type: (Text) -> None
+        def force_unsubscribe(stream_name: Text) -> None:
             '''
             We don't want side effects here, since the eventual
             unsubscribe path may mark messages as read, defeating

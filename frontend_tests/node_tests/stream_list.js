@@ -20,6 +20,7 @@ var return_false = function () { return false; };
 var return_true = function () { return true; };
 
 set_global('topic_list', {});
+set_global('overlays', {});
 
 (function test_create_sidebar_row() {
     // Make a couple calls to create_sidebar_row() and make sure they
@@ -30,6 +31,7 @@ set_global('topic_list', {});
         stream_id: 100,
         color: 'blue',
         subscribed: true,
+        pin_to_top: true,
     };
     global.stream_data.add_sub('devel', devel);
 
@@ -57,7 +59,7 @@ set_global('topic_list', {});
 
         global.templates.render = function (template_name, data) {
             assert.equal(template_name, 'stream_sidebar_row');
-            assert.equal(data.uri, '#narrow/stream/devel');
+            assert.equal(data.uri, '#narrow/stream/100-devel');
             return '<devel sidebar row>';
         };
 
@@ -76,7 +78,7 @@ set_global('topic_list', {});
 
         global.templates.render = function (template_name, data) {
             assert.equal(template_name, 'stream_sidebar_row');
-            assert.equal(data.uri, '#narrow/stream/social');
+            assert.equal(data.uri, '#narrow/stream/200-social');
             return '<social sidebar row>';
         };
 
@@ -96,9 +98,9 @@ set_global('topic_list', {});
     stream_list.build_stream_list();
 
     var expected_elems = [
-        split,
-        devel_sidebar,
-        social_sidebar,
+        devel_sidebar,          //pinned
+        split,                  //separator
+        social_sidebar,         //not pinned
     ];
 
     assert.deepEqual(appended_elems, expected_elems);
@@ -143,25 +145,23 @@ set_global('topic_list', {});
     row.remove();
     assert(removed);
 }());
+function add_row(sub) {
+    global.stream_data.add_sub(sub.name, sub);
+    var row = {
+        update_whether_active: function () {},
+        get_li: function () {
+            var html = '<' + sub.name + ' sidebar row html>';
+            var obj = $(html);
 
+            obj.length = 1;  // bypass blueslip error
+
+            return obj;
+        },
+    };
+    stream_list.stream_sidebar.set_row(sub.stream_id, row);
+}
 function initialize_stream_data() {
     stream_data.clear_subscriptions();
-
-    function add_row(sub) {
-        global.stream_data.add_sub(sub.name, sub);
-        var row = {
-            update_whether_active: function () {},
-            get_li: function () {
-                var html = '<' + sub.name + ' sidebar row html>';
-                var obj = $(html);
-
-                obj.length = 1;  // bypass blueslip error
-
-                return obj;
-            },
-        };
-        stream_list.stream_sidebar.set_row(sub.stream_id, row);
-    }
 
     // pinned streams
     var develSub = {
@@ -240,9 +240,13 @@ function initialize_stream_data() {
     stream_list.scroll_element_into_container = noop;
 
     var scrollbar_updated = false;
-    $.stub_selector("#stream-filters-container", {
-        perfectScrollbar: function () { scrollbar_updated = true; },
+
+    set_global('ui', {
+        update_scrollbar: function () {scrollbar_updated = true;},
     });
+    ui.update_scrollbar(
+        $.stub_selector("#stream-filters-container")
+    );
 
     assert(!$('<devel sidebar row html>').hasClass('active-filter'));
 
@@ -273,6 +277,141 @@ function initialize_stream_data() {
     stream_list.handle_narrow_activated(filter);
     assert(!$("ul.filters li").hasClass('active-filter'));
     assert($('<cars sidebar row html>').hasClass('active-filter'));
+}());
+
+var keydown_handler = $('.stream-list-filter').get_on_handler('keydown');
+
+(function test_arrow_navigation() {
+
+    stream_list.build_stream_list();
+    initialize_stream_data();
+
+    var stream_order = ['devel', 'Rome', 'test',
+                        '-divider-', 'announce','Denmark',
+                        '-divider-','cars'];
+    var stream_count = 8;
+
+    // Mock the jquery is func
+    $('.stream-list-filter').is = function (sel) {
+        if (sel === ':focus') {
+            return $('.stream-list-filter').is_focused();
+        }
+    };
+
+    // Mock the jquery first func
+    $('#stream_filters li.narrow-filter').first = function () {
+        return $('#stream_filters li[data-stream-name="' + stream_order[0] + '"]');
+    };
+    $('#stream_filters li.narrow-filter').last = function () {
+        return $('#stream_filters li[data-stream-name="' + stream_order[stream_count - 1] + '"]');
+    };
+
+    var sel_index = 0;
+    // Returns which element is highlighted
+    $('#stream_filters li.narrow-filter.highlighted_stream')
+        .expectOne().data = function () {
+            // Return random id (is further not used)
+            return 1;
+        };
+
+    // Returns element before highlighted one
+    $('#stream_filters li.narrow-filter.highlighted_stream')
+        .expectOne().prev = function () {
+            if (sel_index === 0) {
+                // Top, no prev element
+                return $('div.no_stream');
+            } else if (sel_index === 3 || sel_index === 6) {
+                return $('div.divider');
+            }
+            return $('#stream_filters li[data-stream-name="'
+                        + stream_order[sel_index-1] + '"]');
+        };
+
+    // Returns element after highlighted one
+    $('#stream_filters li.narrow-filter.highlighted_stream')
+        .expectOne().next = function () {
+            if (sel_index === stream_count - 1) {
+                // Bottom, no next element
+                return $('div.no_stream');
+            } else if (sel_index === 3 || sel_index === 6) {
+                return $('div.divider');
+            }
+            return $('#stream_filters li[data-stream-name="'
+                        + stream_order[sel_index + 1] + '"]');
+        };
+
+    for (var i = 0; i < stream_count; i = i + 1) {
+        if (i === 3 || i === 6) {
+            $('#stream_filters li[data-stream-name="' + stream_order[i] + '"]')
+                .is = return_false;
+        } else {
+            $('#stream_filters li[data-stream-name="' + stream_order[i] + '"]')
+                .is = return_true;
+        }
+    }
+
+    $('div.no_stream').is = return_false;
+    $('div.divider').is = return_false;
+
+    $('#stream_filters li.narrow-filter').length = stream_count;
+
+    // up
+    var e = {
+        keyCode: 38,
+        stopPropagation: function () {},
+        preventDefault: function () {},
+    };
+
+    keydown_handler(e);
+    // Now the last element is highlighted
+    sel_index = stream_count - 1;
+    keydown_handler(e);
+    sel_index = sel_index - 1;
+
+    // down
+    e = {
+        keyCode: 40,
+        stopPropagation: function () {},
+        preventDefault: function () {},
+    };
+    keydown_handler(e);
+    sel_index = sel_index + 1;
+    keydown_handler(e);
+}());
+
+(function test_enter_press() {
+    var e = {
+        keyCode: 13,
+        stopPropagation: function () {},
+        preventDefault: function () {},
+    };
+
+    overlays.is_active = return_false;
+    narrow_state.active = return_false;
+    stream_data.get_sub_by_id = function () {
+        return 'name';
+    };
+    narrow.by = noop;
+    stream_list.clear_and_hide_search = noop;
+
+    // Enter text and narrow users
+    $(".stream-list-filter").expectOne().val('');
+
+    keydown_handler(e);
+}());
+
+(function test_focusout_user_filter() {
+    var e = { };
+    var click_handler = $('.stream-list-filter').get_on_handler('focusout');
+    click_handler(e);
+}());
+
+(function test_focus_user_filter() {
+    var e = {
+        stopPropagation: function () {},
+    };
+    var click_handler = $('.stream-list-filter').get_on_handler('click');
+    click_handler(e);
 }());
 
 (function test_sort_streams() {
@@ -330,6 +469,114 @@ function initialize_stream_data() {
     assert(!stream_list.stream_sidebar.has_row_for(stream_id));
 }());
 
+(function test_separators_only_pinned_and_dormant() {
+
+    // Test only pinned and dormant streams
+
+    stream_data.clear_subscriptions();
+
+    // Get coverage on early-exit.
+    stream_list.build_stream_list();
+
+    // pinned streams
+    var develSub = {
+        name: 'devel',
+        stream_id: 1000,
+        color: 'blue',
+        pin_to_top: true,
+        subscribed: true,
+    };
+    add_row(develSub);
+
+    var RomeSub = {
+        name: 'Rome',
+        stream_id: 2000,
+        color: 'blue',
+        pin_to_top: true,
+        subscribed: true,
+    };
+    add_row(RomeSub);
+    // dorment stream
+    var DenmarkSub = {
+        name: 'Denmark',
+        stream_id: 3000,
+        color: 'blue',
+        pin_to_top: false,
+        subscribed: true,
+    };
+    add_row(DenmarkSub);
+
+    global.stream_data.is_active = function (sub) {
+        return sub.name !== 'Denmark';
+    };
+
+    var appended_elems;
+    $('#stream_filters').append = function (elems) {
+        appended_elems = elems;
+    };
+
+    stream_list.build_stream_list();
+
+    var split = '<hr class="stream-split">';
+    var expected_elems = [
+        // pinned
+        $('<devel sidebar row html>'),
+        $('<Rome sidebar row html>'),
+        split,
+        // dormant
+        $('<Denmark sidebar row html>'),
+    ];
+
+    assert.deepEqual(appended_elems, expected_elems);
+
+}());
+
+(function test_separators_only_pinned() {
+
+    // Test only pinned streams
+
+    stream_data.clear_subscriptions();
+
+    // Get coverage on early-exit.
+    stream_list.build_stream_list();
+
+    // pinned streams
+    var develSub = {
+        name: 'devel',
+        stream_id: 1000,
+        color: 'blue',
+        pin_to_top: true,
+        subscribed: true,
+    };
+    add_row(develSub);
+
+    var RomeSub = {
+        name: 'Rome',
+        stream_id: 2000,
+        color: 'blue',
+        pin_to_top: true,
+        subscribed: true,
+    };
+    add_row(RomeSub);
+
+
+    var appended_elems;
+    $('#stream_filters').append = function (elems) {
+        appended_elems = elems;
+    };
+
+    stream_list.build_stream_list();
+
+    var expected_elems = [
+        // pinned
+        $('<devel sidebar row html>'),
+        $('<Rome sidebar row html>'),
+        // no separator at the end as no stream follows
+    ];
+
+    assert.deepEqual(appended_elems, expected_elems);
+
+}());
 (function test_update_count_in_dom() {
     function make_elem(elem, count_selector, value_selector) {
         var count = $(count_selector);

@@ -23,9 +23,9 @@ confirming the success of your muting of the topic.
 
 ## Mute a topic through your current view
 
-1. The default **Home** view displays all messages from unmuted streams and topics
+1. The **All messages** view displays all messages from unmuted streams and topics
 that you are subscribed to. Find a message belonging to the topic that you wish
-to mute in your current filter or in the **Home** view.
+to mute in your current filter or in the **All messages** view.
 
     !!! tip ""
         Alternatively, you can narrow your view to messages sent to the topic
@@ -75,7 +75,7 @@ topic.
 
 ## Unmute a topic through the Settings page
 
-{!go-to-the.md!} [Muted topics](/#settings/muted-topics)
+1. Go to the [Muted topics](/#settings/muted-topics)
 {!settings.md!}
 
 2. Locate the topic you want to unmute in the **Muted topics** section; the

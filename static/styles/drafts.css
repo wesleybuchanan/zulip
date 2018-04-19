@@ -5,7 +5,7 @@
 .drafts-container {
     position: relative;
     height: 95%;
-    background-color: #fff;
+    background-color: hsl(0, 0%, 100%);
     border-radius: 4px;
     padding: 0px;
     width: 60%;
@@ -61,6 +61,15 @@
     -webkit-font-smoothing: antialiased;
 }
 
+.drafts-list .removed-drafts {
+    display: block;
+    text-align: center;
+    font-size: 1em;
+    color: hsl(0, 0%, 66%);
+    pointer-events: none;
+    -webkit-font-smoothing: antialiased;
+}
+
 .draft-row {
     padding: 5px 10px;
 }
@@ -76,7 +85,6 @@
 
 .draft-row .draft-info-box {
     width: 100%;
-    background: hsl(0, 0%, 94%);
     border-bottom: 1px solid hsl(0, 0%, 88%);
     border-top: 1px solid hsl(0, 0%, 88%);
     margin-bottom: 10px;

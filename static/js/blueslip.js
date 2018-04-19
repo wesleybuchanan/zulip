@@ -1,4 +1,4 @@
-// System documented in https://zulip.readthedocs.io/en/latest/logging.html
+// System documented in https://zulip.readthedocs.io/en/latest/subsystems/logging.html
 
 // This must be included before the first call to $(document).ready
 // in order to be able to report exceptions that occur during their
@@ -71,7 +71,7 @@ Logger.prototype = (function () {
             if (console[name] !== undefined) {
                 return console[name].apply(console, arguments);
             }
-            return undefined;
+            return;
         };
     }
 

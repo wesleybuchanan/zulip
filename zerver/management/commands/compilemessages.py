@@ -1,24 +1,31 @@
 
 import os
 import re
-import ujson
-
-from subprocess import check_output, CalledProcessError
+from subprocess import CalledProcessError, check_output
 from typing import Any, Dict, List, Text
 
-from django.core.management.commands import compilemessages
+import polib
+import ujson
 from django.conf import settings
 from django.conf.locale import LANG_INFO
+from django.core.management.base import CommandParser
+from django.core.management.commands import compilemessages
 from django.utils.translation.trans_real import to_language
-
-import polib
 
 from zerver.lib.i18n import with_language
 
 class Command(compilemessages.Command):
 
-    def handle(self, *args, **options):
-        # type: (*Any, **Any) -> None
+    def add_arguments(self, parser: CommandParser) -> None:
+        super().add_arguments(parser)
+
+        parser.add_argument(
+            '--strict', '-s',
+            action='store_true',
+            default=False,
+            help='Stop execution in case of errors.')
+
+    def handle(self, *args: Any, **options: Any) -> None:
         if settings.PRODUCTION:
             # HACK: When using upgrade-zulip-from-git, we're in a
             # production environment where STATIC_ROOT will include
@@ -26,12 +33,12 @@ class Command(compilemessages.Command):
             # version
             settings.STATIC_ROOT = os.path.join(settings.DEPLOY_ROOT, "static")
             settings.LOCALE_PATHS = (os.path.join(settings.DEPLOY_ROOT, 'static/locale'),)
-        super(Command, self).handle(*args, **options)
+        super().handle(*args, **options)
+        self.strict = options['strict']
         self.extract_language_options()
         self.create_language_name_map()
 
-    def create_language_name_map(self):
-        # type: () -> None
+    def create_language_name_map(self) -> None:
         join = os.path.join
         static_root = settings.STATIC_ROOT
         path = join(static_root, 'locale', 'language_options.json')
@@ -49,18 +56,16 @@ class Command(compilemessages.Command):
 
         with open(output_path, 'w') as output_file:
             ujson.dump({'name_map': lang_list}, output_file, indent=4)
+            output_file.write('\n')
 
-    def get_po_filename(self, locale_path, locale):
-        # type: (Text, Text) -> Text
+    def get_po_filename(self, locale_path: Text, locale: Text) -> Text:
         po_template = '{}/{}/LC_MESSAGES/django.po'
         return po_template.format(locale_path, locale)
 
-    def get_json_filename(self, locale_path, locale):
-        # type: (Text, Text) -> Text
+    def get_json_filename(self, locale_path: Text, locale: Text) -> Text:
         return "{}/{}/translations.json".format(locale_path, locale)
 
-    def get_name_from_po_file(self, po_filename, locale):
-        # type: (Text, Text) -> Text
+    def get_name_from_po_file(self, po_filename: Text, locale: Text) -> Text:
         lang_name_re = re.compile('"Language-Team: (.*?) \(')
         with open(po_filename, 'r') as reader:
             result = lang_name_re.search(reader.read())
@@ -73,8 +78,7 @@ class Command(compilemessages.Command):
             else:
                 raise Exception("Unknown language %s" % (locale,))
 
-    def get_locales(self):
-        # type: () -> List[Text]
+    def get_locales(self) -> List[Text]:
         tracked_files = check_output(['git', 'ls-files', 'static/locale'])
         tracked_files = tracked_files.decode().split()
         regex = re.compile('static/locale/(\w+)/LC_MESSAGES/django.po')
@@ -86,10 +90,9 @@ class Command(compilemessages.Command):
 
         return locales
 
-    def extract_language_options(self):
-        # type: () -> None
-        locale_path = u"{}/locale".format(settings.STATIC_ROOT)
-        output_path = u"{}/language_options.json".format(locale_path)
+    def extract_language_options(self) -> None:
+        locale_path = "{}/locale".format(settings.STATIC_ROOT)
+        output_path = "{}/language_options.json".format(locale_path)
 
         data = {'languages': []}  # type: Dict[str, List[Dict[str, Any]]]
 
@@ -99,7 +102,7 @@ class Command(compilemessages.Command):
             # In case we are not under a Git repo, fallback to getting the
             # locales using listdir().
             locales = os.listdir(locale_path)
-            locales.append(u'en')
+            locales.append('en')
             locales = list(set(locales))
 
         for locale in locales:
@@ -138,9 +141,9 @@ class Command(compilemessages.Command):
 
         with open(output_path, 'w') as writer:
             ujson.dump(data, writer, indent=2)
+            writer.write('\n')
 
-    def get_translation_percentage(self, locale_path, locale):
-        # type: (Text, Text) -> int
+    def get_translation_percentage(self, locale_path: Text, locale: Text) -> int:
 
         # backend stats
         po = polib.pofile(self.get_po_filename(locale_path, locale))
@@ -153,5 +156,18 @@ class Command(compilemessages.Command):
                 total += 1
                 if value == '':
                     not_translated += 1
+
+        # mobile stats
+        with open(os.path.join(locale_path, 'mobile_info.json')) as mob:
+            mobile_info = ujson.load(mob)
+        try:
+            info = mobile_info[locale]
+        except KeyError:
+            if self.strict:
+                raise
+            info = {'total': 0, 'not_translated': 0}
+
+        total += info['total']
+        not_translated += info['not_translated']
 
         return (total - not_translated) * 100 // total
