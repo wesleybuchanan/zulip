@@ -7,12 +7,6 @@ zrequire('Filter', 'js/filter');
 
 zrequire('narrow');
 
-var narrow_state = global.narrow_state;
-
-var Filter = global.Filter;
-var stream_data = global.stream_data;
-var _ = global._;
-
 function set_filter(operators) {
     operators = _.map(operators, function (op) {
         return {operator: op[0], operand: op[1]};
@@ -83,9 +77,12 @@ function set_filter(operators) {
 
     var hide_id;
     var show_id;
-    global.$ = function (id) {
-      return {hide: function () {hide_id = id;}, show: function () {show_id = id;}};
-    };
+    set_global('$', (id) => {
+        return {
+            hide: () => {hide_id = id;},
+            show: () => {show_id = id;},
+        };
+    });
 
     narrow_state.reset_current_filter();
     narrow.show_empty_narrow_message();

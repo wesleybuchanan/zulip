@@ -15,6 +15,7 @@ zrequire('topic_data');
 zrequire('people');
 zrequire('stream_color');
 zrequire('stream_data');
+zrequire('marked', 'third/marked/lib/marked');
 
 (function test_basics() {
     var denmark = {
@@ -72,6 +73,11 @@ zrequire('stream_data');
     assert.equal(stream_data.maybe_get_stream_name(), undefined);
     assert.equal(stream_data.maybe_get_stream_name(social.stream_id), 'social');
     assert.equal(stream_data.maybe_get_stream_name(42), undefined);
+
+    stream_data.set_realm_default_streams([denmark]);
+    assert(stream_data.get_default_status('Denmark'));
+    assert(!stream_data.get_default_status('social'));
+    assert(!stream_data.get_default_status('UNKNOWN'));
 }());
 
 (function test_renames() {
@@ -162,33 +168,35 @@ zrequire('stream_data');
     people.add(george);
 
     stream_data.set_subscribers(sub, [fred.user_id, george.user_id]);
-    assert(stream_data.user_is_subscribed('Rome', 'FRED@zulip.com'));
-    assert(stream_data.user_is_subscribed('Rome', 'fred@zulip.com'));
-    assert(stream_data.user_is_subscribed('Rome', 'george@zulip.com'));
-    assert(!stream_data.user_is_subscribed('Rome', 'not_fred@zulip.com'));
+    stream_data.update_calculated_fields(sub);
+    assert(stream_data.is_user_subscribed('Rome', fred.user_id));
+    assert(stream_data.is_user_subscribed('Rome', george.user_id));
+    assert(!stream_data.is_user_subscribed('Rome', not_fred.user_id));
 
     stream_data.set_subscribers(sub, []);
 
-    var email = 'brutus@zulip.com';
     var brutus = {
-        email: email,
+        email: 'brutus@zulip.com',
         full_name: 'Brutus',
         user_id: 104,
     };
     people.add(brutus);
-    assert(!stream_data.user_is_subscribed('Rome', email));
+    assert(!stream_data.is_user_subscribed('Rome', brutus.user_id));
 
     // add
     var ok = stream_data.add_subscriber('Rome', brutus.user_id);
     assert(ok);
-    assert(stream_data.user_is_subscribed('Rome', email));
+    assert(stream_data.is_user_subscribed('Rome', brutus.user_id));
     sub = stream_data.get_sub('Rome');
     stream_data.update_subscribers_count(sub);
     assert.equal(sub.subscriber_count, 1);
+    var sub_email = "Rome:214125235@zulipdev.com:9991";
+    stream_data.update_stream_email_address(sub, sub_email);
+    assert.equal(sub.email_address, sub_email);
 
     // verify that adding an already-added subscriber is a noop
     stream_data.add_subscriber('Rome', brutus.user_id);
-    assert(stream_data.user_is_subscribed('Rome', email));
+    assert(stream_data.is_user_subscribed('Rome', brutus.user_id));
     sub = stream_data.get_sub('Rome');
     stream_data.update_subscribers_count(sub);
     assert.equal(sub.subscriber_count, 1);
@@ -196,10 +204,30 @@ zrequire('stream_data');
     // remove
     ok = stream_data.remove_subscriber('Rome', brutus.user_id);
     assert(ok);
-    assert(!stream_data.user_is_subscribed('Rome', email));
+    assert(!stream_data.is_user_subscribed('Rome', brutus.user_id));
     sub = stream_data.get_sub('Rome');
     stream_data.update_subscribers_count(sub);
     assert.equal(sub.subscriber_count, 0);
+
+    // verify that deactivating user should unsubscribe user from all streams
+    assert(stream_data.add_subscriber('Rome', george.user_id));
+    set_global('subs', { rerender_subscriptions_settings: function () {} });
+    stream_data.remove_deactivated_user_from_all_streams(george.user_id);
+    assert(!stream_data.is_user_subscribed('Rome', george.user_id));
+
+    // verify that checking subscription with undefined user id
+    global.blueslip.warn = function (msg) {
+        assert.equal(msg, "Undefined user_id passed to function is_user_subscribed");
+    };
+    assert.equal(stream_data.is_user_subscribed('Rome', undefined), undefined);
+
+    // Verify noop for bad stream when removing subscriber
+    var bad_stream = 'UNKNOWN';
+    global.blueslip.warn = function (msg) {
+        assert.equal(msg, "We got a remove_subscriber call for a non-existent stream " + bad_stream);
+    };
+    ok = stream_data.remove_subscriber(bad_stream, brutus.user_id);
+    assert(!ok);
 
     // Defensive code will give warnings, which we ignore for the
     // tests, but the defensive code needs to not actually blow up.
@@ -208,7 +236,7 @@ zrequire('stream_data');
     // verify that removing an already-removed subscriber is a noop
     ok = stream_data.remove_subscriber('Rome', brutus.user_id);
     assert(!ok);
-    assert(!stream_data.user_is_subscribed('Rome', email));
+    assert(!stream_data.is_user_subscribed('Rome', brutus.user_id));
     sub = stream_data.get_sub('Rome');
     stream_data.update_subscribers_count(sub);
     assert.equal(sub.subscriber_count, 0);
@@ -219,15 +247,24 @@ zrequire('stream_data');
     stream_data.add_sub('Rome', sub);
     stream_data.add_subscriber('Rome', brutus.user_id);
     sub.subscribed = true;
-    assert(stream_data.user_is_subscribed('Rome', email));
+    assert(stream_data.is_user_subscribed('Rome', brutus.user_id));
 
     // Verify that we noop and don't crash when unsubscribed.
     sub.subscribed = false;
+    stream_data.update_calculated_fields(sub);
     ok = stream_data.add_subscriber('Rome', brutus.user_id);
     assert(ok);
-    assert.equal(stream_data.user_is_subscribed('Rome', email), undefined);
+    assert.equal(stream_data.is_user_subscribed('Rome', brutus.user_id), true);
     stream_data.remove_subscriber('Rome', brutus.user_id);
-    assert.equal(stream_data.user_is_subscribed('Rome', email), undefined);
+    assert.equal(stream_data.is_user_subscribed('Rome', brutus.user_id), false);
+    stream_data.add_subscriber('Rome', brutus.user_id);
+    assert.equal(stream_data.is_user_subscribed('Rome', brutus.user_id), true);
+
+    sub.invite_only = true;
+    stream_data.update_calculated_fields(sub);
+    assert.equal(stream_data.is_user_subscribed('Rome', brutus.user_id), undefined);
+    stream_data.remove_subscriber('Rome', brutus.user_id);
+    assert.equal(stream_data.is_user_subscribed('Rome', brutus.user_id), undefined);
 
     // Verify that we don't crash and return false for a bad stream.
     ok = stream_data.add_subscriber('UNKNOWN', brutus.user_id);
@@ -393,7 +430,7 @@ zrequire('stream_data');
     stream_data.add_sub('private_stream', private_stream);
 
     var names = stream_data.get_non_default_stream_names();
-    assert.deepEqual(names, ['public']);
+    assert.deepEqual(names, ['public', 'private']);
 }());
 
 (function test_delete_sub() {
@@ -414,6 +451,15 @@ zrequire('stream_data');
     assert(!stream_data.is_subscribed('Canada'));
     assert(!stream_data.get_sub('Canada'));
     assert(!stream_data.get_sub_by_id(canada.stream_id));
+
+    var warned = false;
+    blueslip.warn = function (msg) {
+        warned = true;
+        assert.equal(msg, 'Failed to delete stream does_not_exist');
+    };
+    stream_data.delete_sub('does_not_exist');
+    assert(warned);
+    blueslip.warn = function () {};
 }());
 
 (function test_get_subscriber_count() {
@@ -443,4 +489,230 @@ zrequire('stream_data');
     people.add(george);
     stream_data.add_subscriber('India', 103);
     assert.equal(stream_data.get_subscriber_count('India'), 2);
+
+    var sub = stream_data.get_sub_by_name('India');
+    delete sub.subscribers;
+    assert.deepStrictEqual(stream_data.get_subscriber_count('India'), 0);
+}());
+
+(function test_notifications() {
+    var india = {
+        stream_id: 102,
+        name: 'India',
+        subscribed: true,
+        desktop_notifications: true,
+        audible_notifications: true,
+    };
+    stream_data.clear_subscriptions();
+    stream_data.add_sub('India', india);
+    assert(stream_data.receives_desktop_notifications('India'));
+    assert(!stream_data.receives_desktop_notifications('Indiana'));
+
+    assert(stream_data.receives_audible_notifications('India'));
+    assert(!stream_data.receives_audible_notifications('Indiana'));
+}());
+
+(function test_in_home_view() {
+  var tony = {
+    stream_id: 999,
+    name: 'tony',
+    subscribed: true,
+    in_home_view: true,
+  };
+
+  var jazy = {
+    stream_id: 500,
+    name: 'jazy',
+    subscribed: false,
+    in_home_view: false,
+  };
+
+  stream_data.add_sub('tony', tony);
+  stream_data.add_sub('jazy', jazy);
+  assert(stream_data.name_in_home_view('tony'));
+  assert(!stream_data.name_in_home_view('jazy'));
+  assert(!stream_data.name_in_home_view('EEXISTS'));
+}());
+
+(function test_notifications_in_home_view() {
+    page_params.notifications_stream = 'tony';
+    assert(stream_data.notifications_in_home_view());
+
+    page_params.notifications_stream = 'jazy';
+    assert(!stream_data.notifications_in_home_view());
+}());
+
+(function test_remove_default_stream() {
+    var remove_me = {
+        stream_id: 674,
+        name: 'remove_me',
+        subscribed: false,
+        in_home_view: false,
+    };
+
+    stream_data.add_sub('remove_me', remove_me);
+    stream_data.set_realm_default_streams([remove_me]);
+    stream_data.remove_default_stream(remove_me.stream_id);
+    assert(!stream_data.get_default_status('remove_me'));
+    assert.equal(page_params.realm_default_streams.length, 0);
+}());
+
+(function test_render_stream_description() {
+    var desc = {
+        name: 'no_desc',
+        stream_id: 1002,
+        description: '<p>rendered desc</p>',
+    };
+
+    stream_data.add_sub('desc', desc);
+    var sub = stream_data.get_sub_by_name('desc');
+    stream_data.render_stream_description(sub);
+    assert.deepStrictEqual(sub.rendered_description, "rendered desc");
+}());
+
+(function test_canonicalized_name() {
+    assert.deepStrictEqual(
+        stream_data.canonicalized_name('Stream_Bar'),
+        "stream_bar"
+    );
+}());
+
+(function test_create_sub() {
+    stream_data.clear_subscriptions();
+    var india = {
+        stream_id: 102,
+        name: 'India',
+        subscribed: true,
+    };
+
+    var canada = {
+        name: 'Canada',
+        subscribed: true,
+    };
+
+    var antarctica = {
+        stream_id: 103,
+        name: 'Antarctica',
+        subscribed: true,
+        color: '#76ce90',
+    };
+
+    global.stream_color.pick_color = function () {
+        return '#bd86e5';
+    };
+
+    var india_sub = stream_data.create_sub_from_server_data('India', india);
+    assert(india_sub);
+    assert.equal(india_sub.color, '#bd86e5');
+    var new_sub = stream_data.create_sub_from_server_data('India', india); // make sure sub doesn't get created twice
+    assert.equal(india_sub, new_sub);
+
+    var called = false;
+    global.blueslip.fatal = function (msg) {
+        assert.equal(msg, 'We cannot create a sub without a stream_id');
+        called = true;
+    };
+    var ok = stream_data.create_sub_from_server_data('Canada', canada);
+    assert.equal(ok, undefined);
+    assert(called);
+
+    var antarctica_sub = stream_data.create_sub_from_server_data('Antarctica', antarctica);
+    assert(antarctica_sub);
+    assert.equal(antarctica_sub.color, '#76ce90');
+}());
+
+(function test_initialize_from_page_params() {
+    function initialize() {
+        page_params.subscriptions = [{
+            name: 'subscriptions',
+        }];
+
+        page_params.unsubscribed = [{
+            name: 'unsubscribed',
+        }];
+
+        page_params.never_subscribed = [{
+            name: 'never_subscribed',
+        }];
+    }
+
+    initialize();
+    page_params.realm_notifications_stream_id = -1;
+    stream_data.initialize_from_page_params();
+
+    assert(!page_params.subscriptions);
+    assert(!page_params.unsubscribed);
+    assert(!page_params.never_subscribed);
+    assert.equal(page_params.notifications_stream, "");
+
+    initialize();
+    var foo = {
+        name: 'foo',
+        stream_id: 89,
+    };
+
+    stream_data.add_sub('foo', foo);
+    page_params.realm_notifications_stream_id = 89;
+    stream_data.initialize_from_page_params();
+
+    assert.equal(page_params.notifications_stream, "foo");
+}());
+
+(function test_get_newbie_stream() {
+    var newbie = {
+        name: 'newbie',
+        stream_id: 234,
+        subscribed: true,
+        in_home_view: true,
+    };
+
+    var new_members = {
+        subscribed: true,
+        name: 'new members',
+        stream_id: 531,
+    };
+
+    assert.equal(stream_data.get_newbie_stream(), undefined);
+
+    stream_data.add_sub('newbie', newbie);
+    page_params.notifications_stream = 'newbie';
+    assert.equal(stream_data.get_newbie_stream(), 'newbie');
+
+    newbie.in_home_view = false;
+    assert.equal(stream_data.get_newbie_stream(), undefined);
+
+    stream_data.add_sub('new members', new_members);
+    assert.equal(stream_data.get_newbie_stream(), 'new members');
+
+    new_members.subscribed = false;
+    assert.equal(stream_data.get_newbie_stream(), undefined);
+}());
+
+(function test_invite_streams() {
+    // add default stream
+    var orie = {
+        stream_id: 320,
+        name: 'Orie',
+        subscribed: true,
+    };
+
+    // clear all the data form stream_data, and people
+    stream_data.clear_subscriptions();
+    people.init();
+
+    stream_data.add_sub('Orie', orie);
+    stream_data.set_realm_default_streams([orie]);
+
+    var expected_list = ['Orie'];
+    assert.deepEqual(stream_data.invite_streams(), expected_list);
+
+    var inviter = {
+        stream_id: 25,
+        name: 'Inviter',
+        subscribed: true,
+    };
+    stream_data.add_sub('Inviter', inviter);
+
+    expected_list.push('Inviter');
+    assert.deepEqual(stream_data.invite_streams(), expected_list);
 }());

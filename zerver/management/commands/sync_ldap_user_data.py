@@ -1,20 +1,21 @@
 
+import logging
 from typing import Any
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db.utils import IntegrityError
-from django.conf import settings
 
-from zproject.backends import ZulipLDAPUserPopulator
+from zerver.lib.logging_util import log_to_file
 from zerver.models import UserProfile
-from zerver.lib.logging_util import create_logger
+from zproject.backends import ZulipLDAPUserPopulator
 
 ## Setup ##
-logger = create_logger(__name__, settings.LDAP_SYNC_LOG_PATH, 'INFO')
+logger = logging.getLogger(__name__)
+log_to_file(logger, settings.LDAP_SYNC_LOG_PATH)
 
 # Run this on a cronjob to pick up on name changes.
-def sync_ldap_user_data():
-    # type: () -> None
+def sync_ldap_user_data() -> None:
     logger.info("Starting update.")
     backend = ZulipLDAPUserPopulator()
     for u in UserProfile.objects.select_related().filter(is_active=True, is_bot=False).all():
@@ -30,6 +31,5 @@ def sync_ldap_user_data():
     logger.info("Finished update.")
 
 class Command(BaseCommand):
-    def handle(self, *args, **options):
-        # type: (*Any, **Any) -> None
+    def handle(self, *args: Any, **options: Any) -> None:
         sync_ldap_user_data()

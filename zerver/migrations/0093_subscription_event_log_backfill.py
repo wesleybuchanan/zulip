@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 
+from typing import List
+
+from django.db import migrations, models
 from django.db.backends.postgresql_psycopg2.schema import DatabaseSchemaEditor
 from django.db.migrations.state import StateApps
 from django.db.models import Max
-from django.db import migrations, models
-
 from django.utils.timezone import now as timezone_now
 
-from typing import List
-
-def backfill_subscription_log_events(apps, schema_editor):
-    # type: (StateApps, DatabaseSchemaEditor) -> None
+def backfill_subscription_log_events(apps: StateApps, schema_editor: DatabaseSchemaEditor) -> None:
     migration_time = timezone_now()
     RealmAuditLog = apps.get_model('zerver', 'RealmAuditLog')
     Subscription = apps.get_model('zerver', 'Subscription')
@@ -47,8 +45,7 @@ def backfill_subscription_log_events(apps, schema_editor):
     RealmAuditLog.objects.bulk_create(objects_to_create)
     objects_to_create = []
 
-def reverse_code(apps, schema_editor):
-    # type: (StateApps, DatabaseSchemaEditor) -> None
+def reverse_code(apps: StateApps, schema_editor: DatabaseSchemaEditor) -> None:
     RealmAuditLog = apps.get_model('zerver', 'RealmAuditLog')
     RealmAuditLog.objects.filter(event_type='subscription_created').delete()
     RealmAuditLog.objects.filter(event_type='subscription_deactivated').delete()

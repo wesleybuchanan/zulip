@@ -1,22 +1,18 @@
 
-from argparse import ArgumentParser
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Mapping, Optional, Text, Type, Union
 
 from django.core.management.base import BaseCommand
 from django.utils.timezone import now as timezone_now
 
-from analytics.lib.counts import COUNT_STATS, CountStat, do_drop_all_analytics_tables
+from analytics.lib.counts import COUNT_STATS, \
+    CountStat, do_drop_all_analytics_tables
 from analytics.lib.fixtures import generate_time_series_data
 from analytics.lib.time_utils import time_range
-from analytics.models import BaseCount, InstallationCount, RealmCount, \
-    UserCount, StreamCount, FillState
+from analytics.models import BaseCount, FillState, RealmCount, UserCount, StreamCount
 from zerver.lib.timestamp import floor_to_day
 from zerver.models import Realm, UserProfile, Stream, Message, Client, \
-    RealmAuditLog
-
-from datetime import datetime, timedelta
-
-from six.moves import zip
-from typing import Any, Dict, List, Optional, Text, Type, Union, Mapping
+    RealmAuditLog, Recipient
 
 class Command(BaseCommand):
     help = """Populates analytics tables with randomly generated data."""
@@ -24,8 +20,11 @@ class Command(BaseCommand):
     DAYS_OF_DATA = 100
     random_seed = 26
 
-    def create_user(self, email, full_name, is_staff, date_joined, realm):
-        # type: (Text, Text, Text, bool, datetime, Realm) -> UserProfile
+    def create_user(self, email: Text,
+                    full_name: Text,
+                    is_staff: bool,
+                    date_joined: datetime,
+                    realm: Realm) -> UserProfile:
         user = UserProfile.objects.create(
             email=email, full_name=full_name, is_staff=is_staff,
             realm=realm, short_name=full_name, pointer=-1, last_pointer_updater='none',
@@ -35,10 +34,10 @@ class Command(BaseCommand):
             event_time=user.date_joined)
         return user
 
-    def generate_fixture_data(self, stat, business_hours_base, non_business_hours_base,
-                              growth, autocorrelation, spikiness, holiday_rate=0,
-                              partial_sum=False):
-        # type: (CountStat, float, float, float, float, float, float, bool) -> List[int]
+    def generate_fixture_data(self, stat: CountStat, business_hours_base: float,
+                              non_business_hours_base: float, growth: float,
+                              autocorrelation: float, spikiness: float,
+                              holiday_rate: float=0, partial_sum: bool=False) -> List[int]:
         self.random_seed += 1
         return generate_time_series_data(
             days=self.DAYS_OF_DATA, business_hours_base=business_hours_base,
@@ -46,8 +45,7 @@ class Command(BaseCommand):
             autocorrelation=autocorrelation, spikiness=spikiness, holiday_rate=holiday_rate,
             frequency=stat.frequency, partial_sum=partial_sum, random_seed=self.random_seed)
 
-    def handle(self, *args, **options):
-        # type: (*Any, **Any) -> None
+    def handle(self, *args: Any, **options: Any) -> None:
         do_drop_all_analytics_tables()
         # I believe this also deletes any objects with this realm as a foreign key
         Realm.objects.filter(string_id='analytics').delete()
@@ -57,15 +55,22 @@ class Command(BaseCommand):
         realm = Realm.objects.create(
             string_id='analytics', name='Analytics', date_created=installation_time)
         shylock = self.create_user('shylock@analytics.ds', 'Shylock', True, installation_time, realm)
+        stream = Stream.objects.create(
+            name='all', realm=realm, date_created=installation_time)
+        Recipient.objects.create(type_id=stream.id, type=Recipient.STREAM)
 
-        def insert_fixture_data(stat, fixture_data, table):
-            # type: (CountStat, Mapping[Optional[str], List[int]], Type[BaseCount]) -> None
+        def insert_fixture_data(stat: CountStat,
+                                fixture_data: Mapping[Optional[str], List[int]],
+                                table: Type[BaseCount]) -> None:
             end_times = time_range(last_end_time, last_end_time, stat.frequency,
                                    len(list(fixture_data.values())[0]))
             if table == RealmCount:
                 id_args = {'realm': realm}
             if table == UserCount:
                 id_args = {'realm': realm, 'user': shylock}
+            if table == StreamCount:
+                id_args = {'stream': stream, 'realm': realm}
+
             for subgroup, values in fixture_data.items():
                 table.objects.bulk_create([
                     table(property=stat.property, subgroup=subgroup, end_time=end_time,
@@ -134,4 +139,12 @@ class Command(BaseCommand):
         FillState.objects.create(property=stat.property, end_time=last_end_time,
                                  state=FillState.DONE)
 
-        # TODO: messages_sent_to_stream:is_bot
+        stat = COUNT_STATS['messages_in_stream:is_bot:day']
+        realm_data = {'false': self.generate_fixture_data(stat, 30, 5, 6, .6, 4),
+                      'true': self.generate_fixture_data(stat, 20, 2, 3, .2, 3)}
+        insert_fixture_data(stat, realm_data, RealmCount)
+        stream_data = {'false': self.generate_fixture_data(stat, 10, 7, 5, .6, 4),
+                       'true': self.generate_fixture_data(stat, 5, 3, 2, .4, 2)}  # type: Mapping[Optional[str], List[int]]
+        insert_fixture_data(stat, stream_data, StreamCount)
+        FillState.objects.create(property=stat.property, end_time=last_end_time,
+                                 state=FillState.DONE)

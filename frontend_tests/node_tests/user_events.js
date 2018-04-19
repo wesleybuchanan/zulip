@@ -1,12 +1,7 @@
 set_global('$', global.make_zjquery());
 
-add_dependencies({
-    people: 'js/people.js',
-});
-
-var people = global.people;
-
-var user_events = require("js/user_events.js");
+zrequire('people');
+zrequire('user_events');
 
 set_global('activity', {
     redraw: function () {},
@@ -35,6 +30,7 @@ set_global('compose', {
 
 set_global('settings_account', {
     update_email: function () {},
+    update_full_name: function () {},
 });
 
 set_global('message_live_update', {
@@ -141,4 +137,8 @@ initialize();
     assert(!user_events.update_person({user_id: 29, full_name: 'Sir Isaac Newton'}));
     assert.equal(error_msg, "Got update_person event for unexpected user 29");
 
+    me.profile_data = {};
+    user_events.update_person({user_id: me.user_id, custom_profile_field: {id: 3, value: 'Value'}});
+    person = people.get_by_email(me.email);
+    assert.equal(person.profile_data[3], 'Value');
 }());

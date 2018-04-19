@@ -2,9 +2,18 @@ var noop = function () {};
 
 var exports = {};
 
-exports.make_zjquery = function () {
+exports.make_zjquery = function (opts) {
 
     var elems = {};
+
+    // Our fn structure helps us simulate extending jQuery.
+    var fn = {};
+
+    function add_extensions(obj) {
+        _.each(fn, (v, k) => {
+            obj[k] = v;
+        });
+    }
 
     function new_elem(selector) {
         var html = 'never-been-set';
@@ -26,7 +35,10 @@ exports.make_zjquery = function () {
                 on_functions.set(event_name, arg);
             } else {
                 var handler = on_functions.get(event_name);
-                assert(handler);
+                if (!handler) {
+                    var error = 'Cannot find ' + event_name + ' handler for ' + selector;
+                    throw Error(error);
+                }
                 handler(arg);
             }
         }
@@ -79,7 +91,9 @@ exports.make_zjquery = function () {
                 if (child) {
                     return child;
                 }
-
+                if (opts.silent) {
+                    return self;
+                }
                 throw Error("Cannot find " + child_selector + " in " + selector);
             },
             focus: function () {
@@ -123,6 +137,12 @@ exports.make_zjquery = function () {
                 }
                 return html;
             },
+            is: function (arg) {
+                if (arg === ':visible') {
+                    return shown;
+                }
+                return self;
+            },
             is_focused: function () {
                 // is_focused is not a jQuery thing; this is
                 // for our testing
@@ -134,6 +154,21 @@ exports.make_zjquery = function () {
             },
             keyup: function (arg) {
                 generic_event('keyup', arg);
+                return self;
+            },
+            off: function () {
+                var event_name;
+
+                if (arguments.length === 2) {
+                    event_name = arguments[0];
+                    on_functions[event_name] = [];
+                } else if (arguments.length === 3) {
+                    event_name = arguments[0];
+                    var sel = arguments[1];
+                    var child_on = child_on_functions.setdefault(sel, new Dict());
+                    child_on[event_name] = [];
+                }
+
                 return self;
             },
             on: function () {
@@ -195,6 +230,9 @@ exports.make_zjquery = function () {
                 return self;
             },
             removeData: noop,
+            replaceWith: function () {
+                return self;
+            },
             select: function (arg) {
                 generic_event('select', arg);
                 return self;
@@ -223,13 +261,13 @@ exports.make_zjquery = function () {
                 return text;
             },
             trigger: function (ev) {
-                var funcs = on_functions.get(ev.name) || [];
-
+                var ev_name = typeof ev === 'string' ? ev : ev.name;
+                var funcs = on_functions.get(ev_name) || [];
                 // The following assertion is temporary.  It can be
                 // legitimate for code to trigger multiple handlers.
                 // But up until now, we haven't needed this, and if
                 // you come across this assertion, it's possible that
-                // you can sselfify your tests by just doing your own
+                // you can simplify your tests by just doing your own
                 // mocking of trigger().  If you really know what you
                 // are doing, you can remove this limitation.
                 assert(funcs.length <= 1, 'multiple functions set up');
@@ -257,10 +295,13 @@ exports.make_zjquery = function () {
 
         self[0] = 'you-must-set-the-child-yourself';
 
+        add_extensions(self);
+
+        self.selector = selector;
         return self;
     }
 
-    var zjquery = function (arg) {
+    var zjquery = function (arg, arg2) {
         if (typeof arg === "function") {
             // If somebody is passing us a function, we emulate
             // jQuery's behavior of running this function after
@@ -268,29 +309,49 @@ exports.make_zjquery = function () {
             // so we just call it right away.
             arg();
             return;
-        } else if (typeof arg === "object") {
-            // If somebody is passing us an element, we return
-            // the element itself if it's been created with
-            // zjquery.
-            // This may happen in cases like $(this).
-            if (arg.debug) {
-                var this_selector = arg.debug().selector;
-                if (elems[this_selector]) {
-                    return arg;
-                }
+        }
+
+
+        // If somebody is passing us an element, we return
+        // the element itself if it's been created with
+        // zjquery.
+        // This may happen in cases like $(this).
+        if (arg.selector) {
+            if (elems[arg.selector]) {
+                return arg;
             }
         }
 
+        // We occasionally create stub objects that know
+        // they want to be wrapped by jQuery (so they can
+        // in turn return stubs).  The convention is that
+        // they provide a to_$ attribute.
+        if (arg.to_$) {
+            assert(typeof arg.to_$ === "function");
+            return arg.to_$();
+        }
+
+        if (arg2 !== undefined) {
+            throw Error("We only use one-argument variations of $(...) in Zulip code.");
+        }
+
         var selector = arg;
+
+        if (typeof selector !== "string") {
+            console.info(arg);
+            throw Error("zjquery does not know how to wrap this object yet");
+        }
 
         var valid_selector =
             ('<#.'.indexOf(selector[0]) >= 0) ||
             (selector === 'window-stub') ||
             (selector === 'document-stub') ||
+            (selector === 'body') ||
             (selector === 'html') ||
             (selector.location) ||
             (selector.indexOf('#') >= 0) ||
-            (selector.indexOf('.') >= 0);
+            (selector.indexOf('.') >= 0) ||
+            (selector.indexOf('[') >= 0 && selector.indexOf(']') >= selector.indexOf('['));
 
         assert(valid_selector,
                'Invalid selector: ' + selector +
@@ -343,6 +404,8 @@ exports.make_zjquery = function () {
     zjquery.extend = function (content, container) {
         return _.extend(content, container);
     };
+
+    zjquery.fn = fn;
 
     return zjquery;
 };

@@ -100,20 +100,10 @@ if __name__ == '__main__':
     if cmd == 'make_deploy_path':
         print(make_deploy_path())
 
-def mkdir_p(path):
-    # type: (str) -> None
-    # Python doesn't have an analog to `mkdir -p` < Python 3.2.
-    try:
-        os.makedirs(path)
-    except OSError as e:
-        if e.errno == errno.EEXIST and os.path.isdir(path):
-            pass
-        else:
-            raise
-
 def get_dev_uuid_var_path(create_if_missing=False):
     # type: (bool) -> str
-    zulip_path = os.path.realpath(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+    zulip_path = os.path.realpath(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.realpath(__file__)))))
     uuid_path = os.path.join(os.path.realpath(os.path.dirname(zulip_path)), ".zulip-dev-uuid")
     if os.path.exists(uuid_path):
         with open(uuid_path) as f:
@@ -129,7 +119,7 @@ def get_dev_uuid_var_path(create_if_missing=False):
             raise AssertionError("Missing UUID file; please run tools/provision!")
 
     result_path = os.path.join(zulip_path, "var", zulip_uuid)
-    mkdir_p(result_path)
+    os.makedirs(result_path, exist_ok=True)
     return result_path
 
 def get_deployment_lock(error_rerun_script):
@@ -282,14 +272,15 @@ def generate_sha1sum_emoji(zulip_path):
         with open(file_path, 'rb') as reader:
             sha.update(reader.read())
 
-    # Take into account the version of `emoji-datasource` package while generating success stamp.
+    # Take into account the version of `emoji-datasource-google` package
+    # while generating success stamp.
     PACKAGE_FILE_PATH = os.path.join(zulip_path, 'package.json')
     with open(PACKAGE_FILE_PATH, 'r') as fp:
         parsed_package_file = json.load(fp)
     dependency_data = parsed_package_file['dependencies']
 
-    if 'emoji-datasource' in dependency_data:
-        emoji_datasource_version = dependency_data['emoji-datasource'].encode('utf-8')
+    if 'emoji-datasource-google' in dependency_data:
+        emoji_datasource_version = dependency_data['emoji-datasource-google'].encode('utf-8')
     else:
         emoji_datasource_version = b"0"
     sha.update(emoji_datasource_version)

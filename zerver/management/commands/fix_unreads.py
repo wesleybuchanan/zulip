@@ -1,28 +1,22 @@
 
 import logging
 import sys
-
+from argparse import ArgumentParser
 from typing import Any, List, Optional, Text
 
-from argparse import ArgumentParser
 from django.core.management.base import CommandError
 from django.db import connection
 
-from zerver.lib.management import ZulipBaseCommand
 from zerver.lib.fix_unreads import fix
-
-from zerver.models import (
-    Realm,
-    UserProfile
-)
+from zerver.lib.management import ZulipBaseCommand
+from zerver.models import Realm, UserProfile
 
 logging.getLogger('zulip.fix_unreads').setLevel(logging.INFO)
 
 class Command(ZulipBaseCommand):
     help = """Fix problems related to unread counts."""
 
-    def add_arguments(self, parser):
-        # type: (ArgumentParser) -> None
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('emails',
                             metavar='<emails>',
                             type=str,
@@ -35,8 +29,7 @@ class Command(ZulipBaseCommand):
                             help='fix all users in specified realm')
         self.add_realm_args(parser)
 
-    def fix_all_users(self, realm):
-        # type: (Realm) -> None
+    def fix_all_users(self, realm: Realm) -> None:
         user_profiles = list(UserProfile.objects.filter(
             realm=realm,
             is_bot=False
@@ -45,8 +38,7 @@ class Command(ZulipBaseCommand):
             fix(user_profile)
             connection.commit()
 
-    def fix_emails(self, realm, emails):
-        # type: (Optional[Realm], List[Text]) -> None
+    def fix_emails(self, realm: Optional[Realm], emails: List[Text]) -> None:
 
         for email in emails:
             try:
@@ -58,8 +50,7 @@ class Command(ZulipBaseCommand):
             fix(user_profile)
             connection.commit()
 
-    def handle(self, *args, **options):
-        # type: (*Any, **Any) -> None
+    def handle(self, *args: Any, **options: Any) -> None:
         realm = self.get_realm(options)
 
         if options['all']:

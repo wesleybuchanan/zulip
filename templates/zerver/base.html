@@ -15,10 +15,6 @@
         <link href="/static/favicon.ico?v=2" rel="shortcut icon">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-        {% if dropboxAppKey %}
-        <script type="text/javascript">var dropboxAppKey = "{{ dropboxAppKey }}";</script>
-        {% endif %}
-
         {# We need to import jQuery before Bootstrap #}
         {% stylesheet 'common' %}
         {% block page_params %}
@@ -29,6 +25,12 @@
         {% endblock %}
         {{ render_bundle('common') }}
         {% block customhead %}
+        {% endblock %}
+
+        <!-- this is required because we want to put a custom head in
+        `zerver/portico.html` that isn't overwritten like the
+        `customhead` -->
+        {% block porticocustomhead %}
         {% endblock %}
     </head>
 

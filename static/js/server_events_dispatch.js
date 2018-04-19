@@ -54,26 +54,34 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
         var realm_settings = {
             add_emoji_by_admins_only: settings_emoji.update_custom_emoji_ui,
             allow_edit_history: noop,
+            allow_message_deleting: noop,
             allow_message_editing: noop,
+            bot_creation_policy: settings_bots.update_bot_permissions_ui,
             create_stream_by_admins_only: noop,
-            default_language: settings_org.reset_realm_default_language,
-            description: settings_org.update_realm_description,
-            email_changes_disabled: settings_org.toggle_email_change_display,
+            default_language: noop,
+            default_twenty_four_hour_time: noop,
+            description: noop,
+            email_changes_disabled: settings_account.update_email_change_display,
+            disallow_disposable_email_addresses: noop,
             inline_image_preview: noop,
             inline_url_embed_preview: noop,
             invite_by_admins_only: noop,
             invite_required: noop,
             mandatory_topics: noop,
-            message_retention_days: settings_org.update_message_retention_days,
+            message_content_edit_limit_seconds: noop,
+            message_retention_days: noop,
             name: notifications.redraw_title,
-            name_changes_disabled: settings_org.toggle_name_change_display,
+            name_changes_disabled: settings_account.update_name_change_display,
             notifications_stream_id: noop,
+            send_welcome_emails: noop,
+            signup_notifications_stream_id: noop,
             restricted_to_domain: noop,
             waiting_period_threshold: noop,
         };
         if (event.op === 'update' && _.has(realm_settings, event.property)) {
             page_params['realm_' + event.property] = event.value;
             realm_settings[event.property]();
+            settings_org.sync_realm_settings(event.property);
             if (event.property === 'create_stream_by_admins_only') {
                 if (!page_params.is_admin) {
                     page_params.can_create_streams = (!page_params.
@@ -81,13 +89,25 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
                 }
             } else if (event.property === 'notifications_stream_id') {
                 settings_org.render_notifications_stream_ui(
-                    page_params.realm_notifications_stream_id);
+                    page_params.realm_notifications_stream_id,
+                    $('#realm_notifications_stream_name'));
+            } else if (event.property === 'signup_notifications_stream_id') {
+                settings_org.render_notifications_stream_ui(
+                    page_params.realm_signup_notifications_stream_id,
+                    $('#realm_signup_notifications_stream_name'));
+            }
+
+            if (event.property === 'name' && window.electron_bridge !== undefined) {
+                window.electron_bridge.send_event('realm_name', event.value);
             }
         } else if (event.op === 'update_dict' && event.property === 'default') {
             _.each(event.data, function (value, key) {
                 page_params['realm_' + key] = value;
                 if (key === 'allow_message_editing') {
-                    settings_org.toggle_allow_message_editing_pencil();
+                    message_edit.update_message_topic_editing_pencil();
+                }
+                if (_.has(realm_settings, key)) {
+                    settings_org.sync_realm_settings(key);
                 }
             });
             if (event.data.authentication_methods !== undefined) {
@@ -97,6 +117,13 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
             page_params.realm_icon_url = event.data.icon_url;
             page_params.realm_icon_source = event.data.icon_source;
             realm_icon.rerender();
+
+            var electron_bridge = window.electron_bridge;
+            if (electron_bridge !== undefined) {
+                electron_bridge.send_event('realm_icon_url', event.data.icon_url);
+            }
+        } else if (event.op === 'deactivated') {
+            window.location.href = "/accounts/deactivated/";
         }
 
         break;
@@ -106,14 +133,17 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
             bot_data.add(event.bot);
             settings_users.update_user_data(event.bot.user_id, event.bot);
         } else if (event.op === 'remove') {
-            bot_data.deactivate(event.bot.email);
+            bot_data.deactivate(event.bot.user_id);
             event.bot.is_active = false;
+            settings_users.update_user_data(event.bot.user_id, event.bot);
+        } else if (event.op === 'delete') {
+            bot_data.delete(event.bot.user_id);
             settings_users.update_user_data(event.bot.user_id, event.bot);
         } else if (event.op === 'update') {
             if (_.has(event.bot, 'owner_id')) {
                 event.bot.owner = people.get_person_from_user_id(event.bot.owner_id).email;
             }
-            bot_data.update(event.bot.email, event.bot);
+            bot_data.update(event.bot.user_id, event.bot);
             settings_users.update_user_data(event.bot.user_id, event.bot);
         }
         break;
@@ -131,6 +161,11 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
         page_params.realm_filters = event.realm_filters;
         markdown.set_realm_filters(page_params.realm_filters);
         settings_filters.populate_filters(page_params.realm_filters);
+        break;
+
+    case 'custom_profile_fields':
+        page_params.custom_profile_fields = event.fields;
+        settings_profile_fields.populate_profile_fields(page_params.custom_profile_fields);
         break;
 
     case 'realm_domains':
@@ -161,6 +196,7 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
             people.add_in_realm(event.person);
         } else if (event.op === 'remove') {
             people.deactivate(event.person);
+            stream_data.remove_deactivated_user_from_all_streams(event.person.user_id);
         } else if (event.op === 'update') {
             user_events.update_person(event.person);
         }
@@ -177,6 +213,11 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
             settings_streams.update_default_streams_table();
         } else if (event.op === 'create') {
             stream_data.create_streams(event.streams);
+            _.each(event.streams, function (stream) {
+                var sub = stream_data.get_sub_by_id(stream.stream_id);
+                stream_data.update_calculated_fields(sub);
+                subs.add_sub_to_table(sub);
+            });
         } else if (event.op === 'delete') {
             _.each(event.streams, function (stream) {
                 var was_subscribed = stream_data.get_sub_by_id(stream.stream_id).subscribed;
@@ -190,49 +231,42 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
                 if (page_params.realm_notifications_stream_id === stream.stream_id) {
                     page_params.realm_notifications_stream_id = -1;
                     settings_org.render_notifications_stream_ui(
-                        page_params.realm_notifications_stream_id);
+                        page_params.realm_notifications_stream_id,
+                        $('#realm_notifications_stream_name'));
+                }
+                if (page_params.realm_signup_notifications_stream_id === stream.stream_id) {
+                    page_params.realm_signup_notifications_stream_id = -1;
+                    settings_org.render_notifications_stream_ui(
+                        page_params.realm_signup_notifications_stream_id,
+                        $('#realm_signup_notifications_stream_name'));
                 }
             });
         }
         break;
 
     case 'subscription':
-        var person;
-        var email;
-
         if (event.op === 'add') {
             _.each(event.subscriptions, function (rec) {
                 var sub = stream_data.get_sub_by_id(rec.stream_id);
                 if (sub) {
+                    stream_data.update_stream_email_address(sub, rec.email_address);
                     stream_events.mark_subscribed(sub, rec.subscribers);
                 } else {
                     blueslip.error('Subscribing to unknown stream with ID ' + rec.stream_id);
                 }
             });
         } else if (event.op === 'peer_add') {
-            // TODO: remove email shim here and fix called functions
-            //       to use user_ids
-            person = people.get_person_from_user_id(event.user_id);
-            email = person.email;
             _.each(event.subscriptions, function (sub) {
                 if (stream_data.add_subscriber(sub, event.user_id)) {
-                    $(document).trigger(
-                        'peer_subscribe.zulip',
-                        {stream_name: sub, user_email: email});
+                    $(document).trigger('peer_subscribe.zulip', {stream_name: sub});
                 } else {
                     blueslip.warn('Cannot process peer_add event');
                 }
             });
         } else if (event.op === 'peer_remove') {
-            // TODO: remove email shim here and fix called functions
-            //       to use user_ids
-            person = people.get_person_from_user_id(event.user_id);
-            email = person.email;
             _.each(event.subscriptions, function (sub) {
                 if (stream_data.remove_subscriber(sub, event.user_id)) {
-                    $(document).trigger(
-                        'peer_unsubscribe.zulip',
-                        {stream_name: sub, user_email: email});
+                    $(document).trigger('peer_unsubscribe.zulip', {stream_name: sub});
                 } else {
                     blueslip.warn('Cannot process peer_remove event.');
                 }
@@ -268,15 +302,20 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
     case 'update_display_settings':
         var user_display_settings = [
             'default_language',
-            'emoji_alt_code',
             'emojiset',
             'high_contrast_mode',
+            'night_mode',
             'left_side_userlist',
             'timezone',
             'twenty_four_hour_time',
+            'translate_emoticons',
         ];
         if (_.contains(user_display_settings, event.setting_name)) {
             page_params[event.setting_name] = event.setting;
+        }
+        if (event.setting_name === 'default_language') {
+            // We additionally need to set the language name.
+            page_params.default_language_name = event.language_name;
         }
         if (event.setting_name === 'twenty_four_hour_time') {
             // Rerender the whole message list UI
@@ -288,12 +327,16 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
         if (event.setting_name === 'high_contrast_mode') {
             $("body").toggleClass("high-contrast");
         }
-        if (event.setting_name === 'emoji_alt_code') {
-            // Rerender the whole message list UI
-            home_msg_list.rerender();
-            if (current_msg_list === message_list.narrowed) {
-                message_list.narrowed.rerender();
-            }
+        if (event.setting_name === 'night_mode') {
+            $("body").fadeOut(300);
+            setTimeout(function () {
+                if (event.setting === true) {
+                    night_mode.enable();
+                } else {
+                    night_mode.disable();
+                }
+                $("body").fadeIn(300);
+            }, 300);
         }
         if (event.setting_name === 'left_side_userlist') {
             // TODO: Make this change the view immediately rather
@@ -304,29 +347,21 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
             // than requiring a reload or page resize.
         }
         if (event.setting_name === 'emojiset') {
-            var sprite = new Image();
-            sprite.onload = function () {
-                $("#emoji-spritesheet").attr('href', "/static/generated/emoji/" + page_params.emojiset + "_sprite.css");
-                if ($("#display-settings-status").length) {
-                    loading.destroy_indicator($("#emojiset_spinner"));
-                    $("#emojiset_select").val(page_params.emojiset);
-                    ui_report.success(i18n.t("Emojiset changed successfully!!"),
-                                      $('#display-settings-status').expectOne());
-                }
-            };
-            sprite.src = "/static/generated/emoji/sheet_" + page_params.emojiset + "_32.png";
+            settings_display.report_emojiset_change();
+
+            // Rerender the whole message list UI
+            home_msg_list.rerender();
+            if (current_msg_list === message_list.narrowed) {
+                message_list.narrowed.rerender();
+            }
         }
-        if ($("#settings.tab-pane.active").length) {
-            settings_display.update_page();
-        }
+        settings_display.update_page();
         break;
 
     case 'update_global_notifications':
         notifications.handle_global_notification_updates(event.notification_name,
                                                          event.setting);
-        if ($("#settings.tab-pane.active").length) {
-            settings_notifications.update_page();
-        }
+        settings_notifications.update_page();
         break;
 
     case 'update_message_flags':
@@ -345,6 +380,17 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
 
     case 'delete_message':
         var msg_id = event.message_id;
+        // message is passed to unread.get_unread_messages,
+        // which returns all the unread messages out of a given list.
+        // So double marking something as read would not occur
+        unread_ops.process_read_messages_event([msg_id]);
+        if (event.message_type === 'stream') {
+            topic_data.remove_message({
+                stream_id: event.stream_id,
+                topic_name: event.topic,
+            });
+            stream_list.update_streams_sidebar();
+        }
         ui.remove_message(msg_id);
         break;
 
@@ -352,6 +398,18 @@ exports.dispatch_normal_event = function dispatch_normal_event(event) {
         console.log('setting unmute time');
         page_params.mute_notifications_until = event.setting;
 
+    case 'user_group':
+        if (event.op === 'add') {
+            user_groups.add(event.group);
+        } else if (event.op === 'add_members') {
+            user_groups.add_members(event.group_id, event.user_ids);
+        } else if (event.op === 'remove_members') {
+            user_groups.remove_members(event.group_id, event.user_ids);
+        } else if (event.op === "update") {
+            user_groups.update(event);
+        }
+        settings_user_groups.reload();
+        break;
     }
 };
 

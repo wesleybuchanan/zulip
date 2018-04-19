@@ -25,7 +25,7 @@
                 <div id="integration-main-text">
                     <header>
                         <h1 class="portico-page-heading">
-                            {% trans %}Over 60 native integrations.{% endtrans %}
+                            {% trans %}Over {{integrations_count_display}} native integrations.{% endtrans %}
                         </h1>
                     </header>
                     <h2 class="portico-page-subheading">
@@ -34,7 +34,7 @@
                         <a href="/integrations/doc/hubot">Hubot</a>,
                         <a href="/integrations/doc/zapier">Zapier</a>,
                         and
-                        <a href="/integrations/doc/iftt">IFTTT</a>.
+                        <a href="/integrations/doc/ifttt">IFTTT</a>.
                         {% endtrans %}
                     </h2>
                 </div>
@@ -87,14 +87,14 @@
                             {% if integration.is_enabled() %}
                             <a href="/integrations/doc/{{ integration.name }}">
                                 <div
-                                    {% if integration.legacy %}
-                                    class="integration-lozenge integration-{{ integration.name }} legacy"{% else %}
-                                    class="integration-lozenge integration-{{ integration.name }}"
-                                    {% endif %}
-                                    data-categories="{{ integration.categories }}"
-                                    data-name="{{ integration.name }}">
+                                  {% if integration.legacy %}
+                                  class="integration-lozenge integration-{{ integration.name }} legacy"{% else %}
+                                  class="integration-lozenge integration-{{ integration.name }}"
+                                  {% endif %}
+                                  data-categories="{{ integration.categories }}"
+                                  data-name="{{ integration.name }}">
                                     <img class="integration-logo" src="/{{ integration.logo }}"
-                                         alt="{{ integration.display_name }} logo"/>
+                                      alt="{{ integration.display_name }} logo"/>
                                     {% if integration.secondary_line_text %}
                                     <h3 class="integration-name with-secondary">{{ integration.display_name }}</h3>
                                     <h4 class="integration-secondary-line-text">
@@ -108,7 +108,7 @@
                             </a>
                             {% endif %}
                         {% endfor %}
-                        <a href="http://zulip.readthedocs.io/en/latest/integration-guide.html">
+                        <a href="https://zulipchat.com/api/integration-guide">
                             <div class="integration-lozenge integration-create-your-own">
                                 <div class="integration-logo">
                                     <i class="icon-vector-plus"></i>

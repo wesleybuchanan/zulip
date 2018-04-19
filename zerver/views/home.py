@@ -1,12 +1,12 @@
-from typing import Any, List, Dict, Optional, Text
+from typing import Any, List, Dict, Optional, Text, Iterator
 
 from django.conf import settings
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.http import HttpResponseRedirect, HttpResponse, HttpRequest
 from django.shortcuts import redirect, render
 from django.utils import translation, timezone
 from django.utils.cache import patch_cache_control
-from six.moves import zip_longest, zip, range
+from itertools import zip_longest
 
 from zerver.decorator import zulip_login_required, process_client
 from zerver.forms import ToSForm
@@ -14,7 +14,7 @@ from zerver.lib.realm_icon import realm_icon_url
 from zerver.models import Message, UserProfile, Stream, Subscription, Huddle, \
     Recipient, Realm, UserMessage, DefaultStream, RealmEmoji, RealmDomain, \
     RealmFilter, PreregistrationUser, UserActivity, \
-    UserPresence, get_recipient, name_changes_disabled, email_to_username, \
+    UserPresence, get_stream_recipient, name_changes_disabled, email_to_username, \
     get_realm_domains
 from zerver.lib.events import do_events_register
 from zerver.lib.actions import update_user_presence, do_change_tos_version, \
@@ -22,6 +22,7 @@ from zerver.lib.actions import update_user_presence, do_change_tos_version, \
 from zerver.lib.avatar import avatar_url
 from zerver.lib.i18n import get_language_list, get_language_name, \
     get_language_list_for_templates
+from zerver.lib.json_encoder_for_html import JSONEncoderForHTML
 from zerver.lib.push_notifications import num_push_devices_for_user
 from zerver.lib.streams import access_stream_by_name
 from zerver.lib.subdomains import get_subdomain
@@ -32,12 +33,10 @@ import datetime
 import logging
 import os
 import re
-import simplejson
 import time
 
 @zulip_login_required
-def accounts_accept_terms(request):
-    # type: (HttpRequest) -> HttpResponse
+def accounts_accept_terms(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = ToSForm(request.POST)
         if form.is_valid():
@@ -58,16 +57,24 @@ def accounts_accept_terms(request):
                  'special_message_template': special_message_template},
     )
 
-def sent_time_in_epoch_seconds(user_message):
-    # type: (Optional[UserMessage]) -> Optional[float]
+def sent_time_in_epoch_seconds(user_message: Optional[UserMessage]) -> Optional[float]:
     if user_message is None:
         return None
     # We have USE_TZ = True, so our datetime objects are timezone-aware.
     # Return the epoch seconds in UTC.
     return calendar.timegm(user_message.message.pub_date.utctimetuple())
 
-def home(request):
-    # type: (HttpRequest) -> HttpResponse
+def get_bot_types(user_profile: UserProfile) -> List[Dict[Text, object]]:
+    bot_types = []
+    for type_id, name in UserProfile.BOT_TYPES.items():
+        bot_types.append({
+            'type_id': type_id,
+            'name': name,
+            'allowed': type_id in user_profile.allowed_bot_types
+        })
+    return bot_types
+
+def home(request: HttpRequest) -> HttpResponse:
     if settings.DEVELOPMENT and os.path.exists('var/handlebars-templates/compile.error'):
         response = render(request, 'zerver/handlebars_compilation_failed.html')
         response.status_code = 500
@@ -79,14 +86,13 @@ def home(request):
     # page, not the login form, on the root domain
 
     subdomain = get_subdomain(request)
-    if subdomain != "":
+    if subdomain != Realm.SUBDOMAIN_FOR_ROOT_DOMAIN:
         return home_real(request)
 
     return render(request, 'zerver/hello.html')
 
 @zulip_login_required
-def home_real(request):
-    # type: (HttpRequest) -> HttpResponse
+def home_real(request: HttpRequest) -> HttpResponse:
     # We need to modify the session object every two weeks or it will expire.
     # This line makes reloading the page a sufficient action to keep the
     # session alive.
@@ -114,12 +120,15 @@ def home_real(request):
             narrow.append(["topic", narrow_topic])
 
     register_ret = do_events_register(user_profile, request.client,
-                                      apply_markdown=True, narrow=narrow)
+                                      apply_markdown=True, client_gravatar=True,
+                                      narrow=narrow)
     user_has_messages = (register_ret['max_message_id'] != -1)
 
     # Reset our don't-spam-users-with-email counter since the
     # user has since logged in
-    if user_profile.last_reminder is not None:
+    if user_profile.last_reminder is not None:  # nocoverage
+        # TODO: Look into the history of last_reminder; we may have
+        # eliminated that as a useful concept for non-bot users.
         user_profile.last_reminder = None
         user_profile.save(update_fields=["last_reminder"])
 
@@ -176,10 +185,12 @@ def home_real(request):
         server_generation     = settings.SERVER_GENERATION,
         use_websockets        = settings.USE_WEBSOCKETS,
         save_stacktraces      = settings.SAVE_FRONTEND_STACKTRACES,
+        warn_no_email         = settings.WARN_NO_EMAIL,
         server_inline_image_preview = settings.INLINE_IMAGE_PREVIEW,
         server_inline_url_embed_preview = settings.INLINE_URL_EMBED_PREVIEW,
         password_min_length = settings.PASSWORD_MIN_LENGTH,
         password_min_guesses  = settings.PASSWORD_MIN_GUESSES,
+        jitsi_server_url      = settings.JITSI_SERVER_URL,
 
         # Misc. extra data.
         have_initial_messages = user_has_messages,
@@ -194,6 +205,7 @@ def home_real(request):
         has_mobile_devices    = num_push_devices_for_user(user_profile) > 0,
         persistent_desktop_notifications_enabled = user_profile.enable_persistent_desktop_notifications,
         notifications_muted   = timezone.now() >= user_profile.mute_notifications_until,
+        bot_types             = get_bot_types(user_profile),
     )
 
     undesired_register_ret_fields = [
@@ -204,7 +216,7 @@ def home_real(request):
 
     if narrow_stream is not None:
         # In narrow_stream context, initial pointer is just latest message
-        recipient = get_recipient(Recipient.STREAM, narrow_stream.id)
+        recipient = get_stream_recipient(narrow_stream.id)
         try:
             initial_pointer = Message.objects.filter(recipient=recipient).order_by('id').reverse()[0].id
         except IndexError:
@@ -228,7 +240,7 @@ def home_real(request):
     request._log_data['extra'] = "[%s]" % (register_ret["queue_id"],)
     response = render(request, 'zerver/index.html',
                       context={'user_profile': user_profile,
-                               'page_params': simplejson.encoder.JSONEncoderForHTML().encode(page_params),
+                               'page_params': JSONEncoderForHTML().encode(page_params),
                                'nofontface': is_buggy_ua(request.META.get("HTTP_USER_AGENT", "Unspecified")),
                                'avatar_url': avatar_url(user_profile),
                                'show_debug':
@@ -244,18 +256,15 @@ def home_real(request):
     return response
 
 @zulip_login_required
-def desktop_home(request):
-    # type: (HttpRequest) -> HttpResponse
+def desktop_home(request: HttpRequest) -> HttpResponse:
     return HttpResponseRedirect(reverse('zerver.views.home.home'))
 
-def apps_view(request, _):
-    # type: (HttpRequest, Text) -> HttpResponse
+def apps_view(request: HttpRequest, _: Text) -> HttpResponse:
     if settings.ZILENCER_ENABLED:
         return render(request, 'zerver/apps.html')
     return HttpResponseRedirect('https://zulipchat.com/apps/', status=301)
 
-def is_buggy_ua(agent):
-    # type: (str) -> bool
+def is_buggy_ua(agent: str) -> bool:
     """Discrimiate CSS served to clients based on User Agent
 
     Due to QTBUG-3467, @font-face is not supported in QtWebKit.

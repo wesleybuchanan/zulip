@@ -10,24 +10,21 @@ from zerver.lib.utils import statsd
 
 import mock
 import ujson
+import os
 
-def fix_params(raw_params):
-    # type: (Dict[str, Any]) -> Dict[str, str]
+def fix_params(raw_params: Dict[str, Any]) -> Dict[str, str]:
     # A few of our few legacy endpoints need their
     # individual parameters serialized as JSON.
     return {k: ujson.dumps(v) for k, v in raw_params.items()}
 
-class StatsMock(object):
-    def __init__(self, settings):
-        # type: (Callable) -> None
+class StatsMock:
+    def __init__(self, settings: Callable[..., Any]) -> None:
         self.settings = settings
         self.real_impl = statsd
         self.func_calls = []  # type: List[Tuple[str, Iterable[Any]]]
 
-    def __getattr__(self, name):
-        # type: (str) -> Callable
-        def f(*args):
-            # type: (*Any) -> None
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def f(*args: Any) -> None:
             with self.settings(STATSD_HOST=''):
                 getattr(self.real_impl, name)(*args)
             self.func_calls.append((name, args))
@@ -35,8 +32,7 @@ class StatsMock(object):
         return f
 
 class TestReport(ZulipTestCase):
-    def test_send_time(self):
-        # type: () -> None
+    def test_send_time(self) -> None:
         email = self.example_email('hamlet')
         self.login(email)
 
@@ -62,8 +58,7 @@ class TestReport(ZulipTestCase):
         ]
         self.assertEqual(stats_mock.func_calls, expected_calls)
 
-    def test_narrow_time(self):
-        # type: () -> None
+    def test_narrow_time(self) -> None:
         email = self.example_email('hamlet')
         self.login(email)
 
@@ -85,8 +80,7 @@ class TestReport(ZulipTestCase):
         ]
         self.assertEqual(stats_mock.func_calls, expected_calls)
 
-    def test_unnarrow_time(self):
-        # type: () -> None
+    def test_unnarrow_time(self) -> None:
         email = self.example_email('hamlet')
         self.login(email)
 
@@ -107,8 +101,7 @@ class TestReport(ZulipTestCase):
         self.assertEqual(stats_mock.func_calls, expected_calls)
 
     @override_settings(BROWSER_ERROR_REPORTING=True)
-    def test_report_error(self):
-        # type: () -> None
+    def test_report_error(self) -> None:
         email = self.example_email('hamlet')
         self.login(email)
 
@@ -158,3 +151,11 @@ class TestReport(ZulipTestCase):
         self.assert_json_success(result)
         # fix_params (see above) adds quotes when JSON encoding.
         annotate.assert_called_once_with('"trace"')
+
+    def test_report_csp_violations(self) -> None:
+        fixture_data_file = open(os.path.join(os.path.dirname(__file__),
+                                 '../fixtures/csp_report.json'), 'r')
+        fixture_data = ujson.load(fixture_data_file)
+        params = ujson.dumps(fixture_data)
+        result = self.client_post("/report/csp_violations", params, content_type="application/json")
+        self.assert_json_success(result)

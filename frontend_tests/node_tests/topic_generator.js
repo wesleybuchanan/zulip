@@ -1,14 +1,14 @@
-add_dependencies({
-    muting: 'js/muting',
-    stream_data: 'js/stream_data',
-    stream_sort: 'js/stream_sort',
-    topic_data: 'js/topic_data',
-    unread: 'js/unread',
+set_global('blueslip', {});
+set_global('pm_conversations', {
+    recent: {},
 });
 
-set_global('blueslip', {});
-
-var tg = require('js/topic_generator.js');
+zrequire('muting');
+zrequire('unread');
+zrequire('stream_data');
+zrequire('topic_data');
+zrequire('stream_sort');
+var tg = zrequire('topic_generator');
 
 function is_even(i) { return i % 2 === 0; }
 function is_odd(i) { return i % 2 === 1; }
@@ -174,7 +174,7 @@ function is_odd(i) { return i % 2 === 1; }
     assert.equal(gen.next(), undefined);
 
     var undef = function () {
-        return undefined;
+        return;
     };
 
     global.blueslip.error = function (msg) {
@@ -306,4 +306,30 @@ function is_odd(i) { return i % 2 === 1; }
         stream: 'muted',
         topic: 'ms-topic1',
     });
+}());
+
+(function test_get_next_unread_pm_string() {
+    pm_conversations.recent.get_strings = function () {
+        return ['1', 'read', '2,3', '4', 'unk'];
+    };
+
+    unread.num_unread_for_person = function (user_ids_string) {
+        if (user_ids_string === 'unk') {
+            return;
+        }
+
+        if (user_ids_string === 'read') {
+            return 0;
+        }
+
+        return 5; // random non-zero value
+    };
+
+    assert.equal(tg.get_next_unread_pm_string(), '1');
+    assert.equal(tg.get_next_unread_pm_string('4'), '1');
+    assert.equal(tg.get_next_unread_pm_string('unk'), '1');
+    assert.equal(tg.get_next_unread_pm_string('4'), '1');
+    assert.equal(tg.get_next_unread_pm_string('1'), '2,3');
+    assert.equal(tg.get_next_unread_pm_string('read'), '2,3');
+    assert.equal(tg.get_next_unread_pm_string('2,3'), '4');
 }());

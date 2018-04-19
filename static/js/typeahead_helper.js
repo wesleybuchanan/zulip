@@ -75,20 +75,45 @@ exports.render_typeahead_item = function (args) {
     return templates.render('typeahead_list_item', args);
 };
 
-var rendered = { persons: new Dict(), streams: new Dict() };
+var rendered = { persons: new Dict(), streams: new Dict(), user_groups: new Dict() };
 
 exports.render_person = function (person) {
     if (person.special_item_text) {
-        return exports.render_typeahead_item({ primary: person.special_item_text });
+        return exports.render_typeahead_item({
+            primary: person.special_item_text,
+            is_person: true,
+        });
     }
 
     var html = rendered.persons.get(person.user_id);
     if (html === undefined) {
+        var avatar_url = people.small_avatar_url_for_person(person);
+
         html = exports.render_typeahead_item({
             primary: person.full_name,
             secondary: person.email,
+            img_src: avatar_url,
+            is_person: true,
         });
         rendered.persons.set(person.user_id, html);
+    }
+
+    return html;
+};
+
+exports.clear_rendered_person = function (user_id) {
+    rendered.persons.del(user_id);
+};
+
+exports.render_user_group = function (user_group) {
+    var html = rendered.user_groups.get(user_group.id);
+    if (html === undefined) {
+        html = exports.render_typeahead_item({
+            primary: user_group.name,
+            secondary: user_group.description,
+            is_user_group: true,
+        });
+        rendered.user_groups.set(user_group.id, html);
     }
 
     return html;
@@ -107,6 +132,7 @@ exports.render_stream = function (stream) {
         html = exports.render_typeahead_item({
             primary: stream.name,
             secondary: desc,
+            is_unsubscribed: !stream.subscribed,
         });
         rendered.streams.set(stream.stream_id, html);
     }
@@ -159,17 +185,17 @@ exports.compare_by_pms = function (user_a, user_b) {
 };
 
 function compare_for_at_mentioning(person_a, person_b, tertiary_compare, current_stream) {
-    // give preference to "all" or "everyone"
-    if (person_a.email === "all" || person_a.email === "everyone") {
+    // give preference to "all", "everyone" or "stream"
+    if (person_a.email === "all" || person_a.email === "everyone" || person_a.email === "stream") {
         return -1;
-    } else if (person_b.email === "all" || person_b.email === "everyone") {
+    } else if (person_b.email === "all" || person_b.email === "everyone" || person_b.email === "stream") {
         return 1;
     }
 
     // give preference to subscribed users first
     if (current_stream !== undefined) {
-        var a_is_sub = stream_data.user_is_subscribed(current_stream, person_a.email);
-        var b_is_sub = stream_data.user_is_subscribed(current_stream, person_b.email);
+        var a_is_sub = stream_data.is_user_subscribed(current_stream, person_a.user_id);
+        var b_is_sub = stream_data.is_user_subscribed(current_stream, person_b.user_id);
 
         if (a_is_sub && !b_is_sub) {
             return -1;
@@ -246,22 +272,37 @@ exports.sort_languages = function (matches, query) {
     return results.matches.concat(results.rest);
 };
 
-exports.sort_recipients = function (matches, query, current_stream, current_subject) {
-    var name_results =  util.prefix_sort(query, matches, function (x) { return x.full_name; });
-    var email_results = util.prefix_sort(query, name_results.rest,
-        function (x) { return x.email; });
-
-    var matches_sorted = exports.sort_for_at_mentioning(
-        name_results.matches.concat(email_results.matches),
+exports.sort_recipients = function (users, query, current_stream, current_subject, groups) {
+    var users_name_results =  util.prefix_sort(query, users,
+        function (x) { return x.full_name; });
+    var result = exports.sort_for_at_mentioning(
+        users_name_results.matches,
         current_stream,
         current_subject
     );
+
+    var groups_results;
+    if (groups !== undefined) {
+        groups_results = util.prefix_sort(query, groups, function (x) { return x.name; });
+        result = result.concat(groups_results.matches);
+    }
+
+    var email_results = util.prefix_sort(query, users_name_results.rest,
+        function (x) { return x.email; });
+    result = result.concat(exports.sort_for_at_mentioning(
+        email_results.matches,
+        current_stream,
+        current_subject
+    ));
     var rest_sorted = exports.sort_for_at_mentioning(
         email_results.rest,
         current_stream,
         current_subject
     );
-    return matches_sorted.concat(rest_sorted);
+    if (groups !== undefined) {
+        rest_sorted = rest_sorted.concat(groups_results.rest);
+    }
+    return result.concat(rest_sorted);
 };
 
 exports.sort_emojis = function (matches, query) {
@@ -273,12 +314,16 @@ exports.sort_emojis = function (matches, query) {
 // Gives stream a score from 0 to 3 based on its activity
 function activity_score(sub) {
     var stream_score = 0;
-    if (sub.pin_to_top) {
-        stream_score += 2;
-    }
-    // Note: A pinned stream may accumulate a 3rd point if it is active
-    if (stream_data.is_active(sub)) {
-        stream_score += 1;
+    if (!sub.subscribed) {
+        stream_score = -1;
+    } else {
+        if (sub.pin_to_top) {
+            stream_score += 2;
+        }
+        // Note: A pinned stream may accumulate a 3rd point if it is active
+        if (stream_data.is_active(sub)) {
+            stream_score += 1;
+        }
     }
     return stream_score;
 }

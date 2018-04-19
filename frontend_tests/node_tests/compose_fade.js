@@ -1,13 +1,12 @@
 set_global('$', function () {
 });
+set_global('blueslip', {});
+global.blueslip.warn = function () {};
 
-add_dependencies({
-    people: 'js/people',
-    stream_data: 'js/stream_data',
-    util: 'js/util',
-});
-
-var compose_fade = require('js/compose_fade.js');
+zrequire('util');
+zrequire('stream_data');
+zrequire('people');
+zrequire('compose_fade');
 
 var me = {
     email: 'me@example.com',
@@ -27,11 +26,11 @@ var bob = {
     full_name: 'Bob',
 };
 
-people.add(me);
+people.add_in_realm(me);
 people.initialize_current_user(me.user_id);
 
-people.add(alice);
-people.add(bob);
+people.add_in_realm(alice);
+people.add_in_realm(bob);
 
 
 (function test_set_focused_recipient() {
@@ -39,6 +38,7 @@ people.add(bob);
         stream_id: 101,
         name: 'social',
         subscribed: true,
+        can_access_subscribers: true,
     };
     stream_data.add_sub('social', sub);
     stream_data.set_subscribers(sub, [me.user_id, alice.user_id]);
@@ -65,6 +65,7 @@ people.add(bob);
     assert(compose_fade.would_receive_message('me@example.com'));
     assert(compose_fade.would_receive_message('alice@example.com'));
     assert(!compose_fade.would_receive_message('bob@example.com'));
+    assert.equal(compose_fade.would_receive_message('nonrealmuser@example.com'), undefined);
 
     var good_msg = {
         type: 'stream',

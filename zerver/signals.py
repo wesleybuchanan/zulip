@@ -1,16 +1,19 @@
 
-from django.dispatch import receiver
-from django.contrib.auth.signals import user_logged_in
-from django.conf import settings
-from django.template import loader
-from django.utils.timezone import get_current_timezone_name as timezone_get_current_timezone_name
-from django.utils.timezone import now as timezone_now
 from typing import Any, Dict, Optional
-from zerver.lib.send_email import send_email, FromAddress
+
+from django.conf import settings
+from django.contrib.auth.signals import user_logged_in
+from django.dispatch import receiver
+from django.template import loader
+from django.utils.timezone import \
+    get_current_timezone_name as timezone_get_current_timezone_name
+from django.utils.timezone import now as timezone_now
+
+from zerver.lib.queue import queue_json_publish
+from zerver.lib.send_email import FromAddress, send_email
 from zerver.models import UserProfile
 
-def get_device_browser(user_agent):
-    # type: (str) -> Optional[str]
+def get_device_browser(user_agent: str) -> Optional[str]:
     user_agent = user_agent.lower()
     if "zulip" in user_agent:
         return "Zulip"
@@ -18,7 +21,7 @@ def get_device_browser(user_agent):
         return "Edge"
     elif "opera" in user_agent or "opr/" in user_agent:
         return "Opera"
-    elif "chrome" in user_agent and "chromium" not in user_agent:
+    elif ("chrome" in user_agent or "crios" in user_agent) and "chromium" not in user_agent:
         return 'Chrome'
     elif "firefox" in user_agent and "seamonkey" not in user_agent and "chrome" not in user_agent:
         return "Firefox"
@@ -32,8 +35,7 @@ def get_device_browser(user_agent):
         return None
 
 
-def get_device_os(user_agent):
-    # type: (str) -> Optional[str]
+def get_device_os(user_agent: str) -> Optional[str]:
     user_agent = user_agent.lower()
     if "windows" in user_agent:
         return "Windows"
@@ -52,9 +54,7 @@ def get_device_os(user_agent):
 
 
 @receiver(user_logged_in, dispatch_uid="only_on_login")
-def email_on_new_login(sender, user, request, **kwargs):
-    # type: (Any, UserProfile, Any, **Any) -> None
-
+def email_on_new_login(sender: Any, user: UserProfile, request: Any, **kwargs: Any) -> None:
     # We import here to minimize the dependencies of this module,
     # since it runs as part of `manage.py` initialization
     from zerver.context_processors import common_context
@@ -81,8 +81,12 @@ def email_on_new_login(sender, user, request, **kwargs):
 
         context = common_context(user)
         context['device_info'] = device_info
-        context['user'] = user
+        context['user_email'] = user.email
 
-        send_email('zerver/emails/notify_new_login', to_user_id=user.id,
-                   from_name='Zulip Account Security', from_address=FromAddress.NOREPLY,
-                   context=context)
+        email_dict = {
+            'template_prefix': 'zerver/emails/notify_new_login',
+            'to_user_id': user.id,
+            'from_name': 'Zulip Account Security',
+            'from_address': FromAddress.NOREPLY,
+            'context': context}
+        queue_json_publish("email_senders", email_dict)

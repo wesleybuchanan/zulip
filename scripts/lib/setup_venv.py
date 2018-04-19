@@ -19,7 +19,7 @@ VENV_DEPENDENCIES = [
     "build-essential",
     "libffi-dev",
     "libfreetype6-dev",     # Needed for image types with Pillow
-    "libz-dev",             # Needed to handle compressed PNGs with Pillow
+    "zlib1g-dev",             # Needed to handle compressed PNGs with Pillow
     "libjpeg-dev",          # Needed to handle JPEGs with Pillow
     "libldap2-dev",
     "libmemcached-dev",
@@ -35,6 +35,15 @@ VENV_DEPENDENCIES = [
     "libxml2-dev",          # Used for installing talon
     "libxslt1-dev",         # Used for installing talon
     "libpq-dev",            # Needed by psycopg2
+]
+
+THUMBOR_VENV_DEPENDENCIES = [
+    "libcurl4-openssl-dev",
+    "libjpeg-dev",
+    "zlib1g-dev",
+    "libfreetype6-dev",
+    "libpng-dev",
+    "gifsicle",
 ]
 
 def install_venv_deps(requirements_file):

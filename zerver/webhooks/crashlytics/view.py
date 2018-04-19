@@ -1,11 +1,14 @@
 # Webhooks for external integrations.
-from django.utils.translation import ugettext as _
-from zerver.lib.actions import check_send_stream_message
-from zerver.lib.response import json_success, json_error
-from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
-from zerver.models import UserProfile
-from django.http import HttpRequest, HttpResponse
 from typing import Any, Dict, Text
+
+from django.http import HttpRequest, HttpResponse
+from django.utils.translation import ugettext as _
+
+from zerver.decorator import api_key_only_webhook_view
+from zerver.lib.request import REQ, has_request_variables
+from zerver.lib.response import json_error, json_success
+from zerver.lib.webhooks.common import check_send_webhook_message
+from zerver.models import UserProfile
 
 CRASHLYTICS_SUBJECT_TEMPLATE = '{display_id}: {title}'
 CRASHLYTICS_MESSAGE_TEMPLATE = '[Issue]({url}) impacts at least {impacted_devices_count} device(s).'
@@ -18,9 +21,8 @@ VERIFICATION_EVENT = 'verification'
 
 @api_key_only_webhook_view('Crashlytics')
 @has_request_variables
-def api_crashlytics_webhook(request, user_profile, payload=REQ(argument_type='body'),
-                            stream=REQ(default='crashlytics')):
-    # type: (HttpRequest, UserProfile, Dict[str, Any], Text) -> HttpResponse
+def api_crashlytics_webhook(request: HttpRequest, user_profile: UserProfile,
+                            payload: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
     event = payload['event']
     if event == VERIFICATION_EVENT:
         subject = CRASHLYTICS_SETUP_SUBJECT_TEMPLATE
@@ -36,6 +38,5 @@ def api_crashlytics_webhook(request, user_profile, payload=REQ(argument_type='bo
             url=issue_body['url']
         )
 
-    check_send_stream_message(user_profile, request.client, stream,
-                              subject, body)
+    check_send_webhook_message(request, user_profile, subject, body)
     return json_success()

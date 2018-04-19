@@ -57,7 +57,7 @@ yarn_get_tarball() {
 yarn_verify_integrity() {
   # Check if GPG is installed
   if [[ -z "$(command -v gpg)" ]]; then
-    printf "$yellow> WARNING: GPG is not installed, integrity can not be verified!$reset\n"
+    printf "$yellow> WARNING: GPG is not installed, integrity cannot be verified!$reset\n"
     return
   fi
 
@@ -68,10 +68,11 @@ yarn_verify_integrity() {
 
   printf "Verifying integrity...\n"
   # Grab the public key if it doesn't already exist
-  gpg --list-keys $gpg_key >/dev/null 2>&1 || (curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --import)
+  # Zulip patch: Fix the fact that Yarn has extended this keyring and we should always redownload.
+  curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --import
 
   if [ ! -f "$1.asc" ]; then
-    printf "$red> Could not download GPG signature for this Yarn release. This means the release can not be verified!$reset\n"
+    printf "$red> Could not download GPG signature for this Yarn release. This means the release cannot be verified!$reset\n"
     yarn_verify_or_quit "> Do you really want to continue?"
     return
   fi

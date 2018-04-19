@@ -1,9 +1,11 @@
-# See https://zulip.readthedocs.io/en/latest/travis.html for
+# See https://zulip.readthedocs.io/en/latest/testing/travis.html for
 # high-level documentation on our Travis CI setup.
 dist: trusty
+group: deprecated-2017Q4
 install:
-  # Disable broken riak sources.list in Travis base image 2017-10-18
-  - rm -vf "/etc/apt/sources.list.d/*riak*"
+  # Disable sometimes-broken sources.list in Travis base images
+  - sudo rm -vf /etc/apt/sources.list.d/*
+  - sudo apt-get update
 
   # Disable Travis CI's built-in NVM installation
   - mispipe "mv ~/.nvm ~/.travis-nvm-disabled" ts
@@ -33,6 +35,7 @@ cache:
     - $HOME/zulip-npm-cache
     - $HOME/zulip-emoji-cache
     - $HOME/node
+    - $HOME/misc
 env:
   global:
     - BOTO_CONFIG=/tmp/nowhere
@@ -46,13 +49,8 @@ matrix:
     # We only get 4 jobs running at a time, so we try to make the first few
     # the most likely to break.
     - python: "3.4"
-      env: TEST_SUITE=frontend
-    - python: "3.4"
-      env: TEST_SUITE=backend
-    - python: "3.4"
       env: TEST_SUITE=production
-    - python: "3.5"
-      env: TEST_SUITE=backend
+    # Other suites moved to CircleCI -- see .circleci/.
 sudo: required
 addons:
   artifacts:
@@ -67,9 +65,3 @@ addons:
       - moreutils
 after_success:
   - codecov
-notifications:
-  webhooks:
-    urls:
-      - https://zulip.org/zulipbot/travis
-    on_success: always
-    on_failure: always

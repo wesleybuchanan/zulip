@@ -34,7 +34,7 @@
 }
 
 .bg-white {
-    background-color: #FFF;
+    background-color: hsl(0, 0%, 100%);
 }
 
 .clear-float {
@@ -54,7 +54,7 @@
     font-weight: 400;
     text-align: center;
 
-    background-color: #fff;
+    background-color: hsl(0, 0%, 100%);
     color: inherit;
     outline: none;
     border: 1px solid hsl(0, 0%, 80%);
@@ -105,8 +105,8 @@
 }
 
 .new-style .button.sea-green {
-    color: hsl(156, 39%, 54%);
-    border-color: hsl(156, 39%, 77%);
+    color: hsl(156, 41%, 40%);
+    border-color: hsl(156, 28%, 70%);
 }
 
 .new-style .button.btn-warning {
@@ -120,7 +120,8 @@
 }
 
 /* -- button states -- */
-.new-style .button:hover {
+.new-style .button:hover,
+.new-style .button:focus {
     border-color: hsl(0, 0%, 60%);
 }
 
@@ -130,17 +131,19 @@
     background-color: hsl(0, 0%, 95%);
 }
 
-.new-style .button.sea-green:hover {
-    border-color: hsl(156, 30%, 55%);
+.new-style .button.sea-green:hover,
+.new-style .button.sea-green:focus {
+    border-color: hsl(156, 30%, 50%);
 }
 
 .new-style .button.sea-green:active {
-    border-color: hsl(156, 30%, 55%);
+    border-color: hsl(156, 30%, 40%);
     color: hsl(156, 44%, 43%);
     background-color: hsl(154, 33%, 96%);
 }
 
-.new-style .button.btn-danger:hover {
+.new-style .button.btn-danger:hover,
+.new-style .button.btn-danger:focus {
     border-color: hsl(2, 46%, 68%);
 }
 
@@ -159,7 +162,6 @@
     border-color: hsl(35, 55%, 70%);
     background-color: hsl(33, 48%, 96%);
 }
-
 
 .new-style .button[disabled="disabled"] {
     cursor: not-allowed;
@@ -193,10 +195,14 @@
     overflow: hidden;
     vertical-align: bottom; /* See http://stackoverflow.com/a/43266155/ */
     padding: 3px 10px;
-    background-color: #fff;
+    background-color: hsl(0, 0%, 100%);
     cursor: pointer;
     justify-content: center;
     align-items: center;
+}
+
+.new-style .tab-switcher .ind-tab:focus {
+    outline: none;
 }
 
 .informational-overlays .tab-switcher {
@@ -211,7 +217,7 @@
 }
 
 .new-style .tab-switcher.large .ind-tab {
-    width: 130px;
+    width: 100%;
 }
 
 .new-style .tab-switcher .ind-tab:not(.selected) {
@@ -234,7 +240,7 @@
 .new-style .tab-switcher .ind-tab.selected {
     position: relative;
     background: hsl(0, 0%, 53%);
-    color: #fff;
+    color: hsl(0, 0%, 100%);
     border: 1px solid hsl(0, 0%, 46%);
     z-index: 2;
 }
@@ -293,6 +299,7 @@
 .new-style input[type=text] {
     border-radius: 5px;
     box-shadow: none;
+    margin: 0px;
 }
 
 .clear_search_button:hover {
@@ -331,4 +338,9 @@
     border-radius: 4px;
 
     list-style-type: none;
+}
+
+.white-box {
+    background-color: hsl(0, 0%, 100%);
+    border: 1px solid hsl(0, 0%, 86%);
 }

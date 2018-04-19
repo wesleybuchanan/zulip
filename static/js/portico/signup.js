@@ -27,11 +27,11 @@ $(function () {
         errorPlacement: function (error, element) {
             // NB: this is called at most once, when the error element
             // is created.
-            element.next('.help-inline.text-error').remove();
+            element.next('.help-inline.alert.alert-error').remove();
             if (element.next().is('label[for="' + element.attr('id') + '"]')) {
-                error.insertAfter(element.next()).addClass('help-inline text-error');
+                error.insertAfter(element.next()).addClass('help-inline alert alert-error');
             } else {
-                error.insertAfter(element).addClass('help-inline text-error');
+                error.insertAfter(element).addClass('help-inline alert alert-error');
             }
         },
         highlight:   highlight('error'),
@@ -47,18 +47,13 @@ $(function () {
     $("#send_confirm").validate({
         errorElement: "div",
         errorPlacement: function (error) {
-            $('.alert-error').empty();
-            error.appendTo(".alert-error")
-                 .addClass("text-error");
+            $('.email-frontend-error').empty();
+            $("#send_confirm .alert.email-backend-error").remove();
+            error.appendTo(".email-frontend-error").addClass("text-error");
         },
         success: function () {
             $('#errors').empty();
         },
-    });
-
-    $("#login_form").validate({
-        errorClass: "text-error",
-        wrapper: "div",
     });
 
     $(".register-page #email, .login-page-container #id_username").on('focusout keydown', function (e) {
@@ -76,5 +71,42 @@ $(function () {
 
     $("#realm_in_root_domain").change(function () {
         show_subdomain_section($(this).is(":checked"));
+    });
+
+    $("#login_form").validate({
+        errorClass: "text-error",
+        wrapper: "div",
+        submitHandler: function (form) {
+            $("#login_form").find('.loader').css('display', 'inline-block');
+            $("#login_form").find("button .text").hide();
+
+            form.submit();
+        },
+        invalidHandler: function () {
+            // this removes all previous errors that were put on screen
+            // by the server.
+            $("#login_form .alert.alert-error").remove();
+        },
+    });
+
+    function check_subdomain_avilable(subdomain) {
+        var url = "/json/realm/subdomain/" + subdomain;
+        $.get(url, function (response) {
+            if (response.msg !== "available") {
+                $("#id_team_subdomain_error_client").html(response.msg);
+                $("#id_team_subdomain_error_client").show();
+            }
+        });
+    }
+
+    var timer;
+    $('#id_team_subdomain').on("keydown", function () {
+        $('.team_subdomain_error_server').text('').css('display', 'none');
+        $("#id_team_subdomain_error_client").css('display', 'none');
+        clearTimeout(timer);
+    });
+    $('#id_team_subdomain').on("keyup", function () {
+        clearTimeout(timer);
+        timer = setTimeout(check_subdomain_avilable, 250, $('#id_team_subdomain').val());
     });
 });
